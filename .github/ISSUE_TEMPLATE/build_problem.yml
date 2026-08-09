@@ -1,0 +1,34 @@
+name: Build problem
+description: The project fails to compile or run locally
+labels: [build]
+body:
+  - type: input
+    id: emsdk
+    attributes:
+      label: Emscripten version
+      description: Output of `emcc --version` (first line)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS + protoc version
+      placeholder: "Ubuntu 24.04, protoc 3.21.12"
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Full failing command + last 30 lines of output
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I ran `emcmake cmake` (not plain `cmake`) from a clean build directory
+          required: true
+        - label: I'm serving the threaded build with COOP/COEP headers (serve_threaded.py), not a plain file server
+          required: true

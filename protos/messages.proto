@@ -1,0 +1,809 @@
+syntax = "proto3";
+option optimize_for = LITE_RUNTIME;
+
+package pb;
+
+message Pair {
+    string exchange = 1;
+    string symbol = 2;
+}
+
+message BookLevel {
+    double price = 1;
+    double size = 2;
+}
+
+enum Stream {
+    STREAM_UNKNOWN = 0;
+    STREAM_TRADES = 1;
+    STREAM_CANDLES = 2;
+    STREAM_ORDERBOOK = 3;
+    STREAM_STATS = 4;
+    STREAM_LIQUIDATIONS = 5;
+    STREAM_VOLUMES = 6;
+    STREAM_TICKER = 7;
+    STREAM_HISTORICAL_CANDLES = 8;
+    STREAM_HISTORICAL_VOLUMES = 9;
+    STREAM_HISTORICAL_STATS = 10;
+    STREAM_HEATMAP = 11;
+    STREAM_LIQUIDATION_HEATMAP = 12;
+    STREAM_HISTORICAL_HEATMAPS = 13;
+    STREAM_ANALYTICS = 14;
+    STREAM_VPIN_STATE = 15;
+    STREAM_POSITIONING_STATE = 16;
+    STREAM_TICK_VOLUME = 17;
+    STREAM_ORDERBOOK_SNAPSHOTS = 18;
+    STREAM_CONTAGION = 19;
+    STREAM_PATTERN = 20;
+    reserved 21; // Retired legacy pattern visualization stream.
+    STREAM_ALERTS = 22;
+    STREAM_DEBUG  = 23;
+    STREAM_HISTORICAL_LIQ_HEATMAPS = 24;
+    STREAM_FLOW_LIQUIDITY = 25;
+    STREAM_VOLUME_PROFILE = 26;
+    STREAM_TPO = 27;
+    STREAM_PAPER_TRADING = 28;
+    STREAM_TICKER24H = 29;
+    STREAM_SCANNER = 30;
+    // 31 is RESERVED for STREAM_FLOW_DEVIATION (liq Field v2 P3 dedicated
+    // stream, deferred behind the Field-swap scorer gate). Mirrors backend
+    // proto/websocket.proto — defined so the id can never be reused.
+    STREAM_FLOW_DEVIATION = 31;
+    STREAM_HISTORICAL_VPIN = 32; // VPINHistoryBatch (get_historical_vpin response)
+    // Scrub-preview candle batch (get_replay_preview_candles response): the
+    // full replay window's candles for ghost-rendering ahead of the playhead.
+    // MUST stay distinct from STREAM_CANDLES / STREAM_HISTORICAL_CANDLES so
+    // the batch can never be routed into the main candle series (deliberate
+    // future-leak, replay sessions only). Mirrors backend proto/websocket.proto.
+    STREAM_REPLAY_PREVIEW_CANDLES = 33;
+    // HL ground-truth predictive liquidation levels (clearinghouseState census,
+    // P2e): REAL open positions' liq prices, NOT the modelled heatmap. Reuses the
+    // LiquidationHeatmapUpdate wire message (est_Nx = notional by REAL leverage
+    // tier; flow_intensity carries coverage_frac) on a distinct stream id so
+    // real-vs-modelled never conflate. Mirrors backend types.Stream (34); the
+    // backend stamps the envelope via a raw int cast, so this label is the
+    // client-side name for the same wire value.
+    STREAM_LIQUIDATION_LEVELS = 34;
+    // Admin-scoped descending-resistance display channel. Payload is
+    // PatternDetected; the distinct id prevents ordinary pattern subscribers
+    // from receiving rollout-only geometry.
+    STREAM_PATTERN_ADMIN = 35;
+}
+
+message WSPayload {
+    Pair pair = 1;
+    Stream stream = 2;
+    int64 timeframe = 3;
+    bytes data = 4;
+    int64 event_time_ms = 5; // Market event timestamp from NATS (for client-side replay buffer)
+}
+
+
+message Trade {
+    double price = 1;
+    double qty = 2;
+    bool is_buy = 3;
+    int64 timestamp_ms = 4;
+}
+
+message Candle {
+    double open = 1;
+    double high = 2;
+    double low = 3;
+    double close = 4;
+    double volume = 5;
+    double vbuy = 6;
+    double vsell = 7;
+    int64 tbuy = 8;
+    int64 tsell = 9;
+    int64 timestamp_ms = 10;
+    int64 timeframe = 11;
+    bool final = 12;
+}
+
+message Volume {
+    int64 timestamp_ms = 1;
+    int64 timeframe = 2;
+    double buy = 3;
+    double sell = 4;
+    double total = 5;
+    int64 trades = 6;
+    double vwap = 7;
+    double vwap_buy = 8;
+    double vwap_sell = 9;
+    double delta = 10;
+    double imbalance = 11;
+    double cvd = 12;
+    bool final = 13;
+    double taker_buy_ratio = 14;
+    double taker_sell_ratio = 15;
+    double cvd_high = 16;
+    double cvd_low = 17;
+}
+
+message Stat {
+    double mark_price = 1;
+    double funding = 2;
+    int64 timestamp_ms = 3;
+    bool final = 4;
+    int64 timeframe = 5;
+    double liq_long_volume = 6;
+    double liq_short_volume = 7;
+    double liq_long_usd = 8;
+    double liq_short_usd = 9;
+    double liq_total_usd = 10;
+    double liq_ratio = 11;
+    int64 trade_buy = 12;
+    int64 trade_sell = 13;
+    double open_interest_usd = 14;
+    int64 next_funding_time = 15;
+    double oi_open = 16;
+    double oi_high = 17;
+    double oi_low = 18;
+    double oi_close = 19;
+}
+
+// WS4 (2026-07-03): field numbers MUST mirror the backend's canonical wire
+// message `LiquidationUpdate` (the backend's market.proto) — the
+// bytes on the LIQUIDATIONS NATS stream, in archive bundles (raw), and from
+// the replay liquidation_events seed are all that message. The old client
+// numbering (price=1..timestamp_ms=5) predated any consumer and never parsed
+// a real frame; it was silently incompatible (varint/fixed64 collision on
+// field 1). Do NOT renumber again.
+message Liquidation {
+    int64 timestamp_ms = 1;
+    double price = 2;
+    double avg_price = 3;
+    double qty = 4;
+    bool is_buy = 5;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// VPIN / Toxicity (Indicators V1 S1b, 2026-07-03)
+//
+// Field numbers MUST mirror the backend's canonical proto/analytics.proto
+// (WS4 rule — hand-maintained mirrors fail SILENTLY on shape drift; never
+// renumber). The same VPINStateUpdate bytes arrive from three paths: the
+// live STATE_VPIN NATS stream, the replay fetchVPINTimeline DB seed, and
+// archive-bundle vpin.parquet frames.
+// ═══════════════════════════════════════════════════════════════
+message VPINStateUpdate {
+    reserved 1;                  // backend common.Pair — never set on the wire
+    int64 timestamp_ms = 2;
+    double vpin = 3;
+    string regime = 4;           // "Normal" | "Elevated" | "High" | "Critical"
+    double buy_pressure = 5;     // unused (backend never fills)
+    double sell_pressure = 6;    // unused (backend never fills)
+    double mark_price = 7;
+    // HMM regime state 0-3, or -1 when the HMM is not driving the regime
+    // (warmup / fallback era / pre-M1 rows) — proto3 zero-default would
+    // alias state 0, so absence is explicit.
+    int32 hmm_state = 8;
+    double hmm_confidence = 9;
+    // Order imbalance of the most recently COMPLETED volume bucket.
+    double order_imbalance = 10;
+}
+
+// CFTI mirror (analytics.cfti.{sym} frames + archive analytics.parquet).
+// Mirrored NOW per the S1b contract so the S7 Toxicity-v2 pane merge is a
+// pure client change; NOT yet routed (the ANALYTICS stream interleaves
+// several message types on one stream id — disambiguation is S7's job).
+message CFTIUpdate {
+    reserved 1;                  // backend common.Pair
+    int64 timestamp_ms = 2;
+    double vpin_score = 3;
+    double delta_imbalance_score = 4;
+    double volume_accel_score = 5;
+    double flow_persistence_score = 6;
+    double composite_score = 7;
+    string regime = 8;           // "normal".."extreme"
+    double confidence = 9;
+    double directional_bias = 10;
+    bool alignment_boost_active = 11;
+    repeated string elevated_components = 12;
+    bool regime_changed = 13;
+    string previous_regime = 14;
+}
+
+// PositioningStateUpdate mirror (STREAM_POSITIONING_STATE=16). Single-type
+// stream: state.positioning.binancef.{sym} live + archive positioning.parquet.
+// Field numbers MUST mirror backend proto/analytics.proto PositioningStateUpdate.
+message PositioningStateUpdate {
+    reserved 1;                  // backend common.Pair — never set on the wire
+    double top_trader_long_account = 2;   // smart-money long fraction (0..1)
+    double global_long_account = 3;       // retail crowd long fraction (0..1)
+    double funding_rate = 4;
+    double open_interest = 5;
+    double oi_change_24h = 6;
+    double long_liq_usd = 7;
+    double short_liq_usd = 8;
+    double liq_imbalance = 9;
+    double smart_money_bias = 10;
+    double retail_sentiment = 11;
+    double flow_pressure = 12;
+    double cascade_risk = 13;
+    double taker_buy_ratio = 14;
+    double taker_sell_ratio = 15;
+    double cvd = 16;
+    int64 timestamp_ms = 17;
+}
+
+// ContagionSnapshot mirror (STREAM_CONTAGION=19; replay-only today - no live
+// StreamConfig on the server). Only the market-wide stress fields are needed.
+// Field numbers MUST mirror backend proto/analytics.proto ContagionSnapshot.
+message ContagionSnapshot {
+    reserved 1, 2, 5;            // symbols, correlation_matrix, active_paths
+    double market_stress = 3;    // 0..1
+    string stress_regime = 4;    // "calm" | "elevated" | "stress" | "crisis"
+    int64 timestamp_ms = 6;
+}
+
+// get_historical_vpin response (STREAM_HISTORICAL_VPIN). One point per
+// vpin_buckets row — VOLUME-clock grain, irregular timestamps.
+message VPINHistoryPoint {
+    int64 time_ms = 1;           // bucket end_time (the volume-clock print)
+    double vpin = 2;
+    double order_imbalance = 3;
+    string toxicity_regime = 4;  // regime AS STORED at write time
+    int32 hmm_state = 5;         // -1 = threshold / pre-M1 era
+    double hmm_confidence = 6;
+}
+
+message VPINHistoryBatch {
+    repeated VPINHistoryPoint values = 1;
+}
+
+message BookUpdate {
+    int64 timestamp_ms = 1;
+    repeated BookLevel asks = 2;
+    repeated BookLevel bids = 3;
+    bool snapshot = 4;
+    double last_price = 5;
+    int64 first_update_id = 6;
+    int64 last_update_id = 7;
+    int64 previous_update_id = 8;
+}
+
+message BookTickerUpdate {
+    int64 timestamp_ms = 1;
+    double best_bid = 2;
+    double best_bid_qty = 3;
+    double best_ask = 4;
+    double best_ask_qty = 5;
+    int64 update_id = 6;
+    int64 event_time = 7;
+}
+
+message OrderbookSnapshot {
+    int64 timestamp_ms = 1;
+    int64 last_update_id = 2;
+    double last_price = 3;
+    double mid_price = 4;
+    double spread = 5;
+    double spread_bps = 6;
+    repeated BookLevel asks = 7;
+    repeated BookLevel bids = 8;
+    double max_bid_size = 9;
+    double max_ask_size = 10;
+    double bid_total = 11;
+    double ask_total = 12;
+    double price_range_lower = 13;
+    double price_range_upper = 14;
+    double tick_size = 15;
+}
+
+message Candles {
+    int64 timeframe = 1;
+    repeated Candle values = 2;
+}
+
+message Volumes {
+    int64 timeframe = 1;
+    repeated Volume values = 2;
+}
+
+message Stats {
+    int64 timeframe = 1;
+    repeated Stat values = 2;
+}
+
+message HeatmapSnapshot {
+  int64 timestamp_ms = 1;
+  string symbol = 2;
+  string exchange = 3;
+  string mode = 4;
+  double tick_size = 5;
+  double bucket_size = 6;
+  repeated double prices = 7 [packed=true];
+  repeated double bid_qty = 8 [packed=true];
+  repeated double ask_qty = 9 [packed=true];
+  double price_min = 10;
+  double price_max = 11;
+}
+
+message HeatmapSnapshotBatch {
+  repeated bytes snapshot_blobs = 1;
+}
+
+// Admin pattern overlay. These messages mirror backend proto/pattern.proto so
+// PatternDetected can be decoded directly from STREAM_PATTERN_ADMIN. The
+// terminal currently renders only the trendline geometry and compact metrics,
+// but keeping the complete wire shape avoids a second client-only schema.
+message Point {
+    int64 unix_ms = 1;
+    double price = 2;
+}
+
+message TrendlineData {
+    double upper_slope = 1;
+    double upper_intercept = 2;
+    double lower_slope = 3;
+    double lower_intercept = 4;
+    double upper_r2 = 5;
+    double lower_r2 = 6;
+    double upper_rmse = 7;
+    double lower_rmse = 8;
+    double compression = 9;
+    double parallelism = 10;
+    double touch_quality = 11;
+    double inlier_ratio = 12;
+    double convergence = 13;
+    repeated Point swing_highs = 14;
+    repeated Point swing_lows = 15;
+}
+
+message MarketContext {
+    double vpin = 1;
+    string vpin_regime = 2;
+    double cfti = 3;
+    string cfti_regime = 4;
+    double top_trader_long_account = 5;
+    double global_long_account = 6;
+    double smart_money_bias = 7;
+    double retail_sentiment = 8;
+    double flow_pressure = 9;
+    double cascade_risk = 10;
+    double funding_rate = 11;
+    double open_interest = 12;
+    double oi_change_24h = 13;
+    double long_liq_usd_1h = 14;
+    double short_liq_usd_1h = 15;
+    double orderbook_imbalance = 16;
+    string orderbook_regime = 17;
+    double volume_24h = 18;
+    double volume_change_24h = 19;
+}
+
+message PatternDetected {
+    Pair pair = 1;
+    int64 timestamp_ms = 2;
+    string pattern_id = 3;
+    string type = 4;
+    string direction = 5;
+    int64 timeframe = 6;
+    double confidence = 7;
+    double adjusted_confidence = 8;
+    string state = 9;
+    TrendlineData trendline = 10;
+    double current_resistance = 11;
+    double current_support = 12;
+    double breakout_level = 13;
+    double invalidation_level = 14;
+    double target_price = 15;
+    double parallelism = 16;
+    double convergence = 17;
+    double r2_score = 18;
+    double touch_quality = 19;
+    int32 touch_count = 20;
+    double duration_hours = 21;
+    double price_at_detection = 22;
+    MarketContext market_context = 23;
+    double confluence_score = 24;
+    repeated string aligned_patterns = 25;
+}
+
+message LiquidationHeatmapUpdate {
+    Pair pair = 1;
+    int64 timestamp_ms = 2;
+    double mark_price = 3;
+    repeated double price_mid = 4 [packed=true];
+    repeated double obs_long_usd = 5 [packed=true];
+    repeated double obs_short_usd = 6 [packed=true];
+    repeated double est_long_usd = 7 [packed=true];
+    repeated double est_short_usd = 8 [packed=true];
+    repeated double intensity = 9 [packed=true];
+    double total_long_risk_usd = 10;
+    double total_short_risk_usd = 11;
+    double net_risk_bias = 12;
+    double band_width_pct = 13;
+    repeated double reach_prob = 14 [packed=true];    // ML: P(price reaches band)
+    repeated double cascade_prob = 15 [packed=true];  // ML: P(cascade | reached)
+    // Per-leverage tier breakdown (for per-leverage toggle filtering)
+    // Field numbers match backend LiquidationHeatmapUpdate in liquidation.proto
+    repeated double est_5x_usd = 21 [packed=true];
+    repeated double est_10x_usd = 22 [packed=true];
+    repeated double est_25x_usd = 16 [packed=true];
+    repeated double est_50x_usd = 17 [packed=true];
+    repeated double est_75x_usd = 18 [packed=true];
+    repeated double est_100x_usd = 19 [packed=true];
+    // Flow intensity at snapshot creation time (0.0–1.0).
+    // MMT-style per-plot weighting: high during cascades/surges, low during quiet.
+    // Frontend scales GPU column brightness by this value.
+    double flow_intensity = 20;
+
+    // Bayesian leverage uncertainty (Layer 1) — Var(π) of dominant Dirichlet tier.
+    // High = prior-dominated (few @forceOrder events), low = data-informed.
+    // Frontend uses this to modulate band opacity — uncertain bands rendered dimmer.
+    double bayesian_uncertainty = 23;
+
+    // Hawkes cascade dynamics (Layer 4) — self-exciting point process metrics.
+    // branching_ratio: α/β — <1 subcritical, ~1 critical, >1 supercritical
+    // hawkes_severity: 0-1 normalized cascade severity score
+    double hawkes_branching_ratio = 24;
+    double hawkes_severity = 25;
+
+    // Stop-loss density per band (same length as price_mid)
+    repeated double long_stop_density = 26 [packed=true];
+    repeated double short_stop_density = 27 [packed=true];
+
+    // Liquidation RAILS (RailTracker lifecycle) — the MMT zero-overlap render. Each rail is one
+    // episode of liquidity at a (side, price) level, drawn formed_ms → consumed_ms (or to the live
+    // edge while consumed_ms == 0 / pending). A discrete LIST, not per-band arrays — a swept long-liq
+    // level stops lighting as a long band, so a per-band array can't carry its consume time. Tag 32
+    // matches backend liquidation.proto. (28/29 are cascade_sev on the backend, unused here.)
+    repeated LiqRail rails = 32;
+}
+
+// One liquidation rail's lifecycle (from backend RailTracker.Snapshot()). above = level sits above
+// mark (short-liq) vs below (long-liq); price = the level; formed_ms = first cycle it lit; consumed_ms
+// = first LAST-PRICE wick-through after formed (0 = pending/frontier); peak_usd = peak per-side mass.
+message LiqRail {
+    bool   above       = 1;
+    double price       = 2;
+    int64  formed_ms   = 3;
+    int64  consumed_ms = 4;
+    double peak_usd    = 5;
+    // Per-leverage tier peak magnitude (USD), same tiers/order as the per-band est_*x_usd arrays
+    // and the leverage-mask bits (0x01..0x20). Client sums the enabled tiers to filter rails by the
+    // LIQ LEV toggle; peak_usd stays the blended total (back-compat for pre-per-tier snapshots).
+    double peak_5x_usd   = 6;
+    double peak_10x_usd  = 7;
+    double peak_25x_usd  = 8;
+    double peak_50x_usd  = 9;
+    double peak_75x_usd  = 10;
+    double peak_100x_usd = 11;
+}
+
+message DebugEntry {
+    int64  ts     = 1;
+    string actor  = 2;
+    string cat    = 3;
+    int64  tf     = 4;
+    string det    = 5;
+    int32  win    = 6;
+    double score  = 7;
+    double thresh = 8;
+    double price  = 9;
+    string msg    = 10;
+}
+
+message DebugLogBatch {
+    string symbol               = 1;
+    repeated DebugEntry entries = 2;
+    int32  ring_total           = 3;
+    bool   is_backfill          = 4;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Flow Liquidity Detection
+//
+// Detected hidden liquidity from market microstructure patterns.
+// Same 0.05% × 800 band grid as LiquidationHeatmapUpdate.
+// ═══════════════════════════════════════════════════════════════
+message FlowLiquidityUpdate {
+    Pair pair = 1;
+    int64 timestamp_ms = 2;
+    double mark_price = 3;
+    double band_width_pct = 4;
+
+    // SoA — per-band data, all arrays same length
+    repeated double price_mid = 5 [packed=true];
+    repeated double score = 6 [packed=true];            // Composite flow score 0-1
+    repeated double long_score = 7 [packed=true];
+    repeated double short_score = 8 [packed=true];
+
+    // Per-signal breakdown
+    repeated double volume_anomaly = 9 [packed=true];
+    repeated double absorption = 10 [packed=true];
+    repeated double liq_cluster = 11 [packed=true];
+    repeated double iceberg = 12 [packed=true];
+
+    // Snapshot-level summary
+    double flow_intensity = 13;
+    double total_long_score = 14;
+    double total_short_score = 15;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Tick Volume — Per-price-level volume for footprint charts
+// Also used for live VPVR incremental updates
+// ═══════════════════════════════════════════════════════════════
+message TickVolumeLevel {
+    double price = 1;
+    double buy_volume = 2;
+    double sell_volume = 3;
+    double total_volume = 4;
+    int64  trade_count = 5;
+}
+
+message TickVolumeLevels {
+    repeated TickVolumeLevel levels = 1;
+}
+
+message TickVolumeUpdate {
+    reserved 1;                   // backend has common.Pair at field 1 — omitted on wire
+    int64 timestamp_ms = 2;
+    int64 timeframe = 3;
+    int64 start_time = 4;
+    int64 end_time = 5;
+    bytes levels_data = 6;        // zstd-compressed TickVolumeLevels protobuf
+    double total_volume = 7;
+    double buy_volume = 8;
+    double sell_volume = 9;
+    int64 trade_count = 10;
+    double high_price = 11;
+    double low_price = 12;
+    double poc = 13;
+    double vah = 14;
+    double val = 15;
+}
+
+// Batch of TickVolumeUpdate messages for historical footprint delivery.
+message TickVolumeUpdateBatch {
+    repeated TickVolumeUpdate updates = 1;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// VPVR — Volume Profile Visible Range
+// ═══════════════════════════════════════════════════════════════
+message VolumeProfileLevel {
+    double price = 1;
+    double buy_volume = 2;
+    double sell_volume = 3;
+    double total_volume = 4;
+    int64  trade_count = 5;
+    double volume_percentage = 6;
+    bool   is_poc = 7;
+    bool   in_value_area = 8;
+}
+
+message VolumeProfileResponse {
+    int64  start_time = 1;
+    int64  end_time = 2;
+    repeated VolumeProfileLevel levels = 3;
+    double poc = 4;
+    double vah = 5;
+    double val = 6;
+    double total_volume = 7;
+    double value_area_volume = 8;
+    int32  poc_index = 9;
+    int32  vah_index = 10;
+    int32  val_index = 11;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// TPO — Time Price Opportunity / Market Profile
+// ═══════════════════════════════════════════════════════════════
+message TPOBlock {
+    double price = 1;
+    int32  block_count = 2;
+    bool   is_poc = 3;
+    bool   is_value_area = 4;
+    bool   is_single_print = 5;
+    bool   is_initial_balance = 6;
+}
+
+message TPOPeriod {
+    int64  start_time = 1;
+    int64  end_time = 2;
+    double high = 3;
+    double low = 4;
+    string label = 5;
+}
+
+message TPOSession {
+    int64 session_start = 1;
+    int64 session_end = 2;
+    repeated TPOBlock blocks = 3;
+    double poc = 4;
+    double vah = 5;
+    double val = 6;
+    double ib_high = 7;
+    double ib_low = 8;
+    bool   has_poor_high = 9;
+    bool   has_poor_low = 10;
+    double session_high = 11;
+    double session_low = 12;
+    double tick_per_row = 13;
+    int32  total_blocks = 14;
+    repeated TPOPeriod periods = 15;
+}
+
+message TPOResponse {
+    repeated TPOSession sessions = 1;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Paper Trading — Simulated position tracking
+// ═══════════════════════════════════════════════════════════════
+message PaperPositionUpdate {
+    string position_id = 1;
+    string symbol = 2;
+    string side = 3;               // "long" or "short"
+    string alert_type = 4;         // momentum, breakout, cap_recovery, etc.
+    double entry_price = 5;
+    double mark_price = 6;
+    double quantity = 7;
+    double notional_usd = 8;
+    double leverage = 9;
+    double unrealized_pnl = 10;
+    double unrealized_pnl_pct = 11;
+    double mae_pct = 12;
+    double mfe_pct = 13;
+    double stop_level = 14;
+    double tp1_level = 15;
+    double tp2_level = 16;
+    double trailing_stop_level = 17;
+    double funding_costs = 18;
+    double entry_atr = 19;
+    double ml_score = 20;
+    int64 opened_at = 21;
+    int64 closed_at = 22;          // 0 = still open
+    string exit_reason = 23;       // empty = still open
+    double realized_pnl = 24;
+    double r_multiple = 25;
+    double slippage_entry = 26;
+    double slippage_exit = 27;
+    int64 duration_seconds = 28;
+    // Partial fill state — frontend renders TP1/TP2 ladder status and
+    // remaining size. Added 2026-04-16 alongside the partial-fill P&L fix.
+    bool tp1_hit = 29;
+    bool tp2_hit = 30;
+    double remaining_qty_pct = 31; // 1.0 = full, 0.5 = TP1 fired @50%
+    string tp_strategy = 32;       // "trail_only" | "tp1_only" | "tp1_tp2" | "fixed_tp" | "unknown"
+}
+
+message PaperAccountState {
+    double balance = 1;
+    double equity = 2;
+    double open_pnl = 3;
+    double initial_balance = 4;
+    int32 total_trades = 5;
+    int32 winning_trades = 6;
+    int32 losing_trades = 7;
+    double total_pnl = 8;
+    double total_funding = 9;
+    double peak_equity = 10;
+    double max_drawdown_pct = 11;
+    double profit_factor = 12;
+    int64 timestamp_ms = 13;
+}
+
+message PaperTradingSnapshot {
+    PaperAccountState account = 1;
+    repeated PaperPositionUpdate positions = 2;
+    repeated PaperPositionUpdate recent_closed = 3;
+}
+
+// ── Ticker 24h (global, all symbols) ────────────────────────────────────────
+
+message Ticker24hEntry {
+    string symbol = 1;        // "BTCUSDT" (uppercase, matches Binance)
+    double last_price = 2;    // "c" field
+    double change_pct = 3;    // "P" field
+    double volume_quote = 4;  // "q" field
+    int64 event_time_ms = 5;  // "E" field
+}
+
+message Ticker24hUpdate {
+    repeated Ticker24hEntry entries = 1;
+    int64 timestamp_ms = 2;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Market Scanner — per-symbol microstructure summary for symbol picker.
+// Published every 10s on scanner.binancef.global.
+// ═══════════════════════════════════════════════════════════════════
+
+message ScannerEntry {
+    string symbol = 1;
+    double price = 2;
+    double vpin = 3;
+    string vpin_regime = 4;
+    double hawkes_br = 5;
+    double cascade_risk = 6;
+    int32  liq_hmm_state = 7;
+    double oi_change_1h_pct = 8;
+    double oi_change_4h_pct = 9;
+    double funding_rate = 10;
+    double buy_ratio = 11;
+    double flow_intensity = 12;
+    double edgedepth_score = 13;
+    double cfti = 14;
+    double smart_money_bias = 15;
+    double spread_bps = 16;
+    string ob_regime = 17;
+    double meta_regime_30m_score = 18;
+    double volume_24h_usd = 19;
+    double open_interest = 20;
+}
+
+message MarketScannerUpdate {
+    repeated ScannerEntry entries = 1;
+    int64 timestamp_ms = 2;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Replay pack (.edpack) — Hot Replay Path B. MIRRORS the backend's
+// proto/replaypack.proto (field numbers frozen; keep in lockstep).
+// File layout: "EDPK" + version byte + u32 LE header len + PackHeader,
+// then zstd blocks at the header's (data-section-relative) offsets.
+// Each block decompresses to repeated [u32 LE len + PackFrame] records.
+// PackFrame.payload is byte-identical to the WSPayload.data the box
+// path sends for archive replay.
+// ═══════════════════════════════════════════════════════════════
+
+message PackFrame {
+    int64 ts_ms = 1;      // event time — becomes WSPayload.event_time_ms
+    uint32 stream = 2;    // Stream enum numeric value
+    int64 timeframe = 3;  // WSPayload.timeframe (0 for archive streams)
+    bytes payload = 4;    // WSPayload.data, verbatim
+}
+
+message PackCandleSeed {
+    int64 timeframe_sec = 1;  // client-request units: 60..86400
+    bytes candles = 2;        // marshalled Candles (Timeframe = timeframe_sec)
+}
+
+message PackBlockEntry {
+    int64 first_ts_ms = 1;
+    int64 last_ts_ms = 2;
+    // Offset RELATIVE to the data section start (file offset 9 + header len).
+    int64 offset = 3;
+    int64 length = 4;
+    int32 frame_count = 5;
+}
+
+message PackHeader {
+    uint32 format_version = 1;
+    string event_id = 2;
+    string exchange = 3;
+    string symbol = 4;
+    int64 start_ts_ms = 5;
+    int64 end_ts_ms = 6;
+    bytes ob_seed = 7;          // marshalled BookUpdate{snapshot:true}
+    int64 ob_seed_src_ts_ms = 8;
+    repeated PackCandleSeed candle_seeds = 9;
+    repeated PackBlockEntry blocks = 10;
+    int64 total_frames = 11;
+    string description = 12;
+    repeated string tags = 13;
+
+    // ── v2 (format_version 2) — optional; empty on v1 packs. Fat seeds sit
+    //    in a seed section at the start of the data area, range-fetched
+    //    lazily on first use (never taxes the boot header fetch). ──
+    double tick_size = 14;              // instrument tick size (0 = unset)
+    // → marshalled TickVolumeUpdateBatch (whole window): serves
+    //   get_footprint_history + get_volume_profile locally.
+    PackSeedRef tick_volume_seed_ref = 15;
+    // → marshalled HeatmapSnapshotBatch (blobs = verbatim zstd HeatmapSnapshot
+    //   frame payloads): serves get_historical_heatmap locally.
+    //   heatmap_seed_ts_ms[i] = blob[i]'s column ts, for header-only filtering.
+    PackSeedRef heatmap_seed_ref = 16;
+    repeated int64 heatmap_seed_ts_ms = 17;
+}
+
+message PackSeedRef {
+    int64 offset = 1;  // data-section relative (absolute = 9 + header_len + offset)
+    int64 length = 2;  // 0 = seed absent
+}

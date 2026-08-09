@@ -1,0 +1,33 @@
+name: Bug report
+description: Something renders wrong, crashes, or misbehaves
+labels: [bug]
+body:
+  - type: input
+    id: browser
+    attributes:
+      label: Browser + OS
+      placeholder: "Chrome 128 / Ubuntu 24.04"
+    validations:
+      required: true
+  - type: dropdown
+    id: feed
+    attributes:
+      label: Data feed
+      options:
+        - EdgeDepth hosted (default)
+        - Own feed via ?ws=
+        - .edpack replay (no feed)
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps, symbol, and timeframe. Screenshots or a short clip help enormously.
+    validations:
+      required: true
+  - type: textarea
+    id: console
+    attributes:
+      label: Browser console output
+      description: Open devtools → Console, paste anything red (real errors go to stderr; routine [EdgeDepth] traces are not errors).

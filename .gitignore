@@ -1,0 +1,40 @@
+# Build artifacts
+build/
+build-*/
+cmake-build-*/
+*.wasm
+*.js
+*.html
+*.data
+*.worker.js
+
+# Generated protobuf files (C++ only)
+src/pb/*.pb.h
+src/pb/*.pb.cc
+*.pb.h
+*.pb.cc
+
+# But keep the directory structure
+!src/pb/.gitkeep
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.dylib
+
+_deps/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.logsrc/pb

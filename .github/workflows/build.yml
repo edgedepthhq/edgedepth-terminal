@@ -1,0 +1,32 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.61
+          actions-cache-folder: emsdk-cache
+
+      - name: Configure
+        run: |
+          mkdir build && cd build
+          emcmake cmake -DCMAKE_BUILD_TYPE=Release ..
+
+      - name: Build
+        run: cd build && emmake make -j$(nproc) c_based_trader_client
+
+      - name: Verify artifacts
+        run: ls -la build/index.wasm build/index.js build/index.html
