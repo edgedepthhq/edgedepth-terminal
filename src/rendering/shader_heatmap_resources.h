@@ -4,7 +4,7 @@
 #include <cstdint>
 
 /**
- * ShaderHeatmapResources — Shared GPU resources for all shader heatmap instances.
+ * ShaderHeatmapResources - Shared GPU resources for all shader heatmap instances.
  *
  * Owns the shader program, empty VAO, and colormap textures. Compiled once at
  * startup and shared across all ShaderHeatmapRenderer instances (OB + liq,

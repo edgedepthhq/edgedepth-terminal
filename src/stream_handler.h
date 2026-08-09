@@ -45,7 +45,7 @@ public:
     // Pack replay (Hot Replay Path B): while a .edpack session is active, the
     // PackReplayEngine installs this hook and REPLAY-mode StreamManagers offer
     // it every outgoing JSON request (get_historical_candles etc.) BEFORE the
-    // WebSocket. Returning true consumes the request — the engine serves it
+    // WebSocket. Returning true consumes the request - the engine serves it
     // from the pack's baked seeds, so a pack replay never touches the box.
     // Live-mode managers never consult it. One replay session at a time, so a
     // single static hook is sufficient.
@@ -131,7 +131,7 @@ public:
     void request_historical_funding(const Terminal::Pair& pair, int64_t timeframe, int count) const;
     // Indicators V1 (F3 absolute range): vpin_buckets history. start_ms/end_ms
     // are absolute unix ms (0 = server default; replay sessions clamp end to
-    // the playback head server-side). No timeframe — bucket grain is canonical.
+    // the playback head server-side). No timeframe - bucket grain is canonical.
     void request_historical_vpin(const Terminal::Pair& pair, int64_t start_ms,
                                  int64_t end_ms, int count) const;
 

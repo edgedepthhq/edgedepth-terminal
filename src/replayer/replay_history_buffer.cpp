@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// replay_history_buffer.cpp — Client-side message history for instant rewind
+// replay_history_buffer.cpp - Client-side message history for instant rewind
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "replay_history_buffer.h"
@@ -30,7 +30,7 @@ void ReplayHistoryBuffer::push(int64_t timestamp_ms,
     });
     total_bytes_ += len;
 
-    // Trim every 100 pushes instead of every push — reduces overhead
+    // Trim every 100 pushes instead of every push - reduces overhead
     if (++trim_counter_ >= 100) {
         trim();
         trim_counter_ = 0;
@@ -49,7 +49,7 @@ void ReplayHistoryBuffer::snapshot_orderbook(int64_t timestamp_ms,
     const Terminal::Orderbook* ob = ob_mgr.get_orderbook(pair);
     if (!ob) return;
 
-    // Don't snapshot an empty OB — happens when the OB is just created
+    // Don't snapshot an empty OB - happens when the OB is just created
     // but no data has been applied yet. An empty snapshot is worse than
     // no snapshot at all (the rewind will replay from buffer start instead).
     if (ob->bids.empty() && ob->asks.empty()) return;
@@ -122,7 +122,7 @@ void ReplayHistoryBuffer::snapshot_orderbook(int64_t timestamp_ms,
 
 bool ReplayHistoryBuffer::contains(int64_t timestamp_ms) const {
     if (entries_.empty()) return false;
-    // Allow 1 second of slack — the target (from << button) snaps to round
+    // Allow 1 second of slack - the target (from << button) snaps to round
     // second/minute boundaries, but the earliest buffered message may be
     // a few milliseconds later than that boundary.
     return timestamp_ms >= (entries_.front().timestamp_ms - 1000) &&
@@ -140,7 +140,7 @@ int64_t ReplayHistoryBuffer::latest_ms() const {
 const ReplayHistoryBuffer::HistoryEntry*
 ReplayHistoryBuffer::find_ob_snapshot_before(int64_t target_time_ms) const {
     const HistoryEntry* best = nullptr;
-    // Walk backward from end — snapshots are sparse, so linear scan is fine
+    // Walk backward from end - snapshots are sparse, so linear scan is fine
     for (auto it = entries_.rbegin(); it != entries_.rend(); ++it) {
         if (it->timestamp_ms > target_time_ms) continue;
         if (it->is_ob_snapshot) {
@@ -218,7 +218,7 @@ bool ReplayHistoryBuffer::replay_from(int64_t target_time_ms,
             continue;
         }
         if (entry.timestamp_ms > current_time_ms) {
-            break;  // Stop — everything past here hasn't been seen yet
+            break;  // Stop - everything past here hasn't been seen yet
         }
         if (entry.is_ob_snapshot) {
             continue;

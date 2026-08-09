@@ -94,7 +94,7 @@ namespace Indicators {
             const int px_col = static_cast<int>(center_px.x);
 
             if (px_col == last_px_col) {
-                // Same pixel column — accumulate max volume, keep last color
+                // Same pixel column - accumulate max volume, keep last color
                 col_volume = std::max(col_volume, volumes[i]);
                 col_bullish = bars[i].bullish;
                 continue;

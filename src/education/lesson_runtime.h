@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// lesson_runtime.h — Guided Replay engine (C++ / ImGui)
+// lesson_runtime.h - Guided Replay engine (C++ / ImGui)
 //
 // Owns: parse LessonDoc JSON → Lesson; the gate loop (arm/fire steps as the replay
 // playhead reaches them, clamped so a stutter can't skip the lesson); target→rect
@@ -74,7 +74,7 @@ public:
     // ─── Export render mode (CLIP_FACTORY P3-v1) ──────────────────────────
     // While a Studio export records, the beat/quiz card must BURN INTO the
     // canvas (captureStream sees only the canvas), so render_overlay draws the
-    // native ImGui card even in WASM — content only, NO Continue button (the
+    // native ImGui card even in WASM - content only, NO Continue button (the
     // author advances from the React studio footer, which lives outside the
     // capture). Set by StudioRuntime for the export session's lifetime.
     void set_export_render(bool on) { export_render_ = on; }
@@ -89,7 +89,7 @@ public:
     // ─── JS → C++ command queue ────────────────────────────────────────────
     // The KEEPALIVE'd bridge callbacks run from JS with no AppContext in hand,
     // but nav commands need one (seek/set_speed/resume). So they ENQUEUE a
-    // command here; update(ctx) — which already has the ctx — drains it. This
+    // command here; update(ctx) - which already has the ctx - drains it. This
     // keeps the education module from reaching into global app state.
     enum class Cmd : uint8_t { None, Continue, Back, Restart, Jump, Play, Pause, SetSpeed, Seek };
     void enqueue_cmd(Cmd c, int arg_i = 0, float arg_f = 0.0f);
@@ -103,7 +103,7 @@ private:
     void end_track();
 
     // target → screen rect (uses chart_projection + candle data via ctx).
-    // `now_ms` is the current replay clock — used to grow track-follow boxes.
+    // `now_ms` is the current replay clock - used to grow track-follow boxes.
     struct Rect { float x, y, w, h; bool valid = false; };
     Rect resolve_target(const Step& s, const AppContext& ctx, int64_t now_ms) const;
 
@@ -118,7 +118,7 @@ private:
     // A beat/quiz wanted to pause but the replay wasn't Playing yet (e.g. the
     // intro beat anchored at the window start fires DURING Buffering, where
     // ReplayManager::pause() is a no-op). Latch the intent; update() enforces it
-    // once the replay reaches Playing while the card is still up — so the intro
+    // once the replay reaches Playing while the card is still up - so the intro
     // card opens paused even though it armed before the buffering gate promoted.
     bool   want_pause_ = false;
     int    tracking_ = -1;        // index of active track step, or -1
@@ -141,7 +141,7 @@ private:
     double   last_clock_emit_ms_ = 0.0;
 
     // Monotonic floor for the REPORTED replay clock during a continuous playing
-    // stretch — absorbs the small backward steps interpolated_time_ms() takes when
+    // stretch - absorbs the small backward steps interpolated_time_ms() takes when
     // the backend status anchor lags the wall-time extrapolation (initial catch-up),
     // which otherwise snap the React clock 00:01→00:00. Large backward jumps (real
     // seeks/rewinds) pass through. See emit_state.

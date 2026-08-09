@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// watchlist_widget.h — Symbol watchlist sidebar (edgedepth v2 · dense grid 1b)
+// watchlist_widget.h - Symbol watchlist sidebar (edgedepth v2 · dense grid 1b)
 //
 // Docked left rail at Layout::WATCHLIST_W (384px). A non-scrolling header stack
 // (title bar · filter row · category + venue selectors · SYMBOL/LAST/24H% sort
@@ -9,7 +9,7 @@
 // 24h-volume figure beneath each row.
 //
 // Data: last / 24h% / 24h-volume come from the always-on TickerManager stream
-// (owned by AppShell — no subscription here); sparklines from a client-side ring
+// (owned by AppShell - no subscription here); sparklines from a client-side ring
 // buffer sampled in update(); categories + price formatting from SymbolRegistry.
 // Row click switches the terminal symbol (page-reload flow, same as the picker).
 //

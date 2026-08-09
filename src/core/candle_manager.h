@@ -10,7 +10,7 @@
 #include <string>
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// CandleManager — owns all candle state for one symbol+timeframe
+// CandleManager - owns all candle state for one symbol+timeframe
 //
 // Extracted from ChartWidget. Follows the manager ownership pattern:
 //   MessageHandler dispatches → CandleManager updates state
@@ -114,7 +114,7 @@ public:
     int64_t replay_start_time_ms() const { return replay_start_time_ms_; }
 
     // Clear all candle data and re-request historical candles up to seek_time_ms.
-    // Used when the replay seeks to a new position — clears stale data and
+    // Used when the replay seeks to a new position - clears stale data and
     // re-requests the historical context for the new position.
     void reset_for_seek(int64_t seek_time_ms);
 
@@ -124,7 +124,7 @@ public:
     void trim_candles_after(int64_t cutoff_ms);
 
     // Suppress server candle messages (trades still build candles).
-    // Used during drip-feed after rewind — server candle messages in the
+    // Used during drip-feed after rewind - server candle messages in the
     // buffer carry the FULL 15s tick OHLCV which includes "future" data.
     void set_suppress_candle_messages(bool suppress) { suppress_candle_messages_ = suppress; }
 
@@ -183,7 +183,7 @@ private:
     void append_tick(int64_t time_ms, double price);
     void clear_ticks();
 
-    // SoA cache — mutable for lazy const rebuild
+    // SoA cache - mutable for lazy const rebuild
     mutable bool cache_dirty_ = true;
     mutable std::vector<double> cached_timestamps_;
     mutable std::vector<double> cached_opens_;
@@ -194,7 +194,7 @@ private:
     mutable std::vector<double> cached_vbuys_;
     mutable std::vector<double> cached_vsells_;
 
-    // Heikin Ashi derived SoA — rebuilt inside rebuild_cache() from the real
+    // Heikin Ashi derived SoA - rebuilt inside rebuild_cache() from the real
     // cache (recursive, path-dependent from the oldest loaded candle).
     mutable std::vector<double> cached_ha_opens_;
     mutable std::vector<double> cached_ha_highs_;

@@ -19,15 +19,15 @@
 
 class MessageHandler {
 public:
-    // Main entry point — context-based (preferred)
+    // Main entry point - context-based (preferred)
     static void handle_message(const std::string& data, const MessageContext& ctx);
 
-    // Route a pre-parsed WSPayload — use when the caller has already
+    // Route a pre-parsed WSPayload - use when the caller has already
     // decompressed + parsed (avoids double work in the replay capture path).
     static void route_parsed(const pb::WSPayload& ws_payload, const MessageContext& ctx);
 
     // Timestamp of the last successfully routed message (event time, not wall clock).
-    // Set by route_message from WSPayload.event_time_ms — the replay event timestamp
+    // Set by route_message from WSPayload.event_time_ms - the replay event timestamp
     // carried on the outer protobuf envelope. Falls back to 0 during live mode.
     // Used by the history buffer to timestamp captured entries during replay.
     static int64_t last_timestamp_ms;
@@ -98,7 +98,7 @@ private:
 
     // Scrub-preview candle batch (STREAM_REPLAY_PREVIEW_CANDLES): parses a
     // pb::Candles and replaces the replay context's PreviewCandleStore. Never
-    // touches StreamManager dispatch — ghost data must not reach CandleManager.
+    // touches StreamManager dispatch - ghost data must not reach CandleManager.
     static void handle_replay_preview_candles(
         int64_t timeframe,
         const void* data, size_t size,
@@ -244,7 +244,7 @@ private:
         ScannerManager* scanner_mgr
     );
 
-    // Indicators V1 (S1b): VPIN pathfinder — live/seeded VPINStateUpdate
+    // Indicators V1 (S1b): VPIN pathfinder - live/seeded VPINStateUpdate
     // frames and the get_historical_vpin batch, both into the SeriesCache.
     static void handle_vpin_state_message(
         const Terminal::Pair& pair,

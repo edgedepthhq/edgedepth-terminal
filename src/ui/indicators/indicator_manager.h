@@ -49,7 +49,7 @@ namespace Indicators {
             }
             return false;
         }
-        // Render the tabbed indicator pane (design: .indi-pane — 31px header
+        // Render the tabbed indicator pane (design: .indi-pane - 31px header
         // with tabs + live value + collapse/close, single plot below).
         void render_tabbed(double x_min, double x_max, void* chart_widget,
                            void* crosshair_state_ptr);

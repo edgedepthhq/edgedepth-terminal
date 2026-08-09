@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// education_boot.h — Education-layer startup seam (Guided Replay / Course Studio)
+// education_boot.h - Education-layer startup seam (Guided Replay / Course Studio)
 //
 // The terminal binary is ONE canvas with three host chromes (bare Terminal,
 // Guided Replay, Course Studio). When the client is embedded in the EdgeDepth
@@ -13,7 +13,7 @@
 // paywall still gates the *data*, not just the page). The fetched JSON is the
 // exact contract shape produced by toLessonDoc.ts / lesson-schema.json.
 //
-// Fetch strategy mirrors SymbolRegistry::fetch_metadata — EM_ASM + XMLHttpRequest
+// Fetch strategy mirrors SymbolRegistry::fetch_metadata - EM_ASM + XMLHttpRequest
 // + _malloc/stringToUTF8 -> extern "C" callback -> _free. No -sFETCH, no Asyncify.
 //
 // V1 SCOPE: read global, fetch doc, stash it, log it. The beat/track replay
@@ -38,18 +38,18 @@ public:
 
     // The host chrome we're embedded in. Lesson = Guided Replay player (gate loop
     // + cards, doc fetched at boot). Studio = Course Authoring (free scrub + draw
-    // overlay, NO doc — the replay window is chosen later in the picker and pushed
+    // overlay, NO doc - the replay window is chosen later in the picker and pushed
     // in via __studio_cmd_*). None = standalone live terminal.
     enum class Mode { None, Lesson, Studio, Event, Pack };
 
     // True when the host page embedded us in a React chrome that OWNS the shell +
-    // transport and drives the data via replay — lesson, studio, OR archived event.
+    // transport and drives the data via replay - lesson, studio, OR archived event.
     // Drives the SHARED embedded path: replay-driven candles (skip the live initial
     // load), NO native shell/topbar, NO native ImGui control bar (React renders the
     // transport OUTSIDE the canvas), and the focused single-symbol widget set (no
-    // Watchlist). Event mode now takes this path too — its archive replay is driven
+    // Watchlist). Event mode now takes this path too - its archive replay is driven
     // by the React EventReplayBar (eventBridge → EventRuntime), mirroring the lesson
-    // player — so it must hide the native chrome + skip the live candle load exactly
+    // player - so it must hide the native chrome + skip the live candle load exactly
     // like lesson/studio. (Was lesson||studio only, back when event booted the bare
     // terminal + native control bar; that's the chrome we just replaced.)
     // Pack mode is embedded only when the host global says so (the /demo route's
@@ -75,16 +75,16 @@ public:
     bool event_seek_to_start() const { return event_seek_to_start_; }
     // The event window (epoch ms), passed from the web (the EventRecord carries
     // start_time/end_time) so EventRuntime reports a STABLE transport window from
-    // frame one — the backend's archive window only arrives with the first status.
+    // frame one - the backend's archive window only arrives with the first status.
     int64_t event_start_ms() const { return event_start_ms_; }
     int64_t event_end_ms() const { return event_end_ms_; }
-    // Deep-link timestamp (epoch ms; 0 = none) from ?event=…&t=… — a key-moment
+    // Deep-link timestamp (epoch ms; 0 = none) from ?event=…&t=… - a key-moment
     // link on the public event page (CLIP_FACTORY_PLAN Appendix A #5). Applied by
     // EventRuntime as ONE deliberate ReplayManager seek once the seeded book is
-    // live (active && !loading), then never again — the user owns the transport.
+    // live (active && !loading), then never again - the user owns the transport.
     int64_t event_seek_to_ms() const { return event_seek_to_ms_; }
 
-    // Pack = a CDN-served .edpack replay (Hot Replay Path B) — the box is out
+    // Pack = a CDN-served .edpack replay (Hot Replay Path B) - the box is out
     // of the loop entirely: no WebSocket, no session POST, no token. Set from
     // window.__EDGEDEPTH_PACK__ = {url, symbol, embedded} (the /demo route) or
     // the ?pack=<url>&packsym=<symbol> query params (standalone dev boots with
@@ -100,7 +100,7 @@ public:
     // by EventRuntime's one-shot deep-link path, same as event_seek_to_ms().
     int64_t pack_seek_to_ms() const { return pack_seek_to_ms_; }
 
-    // Recorder script (CLIP_FACTORY P2) — ORTHOGONAL to the mode, not a mode:
+    // Recorder script (CLIP_FACTORY P2) - ORTHOGONAL to the mode, not a mode:
     // the render harness boots a normal event/pack replay and ADDITIONALLY
     // injects window.__EDGEDEPTH_RECORDER__ = <RecorderScript> before the glue
     // loads. detect() stashes the stringified script here; main() feeds it to
@@ -118,7 +118,7 @@ public:
     // Studio mode: the symbol the picker chose (lowercase, e.g. "1000cheemsusdt"),
     // read from the studio global at detect() so the terminal can build its widgets
     // + dock layout for the RIGHT symbol at boot (the client has no in-place
-    // symbol-switch — a different symbol means a fresh mount). Empty if not studio
+    // symbol-switch - a different symbol means a fresh mount). Empty if not studio
     // or no symbol was provided.
     const std::string& studio_symbol() const { return studio_symbol_; }
 

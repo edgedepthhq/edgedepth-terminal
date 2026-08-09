@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// upsell_modal.cpp — see upsell_modal.h. The single free→Pro conversion surface.
+// upsell_modal.cpp - see upsell_modal.h. The single free→Pro conversion surface.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "upsell_modal.h"
@@ -61,7 +61,7 @@ void UpsellModal::set_dismiss_redirect(const char* symbol) {
         : std::string("/terminal");
 }
 
-// Shared dismiss for "Maybe later"/"Not now" and Escape — NOT the primary CTA.
+// Shared dismiss for "Maybe later"/"Not now" and Escape - NOT the primary CTA.
 // With a redirect armed (event/lesson boot denial) this leaves the dead embedded
 // chrome for the live terminal via a FULL navigation (the embedded page can't be
 // repurposed in place); otherwise it just closes.
@@ -188,7 +188,7 @@ void UpsellModal::render_modal_body() {
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, 8.0f));
 
-    // Proof bullets — accent dot + primary text
+    // Proof bullets - accent dot + primary text
     auto bullet = [&](const char* s) {
         const ImVec2 p = ImGui::GetCursorScreenPos();
         const float cy = p.y + ImGui::GetTextLineHeight() * 0.5f;
@@ -243,7 +243,7 @@ void UpsellModal::render_modal_body() {
     ImGui::PopStyleColor();
 
     // ── CTAs ─────────────────────────────────────────────────────────────────
-    // Upgrade: dual rails (1e) — solid "pay by card" + outline "pay with Bitcoin".
+    // Upgrade: dual rails (1e) - solid "pay by card" + outline "pay with Bitcoin".
     // Login: a single solid "Log in". Both rails route through the web checkout
     // gateway (open_upgrade_rail); card vs BTC is resolved there.
     ImGui::Dummy(ImVec2(0.0f, 12.0f));
@@ -265,7 +265,7 @@ void UpsellModal::render_modal_body() {
         ImGui::PopStyleVar();
         ImGui::PopStyleColor(4);
     } else {
-        // Primary solid — pay by card.
+        // Primary solid - pay by card.
         ImGui::PushStyleColor(ImGuiCol_Button, Tokens::BRAND);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::BRAND_TX);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, Tokens::BRAND);
@@ -281,7 +281,7 @@ void UpsellModal::render_modal_body() {
         ImGui::PopStyleVar();
         ImGui::PopStyleColor(4);
 
-        // Secondary outline — pay with Bitcoin (10% off list).
+        // Secondary outline - pay with Bitcoin (10% off list).
         ImGui::Dummy(ImVec2(0.0f, 8.0f));
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::HOVER);
@@ -325,7 +325,7 @@ void UpsellModal::render_modal_body() {
     }
     ImGui::PopStyleColor(4);
 
-    // Footer founder line — amber, with a drawn diamond (no U+25C6 in the atlas).
+    // Footer founder line - amber, with a drawn diamond (no U+25C6 in the atlas).
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
     ImGui::PushFont(Fonts::label());
     if (login_variant_) {

@@ -7,7 +7,7 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 
-// localStorage bridge — menu.cpp recents pattern, but with a DYNAMIC-length
+// localStorage bridge - menu.cpp recents pattern, but with a DYNAMIC-length
 // read (drawing blobs can exceed any fixed buffer; caller frees).
 EM_JS(char*, eddraw_read_blob, (const char* key), {
     try {

@@ -98,7 +98,7 @@ bool DebugWidget::compact_should_skip(const DebugEntry& e,
     if (std::strcmp(e.actor, "pattern") == 0 && std::strcmp(e.category, "ignition") == 0) {
         const char* msg = e.msg;
 
-        // State transitions — never skip
+        // State transitions - never skip
         if (std::strstr(msg, "IGNITED") || std::strstr(msg, "PROMOTE") ||
             std::strstr(msg, "GEOMETRY") || std::strstr(msg, "EXPIRED") ||
             std::strstr(msg, "CANDIDATE held") || std::strstr(msg, "SKIP") ||
@@ -146,7 +146,7 @@ bool DebugWidget::compact_should_skip(const DebugEntry& e,
     if (std::strcmp(e.actor, "pattern") == 0 && std::strcmp(e.category, "breakout") == 0) {
         const char* msg = e.msg;
 
-        // State transitions — never skip
+        // State transitions - never skip
         if (std::strstr(msg, "INVALIDATED") || std::strstr(msg, "CONFIRMED") ||
             std::strstr(msg, "TEST") || std::strstr(msg, "EXPIRED") ||
             std::strstr(msg, "trendlines_crossed") || std::strstr(msg, "breakout_confirmed"))
@@ -177,7 +177,7 @@ bool DebugWidget::compact_should_skip(const DebugEntry& e,
 
         // Adaptive thresholds
         if (dist_abs < 1.0f) {
-            // Approaching breakout — always show
+            // Approaching breakout - always show
             std::strncpy(brk[slot].dist, dist, 15);
             brk[slot].dist[15] = '\0';
             brk[slot].dist_abs = dist_abs;
@@ -375,7 +375,7 @@ void DebugWidget::render() {
         ImGui::End();
         return;
     }
-    // PushID INSIDE Begin/End — scopes all child IDs within this window only
+    // PushID INSIDE Begin/End - scopes all child IDs within this window only
     ImGui::PushID(title_.c_str());
     // Ctrl+C: copy selected rows if any, else copy all
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
@@ -674,7 +674,7 @@ void DebugWidget::render_row(size_t row_idx, const DebugEntry& e, bool is_new, i
 
         // Tooltip on row hover
         if (hovered) {
-            // Use a short delay to avoid flicker — only show after ~300ms hover
+            // Use a short delay to avoid flicker - only show after ~300ms hover
             if (ImGui::GetIO().MousePos.x >= 0.0f) {
                 Theme::begin_tooltip();
                 ImGui::Text("ts:       %lld", (long long)e.ts);

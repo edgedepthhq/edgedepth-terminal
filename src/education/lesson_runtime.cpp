@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// lesson_runtime.cpp — see lesson_runtime.h. Absolute-time gate loop + spotlight.
+// lesson_runtime.cpp - see lesson_runtime.h. Absolute-time gate loop + spotlight.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Must precede ANY include that pulls in imgui.h (chart_projection.h does).
@@ -26,7 +26,7 @@
 
 using json = nlohmann::json;
 
-// Defined at GLOBAL scope in main.cpp — true while the replay clock is held for
+// Defined at GLOBAL scope in main.cpp - true while the replay clock is held for
 // priming. Declared here at global scope so emit_state references ::g_lesson_loading
 // (a block-scope extern inside an edu:: member binds to edu::, which is wrong).
 extern bool g_lesson_loading;
@@ -149,7 +149,7 @@ bool LessonRuntime::load(const std::string& jsonStr) {
     return true;
 }
 
-// Inverse of load() — used when a Studio export session ends so the lesson's
+// Inverse of load() - used when a Studio export session ends so the lesson's
 // gate loop stops firing under the studio's normal free scrub. Mirrors load()'s
 // reset block exactly, plus invalidates the doc and drops export-render mode.
 void LessonRuntime::unload() {
@@ -200,7 +200,7 @@ void LessonRuntime::update(const AppContext& ctx) {
 
     // Scrub-forward lock: while a lockForward step is ACTIVE (its card is up,
     // or its track window is running), forward seeks and the ghost preview
-    // clamp to the playhead. Re-pushed EVERY frame — the ceiling self-expires
+    // clamp to the playhead. Re-pushed EVERY frame - the ceiling self-expires
     // in ReplayManager when these pushes stop (lesson unloaded/torn down), so
     // free scrub always returns on its own. Backward motion stays free.
     {
@@ -217,7 +217,7 @@ void LessonRuntime::update(const AppContext& ctx) {
 
     // Gate: fire the next armed step when the replay clock reaches its time.
     // ReplayManager owns the clock (and clamps its own advance), so a stutter
-    // can't skip — we advance armed_ one step at a time and test in order.
+    // can't skip - we advance armed_ one step at a time and test in order.
     if (armed_ < static_cast<int>(lesson_.steps.size()) &&
         now >= lesson_.steps[armed_].t) {
         const Step& ns = lesson_.steps[armed_];
@@ -270,7 +270,7 @@ void LessonRuntime::end_track() {
 
 void LessonRuntime::continue_lesson(const AppContext& ctx) {
     showing_card_ = false;
-    want_pause_ = false;  // user advanced — drop any deferred-pause intent
+    want_pause_ = false;  // user advanced - drop any deferred-pause intent
     if (cur_step_ >= static_cast<int>(lesson_.steps.size()) - 1) return;  // completion = chrome's job
     ctx.replay_mgr().resume();  // play loop gates at the next step
 }
@@ -279,7 +279,7 @@ void LessonRuntime::continue_lesson(const AppContext& ctx) {
 // Seek the replay to a step's anchor and RE-ARM the gate. The gate in update()
 // fires steps when the clock reaches step.t; after a seek we set armed_ = idx so
 // that step re-fires (and earlier ones don't), and cur_step_ = idx-1 so open_step
-// transitions cleanly. We never call open_step directly here — we let the seek
+// transitions cleanly. We never call open_step directly here - we let the seek
 // land and the normal gate loop re-open the step once candle data is back, so the
 // spotlight resolves against freshly-streamed candles rather than cleared ones.
 void LessonRuntime::jump_to_step(int stepN, const AppContext& ctx) {
@@ -296,7 +296,7 @@ void LessonRuntime::jump_to_step(int stepN, const AppContext& ctx) {
 
     armed_    = idx;        // this step re-fires when the clock reaches t
     cur_step_ = idx - 1;    // open_step(idx) will advance it
-    // shown_max_ preserved — the rail keeps its completed ticks.
+    // shown_max_ preserved - the rail keeps its completed ticks.
 }
 
 void LessonRuntime::back(const AppContext& ctx) {
@@ -325,7 +325,7 @@ void LessonRuntime::scrub_to_progress(float progress, bool deliberate, const App
                            static_cast<int64_t>(progress * static_cast<float>(span));
 
     // Tear down any active track/card (idempotent when none is up) and restore a
-    // slowTo speed — same as jump_to_step. A scrub shouldn't leave a track box or a
+    // slowTo speed - same as jump_to_step. A scrub shouldn't leave a track box or a
     // dimmed card pinned to a stale position.
     if (tracking_ >= 0) end_track();
     showing_card_ = false;
@@ -413,7 +413,7 @@ LessonRuntime::Rect LessonRuntime::resolve_target(const Step& s, const AppContex
     // rather than a thin box anchored to one candle / the playhead.
     //
     // Vertical extent: PREFER explicit author-drawn bounds (pTop/pBot, captured by
-    // drawing the box on the real shelf in the studio — this is the accuracy fix).
+    // drawing the box on the real shelf in the studio - this is the accuracy fix).
     // Fall back to the LEGACY heuristic (candle low around t, `below` price-pts down)
     // only when the band wasn't authored with explicit price (hasPrice == false).
     if (t.type == Target::Type::Band) {
@@ -488,7 +488,7 @@ namespace edu {
 // The beat/quiz coach CARD now lives in the React chrome (driven by emit_state).
 // The in-canvas ImGui card stays only as a native/Debug fallback for when the
 // JS bridge isn't present (standalone terminal build, or bridge-down debugging).
-// The SPOTLIGHT (dim + ring + track label) ALWAYS renders here — it needs the
+// The SPOTLIGHT (dim + ring + track label) ALWAYS renders here - it needs the
 // per-frame chart_projection and belongs in the canvas.
 #ifdef __EMSCRIPTEN__
 static constexpr bool g_edu_native_card = false;  // React owns the card in WASM
@@ -553,9 +553,9 @@ void LessonRuntime::render_overlay(const AppContext& ctx) {
 
     // Beat/quiz card. In WASM the React chrome renders this (driven by emit_state),
     // so we draw only the dim+ring spotlight above and skip the ImGui window. The
-    // native card remains for non-WASM / bridge-down fallback — AND for the Studio
+    // native card remains for non-WASM / bridge-down fallback - AND for the Studio
     // export session (export_render_): captureStream sees only the canvas, so the
-    // card must burn in. In export mode it is CONTENT ONLY (no Continue button —
+    // card must burn in. In export mode it is CONTENT ONLY (no Continue button -
     // the author advances from the React studio footer, outside the capture) and
     // styled with Theme::Tokens (it ships inside produced videos).
     if (!g_edu_native_card && !export_render_) return;
@@ -576,7 +576,7 @@ void LessonRuntime::render_overlay(const AppContext& ctx) {
                              ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                              ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize;
     if (export_render_) {
-        // No input in a burned-in card — don't let it steal focus/hover from the
+        // No input in a burned-in card - don't let it steal focus/hover from the
         // chart mid-take either.
         flags |= ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing;
         ImGui::PushStyleColor(ImGuiCol_WindowBg, Theme::Tokens::PANEL);
@@ -620,7 +620,7 @@ void LessonRuntime::render_overlay(const AppContext& ctx) {
                 }
                 ImGui::PopStyleColor();
             }
-            // NO button, NO separator — pure content in the recording.
+            // NO button, NO separator - pure content in the recording.
         } else {
             ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(34, 197, 219, 255));
             ImGui::TextUnformatted((std::to_string(step.n) + "  " +
@@ -699,7 +699,7 @@ static const char* phase_name(bool active, bool playing, bool showing_card,
     if (showing_card) return "card";
     if (tracking)     return "track";
     if (playing)      return "playing";
-    return "playing";  // active but between steps — still "playing" to the UI
+    return "playing";  // active but between steps - still "playing" to the UI
 }
 
 void LessonRuntime::emit_state(const AppContext& ctx) {
@@ -709,7 +709,7 @@ void LessonRuntime::emit_state(const AppContext& ctx) {
     const bool active  = rm.is_active();
     const bool playing = rm.is_playing();
     const bool paused  = rm.is_paused();
-    // loading = clock HELD for initial prime OR mid-seek re-buffer after a scrub —
+    // loading = clock HELD for initial prime OR mid-seek re-buffer after a scrub -
     // either way no fresh data, so the React chrome shows a spinner and freezes the
     // clock instead of extrapolating into an empty window.
     const bool loading = ::g_lesson_loading || rm.state() == ReplayManager::State::Seeking;
@@ -732,7 +732,7 @@ void LessonRuntime::emit_state(const AppContext& ctx) {
     hasher.mix(static_cast<uint64_t>(::g_lesson_loading ? 1 : 0));
     hasher.mix(static_cast<uint64_t>(last_box_.valid ? 1 : 0));  // spotlight appear/disappear
     // Scrub-forward lock: hash the BOOL only (the ceiling value tracks the
-    // playhead while locked; hashing it would emit every frame — React derives
+    // playhead while locked; hashing it would emit every frame - React derives
     // the ceiling from its interpolated clock instead).
     const bool lock_forward = rm.seek_ceiling_active();
     hasher.mix(static_cast<uint64_t>(lock_forward ? 1 : 0));
@@ -819,13 +819,13 @@ void LessonRuntime::emit_state(const AppContext& ctx) {
     st["step"] = (active_idx >= 0 && active_idx <= last) ? step_json(active_idx) : json(nullptr);
 
     // `currentStep` = the current step's full data, PERSISTENT across the gaps
-    // between cards — so the React coach bar can always show context, not blink
+    // between cards - so the React coach bar can always show context, not blink
     // out when no card is up. Falls back to step 1 before the first step fires.
     const int cur_idx = (cur_step_ >= 0 && cur_step_ <= last) ? cur_step_
                        : (last >= 0 ? 0 : -1);
     st["currentStep"] = (cur_idx >= 0) ? step_json(cur_idx) : json(nullptr);
 
-    // Rail list (static after load) — included in every emit so a late-mounting
+    // Rail list (static after load) - included in every emit so a late-mounting
     // listener gets a self-contained snapshot from one read. Cheap (~steps×~60B).
     json rail = json::array();
     for (const auto& s : lesson_.steps) {
@@ -840,7 +840,7 @@ void LessonRuntime::emit_state(const AppContext& ctx) {
     st["steps"] = std::move(rail);
 
     // Spotlight rect (CSS px, canvas-relative) so the React floating card can pin
-    // itself beside the cut-out. Excluded from the dirty-check sig on purpose —
+    // itself beside the cut-out. Excluded from the dirty-check sig on purpose -
     // it rides whatever emit a discrete change triggers (card open = a phase/step
     // change → fresh rect). While a beat is paused the chart is static so the rect
     // stays accurate; null when no spotlight is up.
@@ -861,7 +861,7 @@ void LessonRuntime::emit_state(const AppContext& ctx) {
 } // namespace edu
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// KEEPALIVE command callbacks — React calls these via Module._edu_cmd_*().
+// KEEPALIVE command callbacks - React calls these via Module._edu_cmd_*().
 // They only ENQUEUE; LessonRuntime::update(ctx) applies them with a live ctx.
 // Mirrors education_boot.cpp's _education_on_lesson_fetch pattern.
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -889,7 +889,7 @@ EMSCRIPTEN_KEEPALIVE void _edu_cmd_set_speed(int centi_speed) {
     // Speed crosses the JS↔wasm boundary as an INT (centi-speed: 400 = 4.0×).
     // A float param read straight off the raw wasm export mis-marshals the JS
     // f64 as f32 (the direct-export path does no arg conversion, unlike ccall),
-    // which silently corrupted the speed — that was the "fast-forward does
+    // which silently corrupted the speed - that was the "fast-forward does
     // nothing" bug. Int args marshal cleanly. Convert back to a float here.
     const float speed = static_cast<float>(centi_speed) / 100.0f;
     edu::LessonRuntime::instance().enqueue_cmd(edu::LessonRuntime::Cmd::SetSpeed, 0, speed);

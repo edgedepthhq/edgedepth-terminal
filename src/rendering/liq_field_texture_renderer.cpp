@@ -9,7 +9,7 @@
 #include "core/heatmap_colormap.h"
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Shaders — GLSL ES 3.0. The fragment shader is the whole point of WS2:
+// Shaders - GLSL ES 3.0. The fragment shader is the whole point of WS2:
 // sample R8 (pre-gamma tl) → gamma → noise floor → LUT → design alpha curve,
 // with the forward cascade computed procedurally right of the live-edge seam.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -28,7 +28,7 @@ precision highp int;
 
 uniform sampler2D u_field;     // R8 WxH: x = candle column, y = log-price row; PRE-gamma tl
 uniform sampler2D u_standing;  // R8 1xH: standing tl per row, live carve applied (cascade)
-uniform sampler2D u_colormap;  // 256x1 RGBA8 — RGB only; alpha is computed here
+uniform sampler2D u_colormap;  // 256x1 RGBA8 - RGB only; alpha is computed here
 
 uniform vec2  u_plot_origin;   // plot bottom-left, GL framebuffer px
 uniform vec2  u_plot_size;     // plot size, GL framebuffer px
@@ -45,7 +45,7 @@ uniform float u_seam_u;        // live edge (seam) position in plot-uv x
 uniform int   u_extend;        // 1 = cascade length ∝ strength; 0 = fixed magnet
 uniform float u_magnet_frac;   // cascade length fraction of (right − seam) when !u_extend
 uniform float u_max_projection_frac; // maximum cascade length fraction of (right - seam)
-uniform float u_gamma;         // live style knobs — no texture re-upload on change
+uniform float u_gamma;         // live style knobs - no texture re-upload on change
 uniform float u_floor;
 uniform float u_alpha_floor;
 uniform float u_alpha_pow;
@@ -56,14 +56,14 @@ uniform float u_min_row_px;    // rect-path emit_rect row clamp (min painted row
 
 out vec4 fragColor;
 
-// Row-COVERAGE sampling (round 3 — the "tidy" fix). LINEAR filtering read as
+// Row-COVERAGE sampling (round 3 - the "tidy" fix). LINEAR filtering read as
 // mush: a lone row's value bell-curved away from its center, so thin rows
 // rendered dimmer/thinner than the rect path's hard full-alpha slabs and the
 // cascade rows blurred together. Instead: fetch the ±2 nearest rows exactly
-// (texelFetch) and let each PAINT over the fragment the way emit_rect did —
+// (texelFetch) and let each PAINT over the fragment the way emit_rect did -
 // full strength inside max(native+1px, u_min_row_px px) about its center,
 // with only a 0.5px smoothstep feather at the boundary (the design feather).
-// Returns vec2(value, coverage). Coverage modulates ALPHA only — the colour
+// Returns vec2(value, coverage). Coverage modulates ALPHA only - the colour
 // keeps the row's true LUT hue, exactly like the rect path's hard edges.
 vec2 row_cover(sampler2D tex, int c, float rc, float row_px) {
     float h_px = max(0.5 * (row_px + 1.0), 0.5 * u_min_row_px);
@@ -108,21 +108,21 @@ void main() {
             : u_magnet_frac;                                // fixed forward magnet
         float ft = rel / max(len, 1.0e-4);
         if (ft > 1.0) discard;
-        // Design target: flat, then LINEAR fade over the final u_fade_frac of len —
+        // Design target: flat, then LINEAR fade over the final u_fade_frac of len -
         // this retires the interim stepped tail (88/95/100% × 100/55/28%).
         float fade = (ft <= 1.0 - u_fade_frac) ? 1.0 : (1.0 - ft) / u_fade_frac;
         cascade_mul = u_cascade_alpha * fade;
     } else {
         // ── History + live column ──
         float col_f = mix(u_view_col_min, u_view_col_max, uv.x);
-        // Columns per fragment — ANALYTIC (col_f is linear in gl_FragCoord.x),
+        // Columns per fragment - ANALYTIC (col_f is linear in gl_FragCoord.x),
         // no fwidth needed, so it's exact and control-flow-safe.
         float cpp = (u_view_col_max - u_view_col_min) / u_plot_size.x;
         float half_c = 0.5 * max(cpp, 0.0);
         if (col_f + half_c < -0.5 || col_f - half_c > u_live_col + 0.5) discard;
         int c_last = min(int(floor(u_live_col + 0.5)), int(u_tex_w) - 1);
         if (cpp <= 1.0) {
-            // Zoomed in (≥1px per candle): column snaps to its texel — no
+            // Zoomed in (≥1px per candle): column snaps to its texel - no
             // horizontal smear across the deposit/consume boundaries, the
             // no-overlap edges stay crisp.
             int c = clamp(int(floor(col_f + 0.5)), 0, int(u_tex_w) - 1);
@@ -131,7 +131,7 @@ void main() {
         } else {
             // Extreme zoom-out (sub-pixel candles): point sampling would skip
             // columns and SHIMMER during scroll (the WS2 wiggle risk). Instead
-            // take the MAX over the fragment's column footprint — "brightest
+            // take the MAX over the fragment's column footprint - "brightest
             // fuel in this pixel", the same painter semantics as the rows.
             // Taps sit on a stride grid anchored to ABSOLUTE column indices
             // (not the fragment), so the sampled set is scroll-invariant and
@@ -261,7 +261,7 @@ bool LiqFieldTextureRenderer::init_gl() {
     return true;
 }
 
-// Own 256x1 RGB LUT via HeatmapColormap::apply — the EXACT ramp the rect path
+// Own 256x1 RGB LUT via HeatmapColormap::apply - the EXACT ramp the rect path
 // uses CPU-side (routes Ember/Inferno/Magma/Viridis; generation() bumps on
 // change). Deliberately NOT the shared ShaderHeatmapResources liq LUT: other
 // consumers bake their own opacity into that one's alpha, and this shader
@@ -291,7 +291,7 @@ void LiqFieldTextureRenderer::rebuild_lut_if_stale() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Rasterization — one pass over the segment cache per Field-cache rebuild.
+// Rasterization - one pass over the segment cache per Field-cache rebuild.
 // The cache (liq_field_segs_) stays the source of truth; this only bakes it.
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -431,14 +431,14 @@ bool LiqFieldTextureRenderer::ensure(const std::vector<LiqFieldSeg>& segs,
 
         // NO-OVERLAP column resolution: light [deposit_col+1 .. consume_col-1]
         // (pending → the live column). The depositing / consuming candles' own
-        // columns stay dark — whole-column version of the rect path's ±tf*0.35
+        // columns stay dark - whole-column version of the rect path's ±tf*0.35
         // sub-candle edges (flagged A/B parity risk).
         const int dep_col = col_of(s.start_ms);
         int c0 = dep_col + 1;
         int c1 = pending ? live_col_raster_ : col_of(s.end_ms) - 1;
 
         if (pending) {
-            // Standing fuel drives the cascade + the per-frame live column —
+            // Standing fuel drives the cascade + the per-frame live column -
             // including fuel deposited BY the raster-time live candle (its own
             // column stays dark, but its projection must still cascade).
             for (int r = r0; r <= r1; ++r) {
@@ -509,7 +509,7 @@ void LiqFieldTextureRenderer::update_live(const FrameParams& f) {
     const int live_col = std::clamp(live_col_raw, 0, alloc_w_ - 1);
 
     // The live column advanced past a previously-live one (building candle
-    // appeared after raster): restore that column's raster content — it's
+    // appeared after raster): restore that column's raster content - it's
     // history now and must not keep a stale carve.
     if (last_live_col_uploaded_ >= 0 &&
         (!live_in_window || last_live_col_uploaded_ != live_col)) {
@@ -555,7 +555,7 @@ void LiqFieldTextureRenderer::update_live(const FrameParams& f) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Render — ONE draw callback per frame; zoom/scroll is pure uniform math.
+// Render - ONE draw callback per frame; zoom/scroll is pure uniform math.
 // ═══════════════════════════════════════════════════════════════════════════
 
 float LiqFieldTextureRenderer::render(const FrameParams& f) {
@@ -566,14 +566,14 @@ float LiqFieldTextureRenderer::render(const FrameParams& f) {
     const ImVec2 plot_pos = ImPlot::GetPlotPos();
     const ImVec2 plot_size = ImPlot::GetPlotSize();
     if (plot_size.x <= 0.0f || plot_size.y <= 0.0f) return -1.0f;
-    // NOTE: y_min may be ≤ 0 on a zoomed-out linear axis (sub-cent movers) —
+    // NOTE: y_min may be ≤ 0 on a zoomed-out linear axis (sub-cent movers) -
     // the shader discards price ≤ 0 per fragment, so only degenerate spans bail.
     if (lims.Y.Max <= lims.Y.Min) return -1.0f;
 
     const float x_left = plot_pos.x;
     const float x_right = plot_pos.x + plot_size.x;
 
-    // Live edge (the seam): right edge of the live candle column — the same
+    // Live edge (the seam): right edge of the live candle column - the same
     // latest_ms + tf/2 the rect path uses, clamped to the plot.
     const float x_live = std::clamp(
         ImPlot::PlotToPixels(ImPlotPoint(
@@ -599,7 +599,7 @@ float LiqFieldTextureRenderer::render(const FrameParams& f) {
     u.plot_size_screen[1] = plot_size.y;
 
     // Viewport in texture-column coordinates (CPU doubles → float; magnitudes
-    // stay ≤ ~8k so float precision holds — never raw ms in float).
+    // stay ≤ ~8k so float precision holds - never raw ms in float).
     u.view_col_min = static_cast<float>((lims.X.Min - static_cast<double>(t0_ms_)) /
                                         static_cast<double>(tf_ms_));
     u.view_col_max = static_cast<float>((lims.X.Max - static_cast<double>(t0_ms_)) /
@@ -673,7 +673,7 @@ void LiqFieldTextureRenderer::gl_render_callback(const ImDrawList* /*parent*/,
     const float fb_h = dd->DisplaySize.y * fb_scale_y;
 
     // Scissor = ImGui ClipRect ∩ data extent (the OB heatmap's proven FPS
-    // optimization — the shader only runs where the field can exist).
+    // optimization - the shader only runs where the field can exist).
     const float clip_x0 = (cmd->ClipRect.x - dd->DisplayPos.x) * fb_scale_x;
     const float clip_y0 = (cmd->ClipRect.y - dd->DisplayPos.y) * fb_scale_y;
     const float clip_x1 = (cmd->ClipRect.z - dd->DisplayPos.x) * fb_scale_x;

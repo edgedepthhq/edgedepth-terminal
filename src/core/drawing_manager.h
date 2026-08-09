@@ -1,17 +1,17 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// DrawingManager — store + shared state for the chart drawing tools.
+// DrawingManager - store + shared state for the chart drawing tools.
 //
 // Owned by AppState (NOT DataContext) so drawings survive live<->replay context
 // swaps untouched; anchors are (epoch_ms, price) so they land correctly on
 // historical candles. Main-thread only (no data-thread writes, no mutex).
 //
 // Split of responsibilities:
-//   DrawingManager (here)      — items, armed tool, selection, undo, global
+//   DrawingManager (here)      - items, armed tool, selection, undo, global
 //                                toggles, per-symbol localStorage persistence.
-//   drawing::DrawingLayer (ui) — placement state machine, hit-testing, drags,
+//   drawing::DrawingLayer (ui) - placement state machine, hit-testing, drags,
 //                                all in-plot rendering.
-//   drawing_toolbar (ui)       — left icon rail + topbar dropdown.
+//   drawing_toolbar (ui)       - left icon rail + topbar dropdown.
 // ═══════════════════════════════════════════════════════════════════════════════
 #include "ui/drawing/drawing_types.h"
 
@@ -49,7 +49,7 @@ public:
     void end_modify(uint64_t id);
     void mark_dirty();                 // any mutation → schedule a persist
 
-    void undo();                       // Ctrl+Z — bounded stack (64)
+    void undo();                       // Ctrl+Z - bounded stack (64)
     bool can_undo() const { return !undo_stack_.empty(); }
 
     // ── Selection (Cursor mode) ──────────────────────────────────────────────

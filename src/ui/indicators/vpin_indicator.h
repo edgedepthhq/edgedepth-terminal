@@ -1,12 +1,12 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// vpin_indicator.h — Toxicity pane (VPIN, Indicators V1 Wave B pathfinder)
+// vpin_indicator.h - Toxicity pane (VPIN, Indicators V1 Wave B pathfinder)
 //
 // Implementation contract: the Microstructure Indicator Suite SPEC §2
-//   · fixed 0–1.0 axis, gridlines .25/.50/.75, dotted landmark rules at
-//     .30/.45/.60 (the fallback thresholds — drawn always)
+//   · fixed 0-1.0 axis, gridlines .25/.50/.75, dotted landmark rules at
+//     .30/.45/.60 (the fallback thresholds - drawn always)
 //   · VPIN = 1px STEP-HOLD line (H then V at each volume-clock print),
-//     stroke colored by regime; shelves are honest — quiet symbols hold
+//     stroke colored by regime; shelves are honest - quiet symbols hold
 //   · conf < 0.65 in HMM eras → that segment at 0.55 alpha (quantized)
 //   · 2px regime strip ON the time axis, drawn only for regime ≥ ELEVATED;
 //     color seams land exactly on state-change prints (no extra glyphs);

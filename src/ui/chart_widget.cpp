@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// chart_widget.cpp — REFACTORED: Rendering + UI only
+// chart_widget.cpp - REFACTORED: Rendering + UI only
 //
 // ChartWidget no longer owns candle data. It reads from CandleManager via
 // const accessors. All candle lifecycle (build, finalize, batch, scroll-load)
@@ -61,10 +61,10 @@ ChartProjection& chart_projection() {
 }
 }
 
-// "Investigate this minute" — shared by the candle (##ChartCtx) and Renko
+// "Investigate this minute" - shared by the candle (##ChartCtx) and Renko
 // (##RenkoCtx) context menus, placed ABOVE the replay block in both (it is a
 // read, not a replay). Enabled only for Binance USDT-M: that is all the C++
-// side can honestly know — tier, record edge and absent readings belong to
+// side can honestly know - tier, record edge and absent readings belong to
 // the web surface, which already says the right thing for each.
 static void render_investigate_menu_item(const Terminal::Pair& pair, int64_t minute_ms) {
     const bool on_record = (pair.exchange == "binancef");
@@ -89,7 +89,7 @@ static void render_investigate_menu_item(const Terminal::Pair& pair, int64_t min
 // P2e census: resolve the HL census pair ({"hl", UNDERLYING}) for any chart pair.
 // The census feed is keyed by underlying coin, so any venue's chart of the same
 // underlying subscribes the same subject. HL-native pairs are their own underlying
-// (uppercase coins, "BTC"); binancef perps are lowercase "<base><quote>" — strip the
+// (uppercase coins, "BTC"); binancef perps are lowercase "<base><quote>" - strip the
 // stable-quote suffix and uppercase. Binance's 1000-bundled tickers map to HL's
 // k-prefix ("1000pepe" → "kPEPE"; both price 1000 units, so USD scales align).
 static Terminal::Pair hl_census_pair_for(const Terminal::Pair& pair) {
@@ -127,7 +127,7 @@ ChartWidget::ChartWidget(
              "###chart_" + pair.exchange + "_" + pair.symbol;
     fmt_ = PriceFormatter::from_tick_and_step(tick_size_, 0.001);
 
-    // P2e: the census layer defaults ON for HL-native pairs — there the census IS
+    // P2e: the census layer defaults ON for HL-native pairs - there the census IS
     // the ground-truth predictive layer (the modelled heatmap has no HL publisher).
     // On other venues it's the opt-in cross-venue overlay (the pill).
     liq_census_pair_ = hl_census_pair_for(pair_);
@@ -238,7 +238,7 @@ std::string ChartWidget::timeframe_to_string(int64_t seconds) {
 void ChartWidget::update() {
     ProfileScope _ps("ChartUpd");
     if (chart_type_ == ChartType::Renko) {
-        // Renko's last_visible_range_.X is a BRICK-INDEX domain — never feed that
+        // Renko's last_visible_range_.X is a BRICK-INDEX domain - never feed that
         // to CandleManager (its scroll-load thresholds are timestamps). Use the
         // visible bricks' TIME window published by render_chart_renko instead.
         if (renko_view_t1_ms_ == 0) return;
@@ -412,7 +412,7 @@ void ChartWidget::update() {
             }
         }
     }
-    // Heatmap — request once candles are loaded (WS guaranteed connected).
+    // Heatmap - request once candles are loaded (WS guaranteed connected).
     // Skipped in Renko: the time-keyed overlays do not draw there, and
     // update_heatmap() reads last_visible_range_ as TIME (brick indices in Renko).
     if (heatmap_enabled_ && ct_allows_time_overlays(chart_type_) &&
@@ -422,7 +422,7 @@ void ChartWidget::update() {
         update_heatmap();
         update_live_heatmap_from_orderbook();
     }
-    // Liquidation heatmap — subscribe + request historical once WS is connected
+    // Liquidation heatmap - subscribe + request historical once WS is connected
     // During replay, skip live subscriptions (data arrives via replay binary stream)
     const bool is_replay = ctx_.candle_mgr().replay_start_time_ms() > 0;
     if (liq_heatmap_enabled_ && ct_allows_time_overlays(chart_type_) &&
@@ -440,7 +440,7 @@ void ChartWidget::update() {
             update_liq_heatmap_scroll();
         }
     }
-    // Liq Levels HL (census, P2e) — live-only subscribe on the UNDERLYING-keyed HL
+    // Liq Levels HL (census, P2e) - live-only subscribe on the UNDERLYING-keyed HL
     // pair (works from any venue's chart of the same underlying). No historical
     // request: the stream is deliver-last-per-subject (loads instantly on subscribe)
     // with a 5-min live window; replay has no census data.
@@ -481,7 +481,7 @@ void ChartWidget::change_timeframe(const int new_tf_seconds)
     heatmap_data_requested_ = false;
     heatmap_loaded_timeframe_ = 0;
     // Liq map is TIMEFRAME-INDEPENDENT. Snapshots are price-level bands keyed by
-    // {exchange,symbol}+timestamp (raw_timeline_protos_) at a fixed ~5-min cadence —
+    // {exchange,symbol}+timestamp (raw_timeline_protos_) at a fixed ~5-min cadence -
     // NOT bucketed by candle TF. The chart TF only changes the x-axis mapping at
     // render; the GPU timeline (and rails) reconstruct from the cached protos via the
     // same path set_leverage_mask() uses. So do NOT clear or re-request on TF change:
@@ -601,7 +601,7 @@ void ChartWidget::render() {
     // In-chart drawing rail (2026-08-06: moved off the viewport edge so it
     // sits directly against the chart). It reserves its width from the plot;
     // the body child keeps the indicator panes right of the rail too. Gated
-    // like the old full_shell chrome — drawings themselves render everywhere.
+    // like the old full_shell chrome - drawings themselves render everywhere.
     const auto& edu_boot = EducationBoot::instance();
     const bool show_rail = !edu_boot.is_embedded() && !edu_boot.is_pack() &&
                            !ClipRecorder::focus_active() &&
@@ -618,7 +618,7 @@ void ChartWidget::render() {
     const float total_height = ImGui::GetContentRegionAvail().y;
     // Indicator pane (tabbed, design .indi-pane): 0 / header-only / INDI_PANE_H.
     // Renko skips the time-aligned indicator pane (render_indicators early-returns),
-    // so reserve no height for it — the brick chart takes the full area.
+    // so reserve no height for it - the brick chart takes the full area.
     const float indicator_total_height =
         (chart_type_ == ChartType::Renko) ? 0.0f : indicator_mgr_.pane_height();
     const float chart_height = std::max(100.0f, total_height - indicator_total_height);
@@ -628,7 +628,7 @@ void ChartWidget::render() {
     crosshair_state_.is_active = false;
 
     // SPEC §0.2: the chart + every stacked pane share ONE right-gutter
-    // column — ImPlot equalizes the y-axis widths across the group, so all
+    // column - ImPlot equalizes the y-axis widths across the group, so all
     // plots have identical x-extents. This is also what makes the crosshair
     // math exact: render_crosshair maps time→pixels with a single transform
     // spanning chart-left → last-pane-right, which is only valid when the
@@ -636,7 +636,7 @@ void ChartWidget::render() {
     // "mouse vs time-pointer horizontal gap" once panes stacked by default).
     const bool plots_aligned = ImPlot::BeginAlignedPlots("##chart_pane_align");
     render_chart();
-    // Restore the ImPlot input map before the indicator subplots BeginPlot —
+    // Restore the ImPlot input map before the indicator subplots BeginPlot -
     // they must never see the drawing layer's overrides. Idempotent.
     drawing_layer_.end_frame();
     {
@@ -656,7 +656,7 @@ void ChartWidget::render() {
 }
 
 
-// Chart Rendering — reads from CandleManager
+// Chart Rendering - reads from CandleManager
 void ChartWidget::render_chart() {
     // Renko abandons the time X-axis for a brick-index domain; it is a fully
     // self-contained render path (own BeginPlot/EndPlot) so the time-based path
@@ -715,7 +715,7 @@ void ChartWidget::render_chart() {
     // transport, extend x_max PAST the playhead clamp to the aimed-at time
     // plus a small lead, bounded by the replay window end. The view grows as
     // the user sweeps right and snaps back to the clamp when the preview
-    // disarms — the clamp above stays authoritative whenever no preview is up.
+    // disarms - the clamp above stays authoritative whenever no preview is up.
     const int64_t scrub_preview_ms = ctx_.replay_mgr().scrub_preview_ms();
     if (scrub_preview_ms > 0) {
         const double preview_lead = static_cast<double>(tf_sec) * 1000.0 * 6.0;
@@ -735,9 +735,9 @@ void ChartWidget::render_chart() {
     }
 
     // CLIP_FACTORY: script-pinned visible span. The post-seek batch fit spans
-    // however much history the seed happened to serve — a produced clip must
+    // however much history the seed happened to serve - a produced clip must
     // not inherit that. Pin the X window to the last viewSpanMinutes behind
-    // the live edge — but ONLY from shot 0 onward (in_shot): pinning during
+    // the live edge - but ONLY from shot 0 onward (in_shot): pinning during
     // boot/seek/prime races the initial candle batch (malformed building
     // candle + request thrash), so those phases keep default behavior.
     if (edu::RecorderRuntime::instance().in_shot()) {
@@ -748,7 +748,7 @@ void ChartWidget::render_chart() {
     }
     // Real-time view (RT), any chart type: engage follow-live so the chart
     // streams and keeps the live edge current. We re-arm follow-live ONLY on the
-    // rising edge of rt_mode_ (rt_was_on_ edge-detect) — not every frame — so the
+    // rising edge of rt_mode_ (rt_was_on_ edge-detect) - not every frame - so the
     // normal follow_live() X/Y path (above / below) takes over and ImPlot zoom +
     // pan stay fully interactive (the first user pan/scroll clears the latch in
     // handle_plot_interaction). No per-frame axis pin here.
@@ -823,7 +823,7 @@ void ChartWidget::render_chart() {
                 tpo_zoom_pending_ = false;
             }
         } else if (chart_type_ == ChartType::TPO) {
-            // TPO mode: don't follow live — let user control zoom freely
+            // TPO mode: don't follow live - let user control zoom freely
             ImPlot::SetupAxisLimits(ImAxis_X1, x_min, x_max, ImPlotCond_Once);
         } else if (ctx_.candle_mgr().follow_live() || zoom_clamped) {
             ImPlot::SetupAxisLimits(ImAxis_X1,
@@ -866,7 +866,7 @@ void ChartWidget::render_chart() {
                 y_max = std::max(y_max, bc.high);
             }
         }
-        // Heikin Ashi: frame the DRAWN HA candles, not the real ones — HA bodies
+        // Heikin Ashi: frame the DRAWN HA candles, not the real ones - HA bodies
         // sit inside the real range, so real extents would leave dead space (or,
         // for the building HA candle, clip). Recompute purely from HA extents;
         // if HA has no data in range this leaves y at infinity and the fallback
@@ -975,7 +975,7 @@ void ChartWidget::render_chart() {
 
                 // Viewport-adaptive bucket multiplier: ensure each heatmap cell
                 // is at least min_cell_px pixels tall. This adapts to any coin at
-                // any zoom level — BTC on 1m stays at native resolution, LABUSDT
+                // any zoom level - BTC on 1m stays at native resolution, LABUSDT
                 // on 4h (300%+ range) aggregates into visible bands automatically.
                 // The UHD/HD/SD combo controls min_cell_px (detail preference).
                 const double native_bucket = reconstructor->get_native_bucket_size();
@@ -1038,20 +1038,20 @@ void ChartWidget::render_chart() {
             ProfileScope _ps("LiqField");
             render_liq_dense_field();
         }
-        // 1.6 Liq Levels — discrete OI/positioning liquidation levels (rails), an
+        // 1.6 Liq Levels - discrete OI/positioning liquidation levels (rails), an
         //     independent layer on top of the Field.
         if (liq_heatmap_enabled_ && ct_allows_time_overlays(chart_type_)) {
             ProfileScope _ps("LiqRails");
             render_liquidation_heatmap(visible_x_min, visible_x_max);
         }
-        // 1.62 Liq Levels HL — REAL predictive liq levels (HL census, P2e). Drawn
+        // 1.62 Liq Levels HL - REAL predictive liq levels (HL census, P2e). Drawn
         //      over the modelled layers: ground truth outranks the model. Underlying-
         //      keyed, so it also overlays non-HL charts of the same underlying.
         if (liq_census_enabled_ && ct_allows_time_overlays(chart_type_)) {
             ProfileScope _ps("LiqCensus");
             render_liq_census();
         }
-        // 1.65 Liq Profile — smoothed price-marginal of the Field; independent
+        // 1.65 Liq Profile - smoothed price-marginal of the Field; independent
         //      toggle, candle-derived (needs no liq subscription or snapshot).
         if (liq_profile_enabled_ && ct_allows_time_overlays(chart_type_)) {
             ProfileScope _ps("LiqProf");
@@ -1071,7 +1071,7 @@ void ChartWidget::render_chart() {
                 &ctx_.stream_mgr());
             render_vpvr_profile();
         }
-        // 2. Foreground price geometry — dispatch over ChartType.
+        // 2. Foreground price geometry - dispatch over ChartType.
         //    Candles / Footprint draw the REAL OHLC arrays; Heikin Ashi draws the
         //    derived HA arrays through the same plot_candles tiers; Line strokes a
         //    close-price polyline; TPO renders market-profile columns.
@@ -1133,7 +1133,7 @@ void ChartWidget::render_chart() {
             ProfileScope _ps("ScrubPreview");
             render_scrub_preview(visible_x_min, std::max(visible_x_max, x_max));
         }
-        // 2.1 Observed — real @forceOrder liquidation markers (WS4). Drawn OVER the
+        // 2.1 Observed - real @forceOrder liquidation markers (WS4). Drawn OVER the
         //     candles: liquidations fire at traded prices, so an under-candle layer
         //     would be occluded by the very candles that consumed them.
         if (liq_observed_enabled_ && ct_allows_time_overlays(chart_type_)) {
@@ -1207,14 +1207,14 @@ void ChartWidget::render_chart() {
 
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Renko (ChartType::Renko) — price-driven bricks on a brick-index X-axis.
+// Renko (ChartType::Renko) - price-driven bricks on a brick-index X-axis.
 // Self-contained render path; the time-axis render_chart() is untouched.
 // See core/renko_builder.h.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Resolved brick size in price units. Manual override wins; otherwise the auto
 // size resolves ONCE from the latest price and freezes (recomputing per frame as
-// price moves would repaint the whole brick sequence — the plan's determinism /
+// price moves would repaint the whole brick sequence - the plan's determinism /
 // "store the resolved size" requirement).
 double ChartWidget::renko_resolved_size() {
     if (renko_brick_ticks_ > 0) {                       // manual override
@@ -1223,7 +1223,7 @@ double ChartWidget::renko_resolved_size() {
     }
     if (renko_resolved_ticks_ > 0)                       // auto, already frozen
         return static_cast<double>(renko_resolved_ticks_) * tick_size_;
-    // Auto = volatility-adaptive ATR(14) of the loaded candles — the TradingView /
+    // Auto = volatility-adaptive ATR(14) of the loaded candles - the TradingView /
     // Binance "Renko [ATR(14), x]" default. Resolved ONCE and frozen so it stays
     // replay-stable (the deferred-ATR concern was CONTINUOUS recompute/repaint;
     // freezing avoids that). A fixed %-of-price default was ~6x too small on a
@@ -1270,8 +1270,8 @@ void ChartWidget::ensure_renko() {
     const size_t  n    = std::min(closes.size(), ts.size());
     // Key on the last CLOSED candle's TIMESTAMP, never its close. The client
     // mutates a closed candle's close during replay (finalize-replace, late
-    // trades, 15s-tick merges); keying on close would re-run build() and — with
-    // the append-only builder ignoring the tail anyway — do nothing useful, while
+    // trades, 15s-tick merges); keying on close would re-run build() and - with
+    // the append-only builder ignoring the tail anyway - do nothing useful, while
     // keying on close in a full-rebuild world was what un-printed bricks. The
     // timestamp only changes when a genuinely new candle closes (append) or the
     // set is reloaded (seek / timeframe), which is exactly when we must fold.
@@ -1282,7 +1282,7 @@ void ChartWidget::ensure_renko() {
     if (dirty && bsize > 0.0) {
         // close_times parallel to closes (both from the same candle deque). The
         // rebuild is infrequent (candle finalize / scroll-load), so the transient
-        // int64 copy of the timestamps is fine. build() is append-only — it folds
+        // int64 copy of the timestamps is fine. build() is append-only - it folds
         // only the candles newer than the ones already consumed.
         static thread_local std::vector<int64_t> times;
         times.clear();
@@ -1296,10 +1296,10 @@ void ChartWidget::ensure_renko() {
     }
 
     // Live leading edge: fold the building (unfinished) candle into a SEPARATE
-    // provisional list. These bricks repaint as live price moves — a retrace can
+    // provisional list. These bricks repaint as live price moves - a retrace can
     // remove the rightmost one, then it re-forms. That IS correct Renko: Binance's
     // live Renko (and others) repaint the forming brick the same way. They render
-    // SOLID (see plot_renko), identical to committed bricks — the only earlier
+    // SOLID (see plot_renko), identical to committed bricks - the only earlier
     // mistake was drawing them hollow. Crucially they live in building_, NOT
     // bricks_, so a repaint here can never touch a PUBLISHED (closed-candle) brick;
     // those stay append-only and permanent. On candle close they hand off to
@@ -1331,7 +1331,7 @@ void ChartWidget::plot_renko(size_t i0, size_t i1) {
     const double kGap = compressed ? 0.0 : 0.08;
 
     ImPlot::PushPlotClipRect();
-    // All bricks draw SOLID — committed (closed-candle) AND the live provisional
+    // All bricks draw SOLID - committed (closed-candle) AND the live provisional
     // ones (building candle, indices >= renko_.bricks().size()). No hollow: the
     // live leading edge looks identical to the rest; it just repaints as price
     // moves (correct Renko), while committed bricks stay permanent (append-only).
@@ -1356,7 +1356,7 @@ void ChartWidget::plot_renko(size_t i0, size_t i1) {
 
 // X ticks EVENLY spaced by brick index (the TradingView Renko look): uniform
 // on-screen spacing, each label showing that brick's actual close time. Renko
-// time is non-uniform, so the labels are NOT round clock values — but the SPACING
+// time is non-uniform, so the labels are NOT round clock values - but the SPACING
 // is consistent, which is what matters (the earlier wall-clock scheme gave clean
 // times but wildly uneven gaps, since a quiet stretch packs few bricks into a
 // long time and a busy one packs many into a short time).
@@ -1479,7 +1479,7 @@ void ChartWidget::render_chart_renko() {
             zoom_clamped = true;
         }
         if (renko_reanchor) {
-            // Prepend just happened — force the shifted range so the view stays on
+            // Prepend just happened - force the shifted range so the view stays on
             // the same bricks (one frame; ImPlot keeps it afterwards under Once).
             ImPlot::SetupAxisLimits(ImAxis_X1, last_visible_range_.X.Min,
                                     last_visible_range_.X.Max, ImPlotCond_Always);
@@ -1499,7 +1499,7 @@ void ChartWidget::render_chart_renko() {
         size_t i1 = (vis_i_max <= 0.0) ? n_total : std::min(n_total, static_cast<size_t>(std::ceil(vis_i_max)) + 1);
         if (i1 < i0) i1 = i0;
 
-        // Live price (REAL close, never a brick level) — drives the forming brick,
+        // Live price (REAL close, never a brick level) - drives the forming brick,
         // the current-price tag, AND the Y-limits (so the forming tip never clips).
         double cur_price = 0.0; bool have_price = false, bullish = true;
         if (ctx_.candle_mgr().has_building_candle()) {
@@ -1540,7 +1540,7 @@ void ChartWidget::render_chart_renko() {
             // candle-time based). When scrolled to the oldest bricks this sits near
             // the oldest candle, so one batch loads; the re-anchor above then keeps
             // the view on the same bricks, moving the left edge far enough from the
-            // (now much older) oldest candle that the loader stops — one batch per
+            // (now much older) oldest candle that the loader stops - one batch per
             // scroll gesture, exactly like the candle chart. NO oldest-candle
             // override (that reported "at the edge" forever → back-loaded one tiny
             // batch per cooldown, thrashing the view + ticks).
@@ -1674,7 +1674,7 @@ void ChartWidget::render_chart_renko() {
                              IM_COL32(230, 230, 235, 255), tl);
             }
         }
-        // Renko context menu (rendered every frame so it stays open once opened) —
+        // Renko context menu (rendered every frame so it stays open once opened) -
         // replay actions keyed to the brick's source-candle time, plus copy price.
         // 450 wide (measured): narrower clipped the MenuItem shortcut values
         // the replay datetime, the copy price). The widest label ("Replay
@@ -1693,7 +1693,7 @@ void ChartWidget::render_chart_renko() {
         if (ImGui::BeginPopup("##RenkoCtx")) {
             // Menu chrome is monospace (JetBrains Mono) to match the design (1f).
             ImGui::PushFont(Theme::Fonts::mono_sm());
-            // Investigate this minute — same placement rule as the candle
+            // Investigate this minute - same placement rule as the candle
             // menu: the read sits above the replay block.
             render_investigate_menu_item(pair_, context_menu_minute_ms_);
             ImGui::Separator();
@@ -1752,10 +1752,10 @@ void ChartWidget::render_renko_settings_popup() {
 }
 
 
-// Candle Drawing — reads SoA from CandleManager
+// Candle Drawing - reads SoA from CandleManager
 // (replaces both plot_candles_simple and CustomImPlot::PlotCandlestick)
 
-// OHLCV readout — top-left overlay, hovered candle (or latest when idle)
+// OHLCV readout - top-left overlay, hovered candle (or latest when idle)
 void ChartWidget::draw_ohlc_readout() const {
     const auto& ts = ctx_.candle_mgr().timestamps();
     if (ts.empty()) return;
@@ -1797,7 +1797,7 @@ void ChartWidget::draw_ohlc_readout() const {
         pos.x += ImGui::CalcTextSize(num).x + 10.0f;
     };
     if (chart_type_ == ChartType::Line) {
-        // Line mode shows Close only (the real close — the line IS the close).
+        // Line mode shows Close only (the real close - the line IS the close).
         field("C", closes[idx], false);
     } else {
         field("O", opens[idx], false);
@@ -1886,7 +1886,7 @@ void ChartWidget::plot_candles(double visible_x_min, double visible_x_max,
     const auto& closes = src_closes;
     const auto& lows = src_lows;
     const auto& highs = src_highs;
-    // §3C — prefer the live building candle over any finalized candle sharing its
+    // §3C - prefer the live building candle over any finalized candle sharing its
     // timestamp. A transient finalized+building coexistence (e.g. the wall-clock
     // finalizer racing a late server partial on 5m/15m) otherwise leaves the STALE
     // finalized candle drawn while the live price tag (= building close) floats above
@@ -1966,10 +1966,10 @@ void ChartWidget::plot_candles(double visible_x_min, double visible_x_max,
         }
     }
     // Draw building candle. Any finalized candle sharing this timestamp was skipped in
-    // the loops above (see building_x), so we ALWAYS draw the live building candle here —
+    // the loops above (see building_x), so we ALWAYS draw the live building candle here -
     // it owns the right edge and its close sits on the price tag. (Previously this was
     // skipped whenever a finalized candle shared the ts, which left the STALE finalized
-    // candle showing while the live price floated above it — the 5m/15m "price not
+    // candle showing while the live price floated above it - the 5m/15m "price not
     // pinned / building candle invisible" bug.)
     if (bld.valid && building_x >= 0.0) {
         const double live_x = building_x;
@@ -1993,7 +1993,7 @@ void ChartWidget::plot_candles(double visible_x_min, double visible_x_max,
     ImPlot::PopPlotClipRect();
 }
 
-// Line chart (ChartType::Line) — a close-price polyline vs time. Real-time
+// Line chart (ChartType::Line) - a close-price polyline vs time. Real-time
 // resolution (§5.1): the recent-tick ring buffer (CandleManager::tick_times /
 // tick_prices) supplies points across the window it covers, so the line moves
 // tick-by-tick; for the region OLDER than the oldest retained tick we fall back
@@ -2091,7 +2091,7 @@ void ChartWidget::plot_line(double visible_x_min, double visible_x_max) {
         ImPlot::PopPlotClipRect();
     }
 
-    // RT (real-time view): a small filled dot on the live edge — the newest
+    // RT (real-time view): a small filled dot on the live edge - the newest
     // point (building candle close, else newest tick, else last candle close).
     // Subtle marker so the eye lands on "now". Only in RT mode.
     if (rt_mode_) {
@@ -2281,7 +2281,7 @@ void ChartWidget::render_controls() {
                 d->AddRectFilled(ImVec2(ox + 7.0f,  oy + 2.5f), ImVec2(ox + 9.0f,  oy + 11.5f), col);
                 d->AddRectFilled(ImVec2(ox + 9.5f,  oy + 5.0f), ImVec2(ox + 11.5f, oy + 9.0f),  col);
                 break;
-            case 6:  // Renko: stepped bricks (staircase — filled, hollow, filled)
+            case 6:  // Renko: stepped bricks (staircase - filled, hollow, filled)
                 d->AddRectFilled(ImVec2(ox + 1.0f,  oy + 8.0f),  ImVec2(ox + 5.0f,  oy + 11.5f), col);
                 d->AddRect(ImVec2(ox + 5.5f,  oy + 4.5f), ImVec2(ox + 9.5f,  oy + 8.0f), col, 0.0f, 0, 1.1f);
                 d->AddRectFilled(ImVec2(ox + 10.0f, oy + 1.0f),  ImVec2(ox + 14.0f, oy + 4.5f),  col);
@@ -2447,7 +2447,7 @@ void ChartWidget::render_controls() {
         cx += w + 12.0f;
     }
 
-    // Draw button — the rail's tool list as a dropdown (icons left of labels).
+    // Draw button - the rail's tool list as a dropdown (icons left of labels).
     // Gated with the in-chart rail: drawing chrome hides in embedded education
     // chromes, pack mode and clip-recorder focus.
     {
@@ -2528,14 +2528,14 @@ void ChartWidget::render_controls() {
         ImGui::EndPopup();
     }
 
-    // (RT toggle relocated to the TIMEFRAME dropdown — app_shell render_tf_menu.
+    // (RT toggle relocated to the TIMEFRAME dropdown - app_shell render_tf_menu.
     //  It now applies to every chart type, not just the Line, so the old Line-
     //  only toolbar pill was removed.)
 
 
     // Layer toggles + LIQ LEV now live inside the layers menu (defined below).
 
-    // Orderbook-heatmap settings — opened by right-clicking the Heatmap pill.
+    // Orderbook-heatmap settings - opened by right-clicking the Heatmap pill.
     if (ImGui::BeginPopup("hm_settings")) {
         ImGui::SetNextItemWidth(120);
         int offset_sec = static_cast<int>(heatmap_time_offset_ms_ / 1000);
@@ -2787,11 +2787,11 @@ void ChartWidget::render_controls() {
             else ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Layer);
         }
         if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) open_liq_settings_ = true;
-        // Liq Levels HL = REAL predictive levels from the HL census (Pro, P2e) —
+        // Liq Levels HL = REAL predictive levels from the HL census (Pro, P2e) -
         // ground truth, never folded into the modelled "Liq Levels" above. Keyed
         // by underlying, so it's offered on any venue's chart; greyed (inert, no
         // padlock) when the underlying has no HL market. The ticker24h hl feed is
-        // the market registry — before it loads, "unknown" stays offered and data
+        // the market registry - before it loads, "unknown" stays offered and data
         // arrival decides (the layer's own NO DATA badge covers the miss).
         {
             const bool hl_known = TickerManager::instance().get("hl", liq_census_pair_.symbol) != nullptr;
@@ -3005,7 +3005,7 @@ void ChartWidget::render_controls() {
                 ImGui::Dummy(ImVec2(pww, 26.0f));
             };
 
-            // one indicator row — label + square toggle switch (1k). Toggles
+            // one indicator row - label + square toggle switch (1k). Toggles
             // flip live; the menu stays open for multi-change. Returns 0 none,
             // 1 left-click (toggle), 2 right-click (settings).
             auto indi_row = [&](const char* label, bool active, const char* tip) -> int {
@@ -3105,7 +3105,7 @@ void ChartWidget::render_controls() {
                 }
             }
 
-            // VPIN / Toxicity (Indicators V1 Wave B — TRADER+)
+            // VPIN / Toxicity (Indicators V1 Wave B - TRADER+)
             {
                 const bool active = indicator_mgr_.has_indicator_of_type<Indicators::VPINIndicator>();
                 if (indi_row("VPIN \xC2\xB7 Toxicity", active,
@@ -3167,7 +3167,7 @@ void ChartWidget::render_controls() {
     }
     // ── Settings popups (opened by right-clicking indicator items) ────────
     // These must be at toolbar scope, not inside the Indicators popup.
-    // Liq heatmap settings — the design floating panel (Style / Intensity),
+    // Liq heatmap settings - the design floating panel (Style / Intensity),
     // wired straight to the Field's chart_widget.h knobs. Low/Peak/tick-per-row/
     // half-life are baked into the cache at build → invalidate on change.
     liq_settings_panel_.set_panel_height(300.0f);
@@ -3393,7 +3393,7 @@ void ChartWidget::handle_plot_interaction() {
         crosshair_state_.hovered_y_max = limits.Y.Max;
 
         // Detect user interaction → stop following live (a drawing drag is
-        // not a pan — the layer suppresses the pan, so keep follow-live)
+        // not a pan - the layer suppresses the pan, so keep follow-live)
         if (ImGui::GetIO().MouseWheel != 0 ||
             (!draw_cap && ImGui::IsMouseDragging(ImGuiMouseButton_Left))) {
             ctx_.candle_mgr().set_follow_live(false);
@@ -3581,7 +3581,7 @@ void ChartWidget::handle_plot_interaction() {
         char price_buf[32];
         fmt_.format_price(price_buf, sizeof(price_buf), context_menu_price_);
 
-        // Add alert — live chart only (an alert on a historical replay is meaningless).
+        // Add alert - live chart only (an alert on a historical replay is meaningless).
         if (!replaying) {
             if (ImGui::MenuItem("Add alert", price_buf)) {
                 PriceAlert al;
@@ -3599,7 +3599,7 @@ void ChartWidget::handle_plot_interaction() {
             }
         }
 
-        // Measure ruler — anchor here; readout follows the cursor (click/Esc clears).
+        // Measure ruler - anchor here; readout follows the cursor (click/Esc clears).
         if (ImGui::MenuItem("Measure from here")) {
             measure_.active = true;
             measure_.t0_ms  = context_menu_time_ms_;
@@ -3607,7 +3607,7 @@ void ChartWidget::handle_plot_interaction() {
             ImGui::CloseCurrentPopup();
         }
 
-        // Investigate this minute — a READ, not a replay, so it sits above the
+        // Investigate this minute - a READ, not a replay, so it sits above the
         // replay block. Uses the MINUTE capture (context_menu_minute_ms_), never
         // the timeframe-floored replay timestamp beside it.
         render_investigate_menu_item(pair_, context_menu_minute_ms_);
@@ -3999,7 +3999,7 @@ void ChartWidget::update_oi_indicator() {
     ind->update();
 }
 
-// ═══ VPIN / Toxicity Indicator (Indicators V1 S1b — pathfinder) ═══
+// ═══ VPIN / Toxicity Indicator (Indicators V1 S1b - pathfinder) ═══
 
 void ChartWidget::add_vpin_indicator() {
     if (indicator_mgr_.has_indicator_of_type<Indicators::VPINIndicator>()) return;
@@ -4020,7 +4020,7 @@ void ChartWidget::update_vpin_indicator() {
 
     const bool is_replay = ctx_.candle_mgr().replay_start_time_ms() > 0;
 
-    // Live STATE_VPIN subscribe — lazy, once, never during replay (the
+    // Live STATE_VPIN subscribe - lazy, once, never during replay (the
     // replay StreamManager is subscribe-inert anyway; seeds deliver data).
     if (!vpin_subscribed_ && !is_replay) {
         const StreamKey key{pair_, Terminal::Stream::VPINState, 0};
@@ -4030,7 +4030,7 @@ void ChartWidget::update_vpin_indicator() {
 
     // Chart-load history (F3 absolute range + chunk-until-covered).
     // The server keeps the MOST RECENT `count` rows of a window, so a wide
-    // window truncates its OLD side — coverage must converge by chunking
+    // window truncates its OLD side - coverage must converge by chunking
     // [candle_front, series_oldest) until the gap closes, a chunk lands
     // empty (series floor), or the initial response is still in flight.
     // This also covers scroll-back: candle backfill moves the target left
@@ -4055,7 +4055,7 @@ void ChartWidget::update_vpin_indicator() {
                         ctx_.stream_mgr().request_historical_vpin(
                             pair_, target_ms, oldest_ms, 5000);
                     } else {
-                        // A chunk landed with nothing older — stop asking.
+                        // A chunk landed with nothing older - stop asking.
                         vpin_hist_exhausted_ = true;
                     }
                 }
@@ -4106,14 +4106,14 @@ void ChartWidget::setup_time_axis_ticks(double visible_x_min, double visible_x_m
 void ChartWidget::generate_time_ticks(double visible_x_min, double visible_x_max) const {
     ProfileScope _ps("TimeTicks");
     // Cached tick set (FPS item, 2026-07-05). The label SET only changes when
-    // the first visible tick / interval / count changes — under live-follow at
+    // the first visible tick / interval / count changes - under live-follow at
     // 160fps that's once per interval crossing, not per frame. Cache key holds
     // every format-affecting input (the audit's "zoom-dependent format"
     // concern: interval + count capture zoom; chart_type + tf capture mode).
     // Storage is static and only mutated on a key change, then ptrs are built
     // in a SECOND pass (emplace-as-you-go dangled SSO c_str()s on realloc).
     // ImPlot::SetupAxisTicks copies labels into the frame's Ticker each call,
-    // so it still runs every frame — browser-Intl formatting is skipped.
+    // so it still runs every frame - browser-Intl formatting is skipped.
     static std::vector<double> tick_positions;
     static std::vector<std::string> tick_labels_storage;
     static std::vector<const char*> tick_labels_ptrs;
@@ -4131,7 +4131,7 @@ void ChartWidget::generate_time_ticks(double visible_x_min, double visible_x_max
         }
     };
 
-    // ── Resolve (first_tick, interval, count) arithmetically — no tm calls ──
+    // ── Resolve (first_tick, interval, count) arithmetically - no tm calls ──
     int64_t interval_s, first_tick_s;
     int64_t tf_sec = 0;
     if (chart_type_ == ChartType::TPO) {
@@ -4227,7 +4227,7 @@ void ChartWidget::generate_time_ticks(double visible_x_min, double visible_x_max
 int64_t ChartWidget::calculate_tick_interval(double visible_candles) const {
     const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
     const double visible_span_seconds = visible_candles * static_cast<double>(tf_sec);
-    // static constexpr — the old std::vector heap-allocated EVERY FRAME.
+    // static constexpr - the old std::vector heap-allocated EVERY FRAME.
     static constexpr int64_t nice_intervals[] = {
         1, 2, 5, 10, 15, 20, 30, 60, 120, 180, 300, 600, 900, 1200, 1800, 2700,
         3600, 5400, 7200, 10800, 14400, 18000, 21600,
@@ -4395,7 +4395,7 @@ void ChartWidget::update_heatmap() {
     constexpr int64_t threshold_ms = 30LL * 60 * 1000;
 
     // Zoom-aware threshold: when zoomed out far, the 30-minute threshold
-    // is too small — the viewport edge can be hours past the data boundary.
+    // is too small - the viewport edge can be hours past the data boundary.
     // Scale threshold to 20% of visible range or 30 min, whichever is larger.
     const int64_t vis_span = display_time_end - display_time_start;
     const int64_t dynamic_threshold = std::max(threshold_ms, vis_span / 5);
@@ -4722,10 +4722,10 @@ void ChartWidget::update_liq_heatmap_scroll() {
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         now - last_liq_heatmap_scroll_load_time_).count();
 
-    // Prevent duplicate requests — use 2s cooldown to wait for in-flight data
+    // Prevent duplicate requests - use 2s cooldown to wait for in-flight data
     if ((missing_left || missing_right) && elapsed > 2000) {
         // Check if previous left-scroll request produced no meaningful data
-        // (data boundary reached — compressed chunks or no data)
+        // (data boundary reached - compressed chunks or no data)
         if (missing_left && liq_heatmap_prev_available_min_ > 0) {
             const int64_t tf_ms = ctx_.candle_mgr().timeframe_seconds() * 1000LL;
             const int64_t advance = liq_heatmap_prev_available_min_ - available_min;
@@ -4761,7 +4761,7 @@ void ChartWidget::update_liq_heatmap_scroll() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// VPVR (Volume Profile Visible Range) — sidebar histogram
+// VPVR (Volume Profile Visible Range) - sidebar histogram
 // ═══════════════════════════════════════════════════════════════════════════════
 
 double ChartWidget::compute_vpvr_tick_per_row(double price_range, double plot_height) const {
@@ -4856,7 +4856,7 @@ void ChartWidget::render_vpvr_profile() {
             break;
         }
         case VolumeProfileManager::Mode::TotalVolume: {
-            // Single neutral bar — brand-tinted, VA-dimmed
+            // Single neutral bar - brand-tinted, VA-dimmed
             pb.primary_value = norm;
             pb.primary_color = tok(Theme::Tokens::BRAND);
             pb.primary_alpha = va_alpha * 0.75f;
@@ -4881,7 +4881,7 @@ void ChartWidget::render_vpvr_profile() {
         }
         }
 
-        // POC highlight — WARN amber edge
+        // POC highlight - WARN amber edge
         if (lvl.is_poc) {
             pb.show_edge = true;
             pb.edge_color = tok(Theme::Tokens::WARN);
@@ -5007,7 +5007,7 @@ void ChartWidget::render_liq_timeline() {
                 target_multiplier = liq_ticks_per_row_;
             }
         } else {
-            // Auto: pixel-space adaptive — ensure each liq band is at least
+            // Auto: pixel-space adaptive - ensure each liq band is at least
             // ~3px tall. This works for both BTC (tight range, many rows fit)
             // and LABUSDT on 4h (300%+ range, needs heavy aggregation).
             // The old fixed target of 200 rows broke on volatile alts where
@@ -5033,7 +5033,7 @@ void ChartWidget::render_liq_timeline() {
     // Push opacity and color scale to the reconstructor
     reconstructor->set_opacity(liq_opacity_);
     // Historical field: never cone-fade by the CURRENT mark (that erases past bands far from
-    // price — preserving them is the whole point). GL_NEAREST + extend-levels give MMT's crisp
+    // price - preserving them is the whole point). GL_NEAREST + extend-levels give MMT's crisp
     // horizontal streaks rather than a smeared gaussian cloud.
     reconstructor->set_reach_modulation(false);
     reconstructor->set_extend_levels(true);
@@ -5050,7 +5050,7 @@ void ChartWidget::render_liq_timeline() {
         const ImPlotRect limits = ImPlot::GetPlotLimits();
         auto stats = reconstructor->get_viewport_stats(limits.Y.Min, limits.Y.Max);
         if (stats.count > 10 && stats.stddev > 0.001f) {
-            // V7d: Final tuning — show more of the purple/magenta mid-range so
+            // V7d: Final tuning - show more of the purple/magenta mid-range so
             // clusters feel substantial with visible halos, not just isolated dots.
             // Low = mean - 0.2σ: slightly below mean so the upper ~60% of data shows.
             // Peak = mean + 2.5σ: tighter peak brings more values into orange/yellow range.
@@ -5062,8 +5062,8 @@ void ChartWidget::render_liq_timeline() {
             // lines. (Diagnostic: if survivors form lines, the data has persistent levels and
             // this was a render problem; if they scatter, the levels jitter → estimator work.)
             // V9: dense floor (was the V8 "peaky" mean+1σ diagnostic, which discarded
-            // everything but the strong tail → rails-only). That diagnostic passed —
-            // survivors form clean horizontal lines = render problem, data good — so
+            // everything but the strong tail → rails-only). That diagnostic passed -
+            // survivors form clean horizontal lines = render problem, data good - so
             // restore the dense setting: low just below the mean renders the field as
             // the purple/magenta background; peak at +2.5σ keeps dominant levels bright.
             liq_color_low_ = std::max(0.0f, stats.mean - 0.5f * stats.stddev);
@@ -5097,7 +5097,7 @@ void ChartWidget::toggle_liquidation_heatmap() {
 }
 
 // "Liq Levels HL" (P2e): the census layer's subscribe follows the pill, on the
-// UNDERLYING-keyed HL pair (not pair_ — cross-venue overlay). Same live-only
+// UNDERLYING-keyed HL pair (not pair_ - cross-venue overlay). Same live-only
 // semantics as toggle_liquidation_heatmap: during replay the StreamManager is
 // subscribe-inert and reset_overlay_subscriptions re-arms the flag on exit.
 void ChartWidget::toggle_liq_census() {
@@ -5125,7 +5125,7 @@ void ChartWidget::reset_overlay_subscriptions() {
     vpvr_last_request_start_ = 0;
     vpvr_last_request_end_ = 0;
     // VPIN pane: fresh SeriesCache on the new context (replay ctx starts
-    // empty and is seed-fed; live ctx refills via re-request) — force
+    // empty and is seed-fed; live ctx refills via re-request) - force
     // re-subscribe + re-request + repopulate.
     vpin_subscribed_ = false;
     vpin_history_requested_ = false;
@@ -5138,10 +5138,10 @@ void ChartWidget::reset_overlay_subscriptions() {
     pattern_overlay_active_.fill(false);
 }
 
-// ── Shared liquidation-level SELECTION — used by BOTH the rail render (replay) and the standing-
+// ── Shared liquidation-level SELECTION - used by BOTH the rail render (replay) and the standing-
 // shelf fallback (live). Floors at max*min_frac, sorts by USD desc, merges near-duplicate prices,
 // then caps: per SIDE when per_side_cap>0 (rails), else a single TOTAL cap (shelves). Pure
-// selection — the caller keeps its OWN styling (rails draw LINEAR brightness, shelves SQRT — a
+// selection - the caller keeps its OWN styling (rails draw LINEAR brightness, shelves SQRT - a
 // deliberate difference, see the LIQMAP handoff). lx/rx (the resolved pixel x-span) ride through
 // untouched. out_max_usd returns the pre-floor max for the caller's brightness normalization.
 namespace {
@@ -5182,12 +5182,12 @@ static std::vector<LiqDrawLine> select_liq_lines(
 
 // The stateful per-level discharge tracker (update_liq_discharge_tracker) and liq_level_taken were
 // REMOVED with the rails pivot (2026-06-29). "Taken" is no longer inferred from candle [low,high] on
-// the client — it is the backend RailTracker's consume_ms (the first LAST-PRICE wick-through),
+// the client - it is the backend RailTracker's consume_ms (the first LAST-PRICE wick-through),
 // delivered per rail on the wire and surfaced via BandTrack.consume_ms. No client candle-scan
 // inference.
 // ── Liq Heatmap projection Field (V1) ────────────────────────────────────────────────────
 // MMT-style dense liquidation heatmap, computed CLIENT-SIDE from candles (universal +
-// deterministic — renders on every symbol/timeframe, unlike the OI estimator).
+// deterministic - renders on every symbol/timeframe, unlike the OI estimator).
 //
 // Sentinel end time for a segment that's still PENDING (never consumed) → extends to the live/replay edge.
 static constexpr int64_t LIQ_SEG_PENDING = std::numeric_limits<int64_t>::max();
@@ -5196,12 +5196,12 @@ static constexpr int64_t LIQ_SEG_PENDING = std::numeric_limits<int64_t>::max();
 // loaded candles maintains the fuel currently standing at each price bucket: each candle CONSUMES the
 // fuel its [low,high] trades through (emitting a finished segment, then going dark) and DEPOSITS fresh
 // fuel at its per-tier liquidation prices. A level therefore emits a NEW segment each time it's swept
-// and re-lit — giving the time-varying intensity + dense fill MMT shows (vs the old single-block carve).
+// and re-lit - giving the time-varying intensity + dense fill MMT shows (vs the old single-block carve).
 // Purely candle-derived → identical live and in replay; rebuilt only when the closed-candle set / mask /
 // timeframe changes. §5b(b).
 void ChartWidget::rebuild_liq_field_cache(uint8_t lmask, int64_t tf_ms) {
     // Rebuild spikes attribute to this section in the perf overlay / spike log
-    // (fires on candle-set/mask/TF signature change — frequent during replay).
+    // (fires on candle-set/mask/TF signature change - frequent during replay).
     ProfileScope _ps("LiqRebuild");
     (void)tf_ms;
     liq_field_segs_.clear();
@@ -5215,7 +5215,7 @@ void ChartWidget::rebuild_liq_field_cache(uint8_t lmask, int64_t tf_ms) {
     if (candles.empty() && !has_bld) return;
 
     // LOG-PRICE buckets (2026-07-02d): bucket k = llround(ln(price)/lbw), so a bucket is liq_field_bps_
-    // of its OWN price at every level — uniform relative row thickness across the whole loaded range.
+    // of its OWN price at every level - uniform relative row thickness across the whole loaded range.
     // A LINEAR grid cannot serve a symbol whose price spans several × (TAIKO 8×: one shared bucket was
     // sub-pixel at the top of the range AND rendered as giant solid blocks at the bottom). Log levels
     // are still absolute in price (static across zoom/scroll) and candle-derived (replayable); bucket
@@ -5224,7 +5224,7 @@ void ChartWidget::rebuild_liq_field_cache(uint8_t lmask, int64_t tf_ms) {
     const double lbw = static_cast<double>(std::clamp(liq_field_bps_, 1.0f, 50.0f)) * 1.0e-4;
     const double inv_lbw = 1.0 / lbw;
 
-    // ROBUST relative-volume (anomaly) weight — MEDIAN-relative, log-soft-clipped in step() below.
+    // ROBUST relative-volume (anomaly) weight - MEDIAN-relative, log-soft-clipped in step() below.
     // The old GLOBAL-mean reference let a few mega-volume pump candles inflate the mean and dim every
     // other deposit (TAIKO: the whole consolidation went sub-floor). Median is viewport-independent
     // and insensitive to those outliers, so consolidation fuel and pump fuel stay on comparable scales.
@@ -5239,7 +5239,7 @@ void ChartWidget::rebuild_liq_field_cache(uint8_t lmask, int64_t tf_ms) {
     if (vmed <= 0.0) return;
     const double wcap = std::max(1.0, static_cast<double>(liq_field_wcap_));
     // AGE-DECAY half-life (task-1 belt fix, round 6). Standing fuel decays exponentially with CANDLE
-    // age — deposits from days ago fade unless the bucket keeps being refed. Bounds every bucket's
+    // age - deposits from days ago fade unless the bucket keeps being refed. Bounds every bucket's
     // steady state (no unbounded standing accumulation → no belts at any load length) while keeping
     // the SUM model's wide, structured dynamic range (rounds 4/5 showed the percentile map just
     // re-normalizes any distribution reshaping into soup/all-bright). Purely candle-timestamp-driven:
@@ -5247,9 +5247,9 @@ void ChartWidget::rebuild_liq_field_cache(uint8_t lmask, int64_t tf_ms) {
     // so history stays a fixed record. ≤0 disables.
     const double hl_ms = static_cast<double>(liq_field_halflife_h_) * 3600.0e3;
 
-    // Mass-conserving gaussian deposit kernel (±K buckets; K=0 default — bucket coarseness supplies
+    // Mass-conserving gaussian deposit kernel (±K buckets; K=0 default - bucket coarseness supplies
     // thickness). A fast/vertical move leaves ~1 candle per price level, so point deposits can render
-    // as 1-bucket threads — the kernel spreads each deposit into a legible band. Σkw = 1 keeps total
+    // as 1-bucket threads - the kernel spreads each deposit into a legible band. Σkw = 1 keeps total
     // deposited mass identical to a point deposit, so stacked zones don't inflate the normalization.
     const int K = std::clamp(liq_field_kernel_, 0, 8);
     double kw[9];
@@ -5296,12 +5296,12 @@ void ChartWidget::rebuild_liq_field_cache(uint8_t lmask, int64_t tf_ms) {
         // DEPOSIT: candle opens leveraged size → project to its per-tier liquidation prices.
         const double p = (c.high + c.low + c.close) / 3.0;
         if (p <= 0.0 || c.volume <= 0.0) return;
-        // ANOMALY weight (MMT's flow-deviation crux) with a NEAR-TIER floor — the round-3e statistic,
+        // ANOMALY weight (MMT's flow-deviation crux) with a NEAR-TIER floor - the round-3e statistic,
         // RESTORED. Brightness comes from the EXCESS over baseline volume (log-compressed + capped);
         // the dim per-candle floor trace applies ONLY to the near tiers (50/75/100×, ≤2% offsets),
         // drawing MMT's short in-channel fragments; far tiers (5/10/25×) are excess-only.
         // Rounds 4/5 post-mortem (belts → soup → all-yellow): gating far deposits harder, then
-        // replacing the run SUM with a per-plot MAX, only RESHAPED the intensity distribution — and
+        // replacing the run SUM with a per-plot MAX, only RESHAPED the intensity distribution - and
         // the dual-percentile map ADAPTS to whatever distribution it gets, so both times it re-
         // normalized the whole field bright (and a 93%-mover's pump projections dominated every level
         // under MAX). The sum keeps the wide, structured dynamic range the map needs; the age-decay
@@ -5337,7 +5337,7 @@ void ChartWidget::rebuild_liq_field_cache(uint8_t lmask, int64_t tf_ms) {
     if (has_bld) step(cm.building_candle());
 
     // Flush fuel still standing → PENDING segments that run to the live/replay edge. Pending fuel is
-    // decayed to the latest loaded candle's open (a candle-set timestamp, NOT wall clock — the field
+    // decayed to the latest loaded candle's open (a candle-set timestamp, NOT wall clock - the field
     // stays deterministic between rebuilds and identical in replay).
     int64_t t_ref = candles.empty() ? 0 : candles.back().timestamp_ms;
     if (has_bld) t_ref = std::max(t_ref, cm.building_candle().timestamp_ms);
@@ -5346,7 +5346,7 @@ void ChartWidget::rebuild_liq_field_cache(uint8_t lmask, int64_t tf_ms) {
 
     liq_field_bw_ = lbw;   // stored: LOG bucket width (grid = exp(k·lbw))
 
-    // DUAL-PERCENTILE LOG normalization (on the RAW per-bucket segments, pre-merge) — MMT's Intensity
+    // DUAL-PERCENTILE LOG normalization (on the RAW per-bucket segments, pre-merge) - MMT's Intensity
     // Low/Peak semantics. Segment mass spans orders of magnitude; a single divisor + power curve either
     // crushed the tail (max-norm, the TAIKO vanish) or bunched everything into flat saturated slabs
     // (p98.5 clip, the BTC "colour walls"). t = ln(f/lo)/ln(hi/lo): below p(lo_pct) → dark, p(hi_pct)+
@@ -5373,7 +5373,7 @@ void ChartWidget::rebuild_liq_field_cache(uint8_t lmask, int64_t tf_ms) {
     }
 
     // MERGE pass (perf): fuse vertically-adjacent buckets with the SAME time interval and the same
-    // QUANTIZED normalized intensity into one taller run — the deposit kernel + dense consolidations
+    // QUANTIZED normalized intensity into one taller run - the deposit kernel + dense consolidations
     // emit long identical bucket runs, so this collapses the per-frame AddRectFilled count with no
     // visual change (1/96 of the normalized ramp is under one visible colormap step; the running mean
     // of values inside a shared quantization bin stays inside that bin).
@@ -5443,7 +5443,7 @@ void ChartWidget::ensure_liq_field_cache() {
     }
 }
 
-// Liq Heatmap Field — dense candle×leverage liquidation projection (MMT-style backdrop), 2D time×price.
+// Liq Heatmap Field - dense candle×leverage liquidation projection (MMT-style backdrop), 2D time×price.
 // The field is built as cached horizontal SEGMENTS (rebuild_liq_field_cache) over ALL loaded candles in
 // absolute price buckets, so it's STRICTLY STATIC across zoom/scroll and 100% replayable. This function
 // only maps the visible segments to pixels: each runs from its deposit time to its consume time (or to
@@ -5457,9 +5457,9 @@ void ChartWidget::render_liq_dense_field() {
     if (candles.empty() && !has_bld) return;
 
     const int64_t tf_ms = cm.timeframe_seconds() * 1000;
-    ensure_liq_field_cache();   // shared cache — also feeds the Liq Profile marginal (§8)
+    ensure_liq_field_cache();   // shared cache - also feeds the Liq Profile marginal (§8)
     if (liq_field_segs_.empty() || liq_field_norm_hi_ <= 0.0f || liq_field_bw_ <= 0.0) return;
-    // WS2: texture-quad path — ONE LUT-shaded GPU quad per frame. Returns false
+    // WS2: texture-quad path - ONE LUT-shaded GPU quad per frame. Returns false
     // on any unsupported case (rows > 4096, shader init failure) → the rect
     // path below stays the A/B fallback (Tweaks → LIQ FIELD RENDER).
     if (liq_field_use_texture_ && render_liq_field_textured(tf_ms)) return;
@@ -5473,7 +5473,7 @@ void ChartWidget::render_liq_dense_field() {
     const ImVec2 plot_size = ImPlot::GetPlotSize();
     if (plot_size.x <= 0.0f || plot_size.y <= 0.0f) return;
     ImDrawList* dl = ImPlot::GetPlotDrawList();
-    const double x_ref = lims.X.Min;   // any X — price→pixel-y is X-independent
+    const double x_ref = lims.X.Min;   // any X - price→pixel-y is X-independent
 
     const float x_left  = plot_pos.x;
     const float x_right = plot_pos.x + plot_size.x;
@@ -5498,12 +5498,12 @@ void ChartWidget::render_liq_dense_field() {
             x_live, x_right)
         : x_right;
     // Base pending right edge = live edge + a small forward magnet. With liq_field_extend_ on, each
-    // pending band instead projects right of the live edge ∝ its own strength (x_pend in the loop) —
+    // pending band instead projects right of the live edge ∝ its own strength (x_pend in the loop) -
     // the MMT future cascade, where the projection length doubles as the histogram bar.
     const float x_edge = std::min(x_projection_end, x_live + plot_size.x * 0.06f);
 
     // Live building-candle carve: while the current candle trades through a price, pending fuel there
-    // stops at the candle NOW (no candle-close lag) — the overlap fix, applied per-frame at render.
+    // stops at the candle NOW (no candle-close lag) - the overlap fix, applied per-frame at render.
     double bld_lo = 1.0, bld_hi = 0.0; int64_t bld_ms = 0;
     if (has_bld) { const auto& b = cm.building_candle(); bld_lo = b.low; bld_hi = b.high; bld_ms = b.timestamp_ms; }
 
@@ -5540,7 +5540,7 @@ void ChartWidget::render_liq_dense_field() {
     // One rect per (sub-)run: [p_lo..p_hi] are bucket CENTERS, drawn ± half a bucket (ratio) tall.
     // Rows are clamped to liq_field_min_row_px_ tall (expanded symmetrically about their center) so
     // alt-tier rows on wide-span movers stay legible bands instead of sub-pixel hairlines (design
-    // 2026-07-02 — replaces the ±1 deposit kernel on the render side).
+    // 2026-07-02 - replaces the ±1 deposit kernel on the render side).
     const float min_row_px = std::max(1.0f, liq_field_min_row_px_);
     auto emit_rect = [&](float p_lo, float p_hi, float xa, float xb, ImU32 col) {
         if (p_hi < p_lo * r_eps_m || xb - xa < 1.0f) return;
@@ -5557,7 +5557,7 @@ void ChartWidget::render_liq_dense_field() {
 
     // Pending fuel = its history run + the forward CASCADE right of the live edge (design `cascade`
     // spec): the projection drops to liq_cascade_alpha_ × the history alpha, and its tail steps down
-    // at kLiqCascadeTailFrac/Alpha — 88/95/100% of the projection length at 100/55/28% alpha (interim;
+    // at kLiqCascadeTailFrac/Alpha - 88/95/100% of the projection length at 100/55/28% alpha (interim;
     // the texture-quad pass will replace the steps with a linear fade over the final 12%).
     auto emit_pending = [&](float p_lo, float p_hi, float pxa, float pxb,
                             uint8_t cr, uint8_t cg, uint8_t cb, int ra) {
@@ -5620,7 +5620,7 @@ void ChartWidget::render_liq_dense_field() {
             continue;
         }
         // Standing fuel: history runs [xa .. live edge]; beyond the live edge it projects forward by a
-        // length ∝ its strength (MMT future cascade — strong magnets reach the right edge, weak fuel
+        // length ∝ its strength (MMT future cascade - strong magnets reach the right edge, weak fuel
         // is a stub, so the projection doubles as a price-anchored histogram). Carve where the
         // building candle is trading NOW; merged runs are split so the carve stays per-bucket exact.
         float x_pend = x_edge;
@@ -5641,7 +5641,7 @@ void ChartWidget::render_liq_dense_field() {
             emit_pending(sg.price_lo, sg.price_hi, xa, x_pend, cr, cg, cb, ra);
         }
     }
-    // 1px live-edge seam (design `cascade.seamPx/seamColor`) — the visual boundary between the
+    // 1px live-edge seam (design `cascade.seamPx/seamColor`) - the visual boundary between the
     // static history and the forward cascade projection.
     if (latest_ms > 0 && x_live > x_left + 1.0f && x_live < x_right - 1.0f)
         dl->AddLine(ImVec2(x_live, plot_pos.y), ImVec2(x_live, plot_pos.y + plot_size.y),
@@ -5649,7 +5649,7 @@ void ChartWidget::render_liq_dense_field() {
     ImPlot::PopPlotClipRect();
 }
 
-// WS2 — the Field as ONE LUT-shaded textured quad.
+// WS2 - the Field as ONE LUT-shaded textured quad.
 // RENDER-ONLY: the segment cache stays the source of truth. The cache is
 // rasterized into an R8 log-grid texture on rebuild (keyed by
 // liq_field_rebuild_gen_), the live column (building-candle carve) + the
@@ -5687,7 +5687,7 @@ bool ChartWidget::render_liq_field_textured(int64_t tf_ms) {
     LiqFieldTextureRenderer::FrameParams fp;
     fp.latest_ms = latest_ms;
     if (has_bld) {
-        // Live building-candle carve band — the same bucket-grid math as the
+        // Live building-candle carve band - the same bucket-grid math as the
         // rect path + the Profile (first/last carved bucket ±1 around range).
         const auto& b = cm.building_candle();
         if (b.high >= b.low && b.low > 0.0) {
@@ -5714,7 +5714,7 @@ bool ChartWidget::render_liq_field_textured(int64_t tf_ms) {
     const float x_live = liq_field_tex_.render(fp);
     if (x_live < 0.0f) return true;   // valid raster; nothing visible this frame
 
-    // 1px live-edge seam (design `cascade.seamPx/seamColor`) — same as the rect path.
+    // 1px live-edge seam (design `cascade.seamPx/seamColor`) - same as the rect path.
     const ImVec2 plot_pos  = ImPlot::GetPlotPos();
     const ImVec2 plot_size = ImPlot::GetPlotSize();
     if (x_live > plot_pos.x + 1.0f && x_live < plot_pos.x + plot_size.x - 1.0f) {
@@ -5727,12 +5727,12 @@ bool ChartWidget::render_liq_field_textured(int64_t tf_ms) {
     return true;
 }
 
-// WS4 — Observed layer (§7): discrete REAL @forceOrder liquidations as side-tinted dots,
-// area ∝ USD. The fact layer against the estimated Field — deliberately a different visual
+// WS4 - Observed layer (§7): discrete REAL @forceOrder liquidations as side-tinted dots,
+// area ∝ USD. The fact layer against the estimated Field - deliberately a different visual
 // grammar (glyphs, not bands). Forced BUY = a SHORT was liquidated (tint Tokens::UP, the
 // buy-side force); forced SELL = a LONG was liquidated (Tokens::DOWN). Events come from
-// LiquidationHeatmapManager::observed_events — live stream, archive bundle, or the replay
-// liquidation_events DB seed — always time-sorted, so the visible window binary-searches.
+// LiquidationHeatmapManager::observed_events - live stream, archive bundle, or the replay
+// liquidation_events DB seed - always time-sorted, so the visible window binary-searches.
 // Replay correctness needs no special casing here: events are delivered in playback order
 // and trimmed on rewind, so nothing past the playback head can exist in the store.
 void ChartWidget::render_liq_observed() {
@@ -5754,7 +5754,7 @@ void ChartWidget::render_liq_observed() {
     const float ref_usd = std::max(1.0f, liq_obs_ref_usd_);
 
     // Draw cap: beyond kLiqObsMaxDraw visible markers, keep the LARGEST by USD
-    // (nth_element cutoff). Deterministic per visible set — no frame flicker.
+    // (nth_element cutoff). Deterministic per visible set - no frame flicker.
     // Scratch is function-static: reused across frames, no per-frame heap churn.
     float usd_cutoff = min_usd;
     const size_t n_vis = static_cast<size_t>(last - first);
@@ -5799,7 +5799,7 @@ void ChartWidget::render_liq_observed() {
     ImPlot::PopPlotClipRect();
 }
 
-// ONE tier-mask fuel sum per liq band (handoff §12 DRY — was copy-pasted in the shelf and the
+// ONE tier-mask fuel sum per liq band (handoff §12 DRY - was copy-pasted in the shelf and the
 // fuel-ratio pill). mask bits: 0=5x,1=10x,2=25x,3=50x,4=75x,5=100x; observed liqs (obs_*) are not
 // tier-specific, so they always count. 0x3F = the mask-independent all-tier total.
 static double tiered_band_usd(const Terminal::LiquidationBand& band, uint8_t mask) {
@@ -5833,7 +5833,7 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
     const uint8_t lmask = ctx_.liq_heatmap_mgr().get_leverage_mask();
     if (lmask == 0) return;
 
-    // latest_ms = the live price bar's time — rails stop there (at consume_ms or the live edge),
+    // latest_ms = the live price bar's time - rails stop there (at consume_ms or the live edge),
     // never across the empty future. tf_ms = the timeframe in ms (for bar-center x mapping).
     int64_t latest_ms = 0;
     if (ctx_.candle_mgr().has_building_candle())
@@ -5843,7 +5843,7 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
     const int64_t tf_ms = ctx_.candle_mgr().timeframe_seconds() * 1000;
 
     // ---------------------------------------------------------------------
-    // Discrete HISTORICAL liquidation bands (MMT) — lines only, NO cloud.
+    // Discrete HISTORICAL liquidation bands (MMT) - lines only, NO cloud.
     // One horizontal line per price level the per-minute timeline has seen
     // (manager get_band_history, leverage-mask aware), drawn from where it first
     // appeared to either the candle that consumed it (price traded through → dim
@@ -5855,7 +5855,7 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
         const auto& tracks = ctx_.liq_heatmap_mgr().get_band_history(pair_, lmask);
         auto& cmh = ctx_.candle_mgr();
         // Consume is BACKEND-BAKED now: each rail carries consume_ms (the first LAST-PRICE
-        // wick-through, from the RailTracker) — no client candle scan, correct on deep scroll-back,
+        // wick-through, from the RailTracker) - no client candle scan, correct on deep scroll-back,
         // and captures stop-hunt wicks. We read BandTrack.consume_ms directly below. Gated on candles
         // so the time→x axis is populated before we map rail timestamps to pixels.
         if (!tracks.empty() && !cmh.candles().empty()) {
@@ -5877,7 +5877,7 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
             };
             // LAST TOUCH = the most recent candle whose [low,high] spans the rail price (price's last
             // visit to that level). Each rail draws from there into OPEN AIR toward the live edge, so it
-            // NEVER paints across the candles where price actually traded — the MMT "no overlap" look.
+            // NEVER paints across the candles where price actually traded - the MMT "no overlap" look.
             // This replaces the FORMATION-time left edge, which painted a standing rail straight across
             // the whole candle history (the rails-over-candles bug James flagged). A level price has not
             // touched in the loaded candles → x0 / full width (it floats in open air anyway).
@@ -5893,12 +5893,12 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
             // 2026-07-01 fix (round 2): the swept-remnant left edge used to anchor at t.first_ms
             // (the backend RailTracker's formed_ms). That's the SAME "formation-time left edge"
             // bug this file's own history already fixed once for the standing case (see the
-            // comment above last_touch) — formed_ms/consumed_ms come from the backend's own price
+            // comment above last_touch) - formed_ms/consumed_ms come from the backend's own price
             // series, which doesn't line up with whatever candle timeframe is on screen, so
             // candles between formation and consumption can (and did) trade through the level
             // without the backend calling it "consumed" yet → the line painted over real wicks.
             // Fix: scan backward from the sweep, same touch/no-touch test as last_touch(), and
-            // stop at the first candle that DOESN'T span the price — that's the last genuine
+            // stop at the first candle that DOESN'T span the price - that's the last genuine
             // open-air moment before the sweep. No safe gap found → don't draw a remnant at all
             // (collapses lx==rx below) rather than guess and risk another overlap.
             auto last_departure_before = [&](double price, int64_t before_ms) -> int64_t {
@@ -5928,12 +5928,12 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
                 float lx, rx;
                 if (swept) {
                     const int64_t departure_ms = last_departure_before(t.price, t.consume_ms);
-                    // 2026-07-01 fix (round 3): rx used to be time_to_x(t.consume_ms) — but
+                    // 2026-07-01 fix (round 3): rx used to be time_to_x(t.consume_ms) - but
                     // consume_ms is the backend's raw wall-clock wick-through moment, NOT a candle
                     // boundary, so the "+tf_ms*0.5" offset time_to_x applies (designed for candle-
                     // timestamp inputs, to land past that candle's edge) could instead land the
                     // right edge INSIDE the sweeping candle's own body, depending on where within
-                    // that candle's span the sweep happened — still visually "overlapping a wick".
+                    // that candle's span the sweep happened - still visually "overlapping a wick".
                     // Fix: land rx at the LEFT edge of the candle immediately after the departure
                     // gap (the one that actually swept it, per last_departure_before's definition),
                     // computed with the same candle-boundary math plot_candles itself uses.
@@ -5960,7 +5960,7 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
             for (const auto& r : lines) {
                 const ImVec2 px = ImPlot::PlotToPixels(ImPlotPoint(0, r.price));
                 if (px.y < plot_pos.y || px.y > plot_pos.y + plot_size.y) continue;
-                // LINEAR magnitude weight (NOT sqrt — sqrt flattened everything to the "wall of
+                // LINEAR magnitude weight (NOT sqrt - sqrt flattened everything to the "wall of
                 // lines" look). Dominant rail ≈ full brightness/thickness; weak rails fade thin/dim.
                 // (The dense look now lives in the projection Field, not here.)
                 const float lin = (max_usd > 0.0)
@@ -5972,7 +5972,7 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
                 // Swept remnant: same hue, dimmed + thinned toward a "taken" look (build -> persist
                 // -> discharge) instead of the disappearing act this had before the 2026-07-01 fix.
                 // Floored (not just multiplied) so weak-but-swept levels stay legible rather than
-                // fading to a near-invisible sliver — a remnant should read as "was here, dimmer",
+                // fading to a near-invisible sliver - a remnant should read as "was here, dimmer",
                 // not "barely rendered".
                 const float alpha = r.swept ? std::max(70.0f, (95.0f + s * 160.0f) * 0.55f)
                                              : (95.0f + s * 160.0f);          // 95 (faint) → 255 (dominant)
@@ -5994,7 +5994,7 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
     // de-cluttered rails render instead.
     if (liq_show_lines_ && !drew_rails) {
         // ── Standing liquidation shelves (current levels, optional overlay on the field) ──
-        // Each CURRENT liquidity level (from the live snapshot — always present, live AND replay)
+        // Each CURRENT liquidity level (from the live snapshot - always present, live AND replay)
         // draws as a bright horizontal band at its price, anchored to the live edge (+ a short
         // forward projection = the standing magnet) and extending LEFT only as far as the most
         // recent candle that traded through that price (its "last touch"). So bands span the
@@ -6005,9 +6005,9 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
         auto& cmh = ctx_.candle_mgr();
         if (bw > 0.0 && !snapshot->bands.empty()) {
             // PERF: the agg-over-ALL-bands + sort/merge/cap selection only changes when the snapshot
-            // (~1/min) or the leverage mask changes — NOT every frame. Cache the selected levels
+            // (~1/min) or the leverage mask changes - NOT every frame. Cache the selected levels
             // (price/usd/side); the per-frame path below just resolves pixel-x for the ~N kept lines
-            // and draws. (This block previously rebuilt over ~800 bands EVERY frame — the FPS hit.)
+            // and draws. (This block previously rebuilt over ~800 bands EVERY frame - the FPS hit.)
             const int64_t snap_ts = snapshot->timestamp_ms;
             if (snap_ts != liq_shelf_cache_ts_ || lmask != liq_shelf_cache_mask_
                 || liq_dense_field_ != liq_shelf_cache_dense_) {
@@ -6018,11 +6018,11 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
                 liq_shelf_cache_max_usd_ = 0.0;
                 // Aggregate per price bucket. `agg` holds the ENABLED-tier fuel (what the toggle
                 // shows); `full_max` is the ALL-tier fuel max (mask-INDEPENDENT). We floor + scale
-                // brightness against full_max — NOT the per-mask max — so the LIQ LEV toggle actually
+                // brightness against full_max - NOT the per-mask max - so the LIQ LEV toggle actually
                 // thins the map: 100x-only keeps ~15% of the mass, so most bands fall under the
                 // absolute floor and only the genuine near-price 100x levels survive. (Before this,
                 // both the floor and brightness renormalized to the per-mask max, so every mask
-                // looked identical — the toggle was a visual no-op. See LIQMAP V1.)
+                // looked identical - the toggle was a visual no-op. See LIQMAP V1.)
                 std::unordered_map<long long, double> agg;   // price bucket → enabled-tier fuel (USD)
                 double full_max = 0.0;
                 for (const auto& band : snapshot->bands) {
@@ -6039,7 +6039,7 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
                 // (it's still the symbol's own all-tier max) but FIXED across mask changes, so a
                 // masked-out band that can't clear it simply disappears.
                 // (§12 cleanup 2026-07-03: the kLiqDense* constants that let liq_dense_field_ flip
-                // the shelf floor/contrast are DELETED — leftover coupling from before the Field
+                // the shelf floor/contrast are DELETED - leftover coupling from before the Field
                 // existed. The shelf reads its own knobs regardless of the Field toggle.)
                 const double abs_floor = full_max * static_cast<double>(liq_hist_min_frac_);
                 if (!agg.empty() && full_max > 0.0) {
@@ -6099,7 +6099,7 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
                 for (const auto& sh : liq_shelf_cache_) {
                     const ImVec2 px = ImPlot::PlotToPixels(ImPlotPoint(0, sh.price));
                     if (px.y < plot_pos.y || px.y > plot_pos.y + plot_size.y) continue;
-                    // Default: sqrt (pow 0.5) contrast — gentler than linear. Dense mode softens
+                    // Default: sqrt (pow 0.5) contrast - gentler than linear. Dense mode softens
                     // further to pow(0.35) so more of the ~100 active bands stay legible (see
                     // liq_dense_field_ above; matches the rail path's curve for a consistent look).
                     const float shelf_lin = (max_usd > 0.0)
@@ -6124,7 +6124,7 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
         }
     }
 
-    // (Removed the dashed "mark" guide line — redundant with the price-axis mark
+    // (Removed the dashed "mark" guide line - redundant with the price-axis mark
     //  tag and the candles; rails + extend-to-candle already anchor to the live bar.)
 
     // -- Hawkes cascade indicator (BR pill) -- top-right of the plot.
@@ -6217,20 +6217,20 @@ void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visibl
     }
 }
 
-// ── "Liq Levels HL" (P2e) — REAL predictive liq levels from the HL census ───────────────
+// ── "Liq Levels HL" (P2e) - REAL predictive liq levels from the HL census ───────────────
 // Renders the census snapshot (LiquidationHeatmapManager census store, UNDERLYING-keyed)
-// in the standing-shelf grammar of the modelled layer — same render reuse as the backend's
-// message reuse — but with a DISTINCT colormap so real-vs-modelled reads at a glance:
+// in the standing-shelf grammar of the modelled layer - same render reuse as the backend's
+// message reuse - but with a DISTINCT colormap so real-vs-modelled reads at a glance:
 // longs (real positions liquidating below mark) = violet, shorts (above) = mint; the
 // modelled layer keeps its amber/cyan. No rails/timeline/remnants: the census is a ~60s
 // snapshot of standing real positions, not a history. The badge (top-right, stacked under
-// the modelled BR/Fuel pills when those show) carries coverage_frac — the census covers
+// the modelled BR/Fuel pills when those show) carries coverage_frac - the census covers
 // the at-risk leveraged tail only (~1-10% of OI notional) and must NEVER read as a
 // complete liq map. The LIQ LEV chips filter this layer by REAL leverage tier (est_Nx =
 // actual position leverage; the 5x/10x tiers exist on the wire but, as for the modelled
-// layer, have no UI chip — their far-from-mark levels are rarely cascade-relevant).
+// layer, have no UI chip - their far-from-mark levels are rarely cascade-relevant).
 void ChartWidget::render_liq_census() {
-    // Live-only layer: replay has no census data — stay silent, no badge.
+    // Live-only layer: replay has no census data - stay silent, no badge.
     if (ctx_.candle_mgr().replay_start_time_ms() > 0) return;
 
     ImDrawList* draw_list = ImPlot::GetPlotDrawList();
@@ -6238,7 +6238,7 @@ void ChartWidget::render_liq_census() {
     const ImVec2 plot_size = ImPlot::GetPlotSize();
 
     // Badge stacking: sit under the modelled layer's BR/Fuel pills when that layer
-    // is rendering (approximate — the fuel pill hides only when fuel < $100).
+    // is rendering (approximate - the fuel pill hides only when fuel < $100).
     float badge_y_off = 0.0f;
     if (liq_heatmap_enabled_) {
         if (const auto* m = ctx_.liq_heatmap_mgr().get_snapshot(pair_); m && !m->bands.empty()) {
@@ -6260,7 +6260,7 @@ void ChartWidget::render_liq_census() {
     const auto* snap = ctx_.liq_heatmap_mgr().get_census_snapshot(liq_census_pair_);
     if (!snap || snap->bands.empty()) {
         // Layer on but nothing arrived (feed warming up, or no HL market for this
-        // underlying) — say so instead of silently rendering nothing.
+        // underlying) - say so instead of silently rendering nothing.
         draw_badge("HL \xc2\xb7 NO DATA", IM_COL32(160, 160, 170, 170));
         return;
     }
@@ -6268,7 +6268,7 @@ void ChartWidget::render_liq_census() {
     const uint8_t lmask = ctx_.liq_heatmap_mgr().get_leverage_mask();
     if (lmask == 0) return;
     // REAL-leverage filter, venue-aware: HL caps leverage PER ASSET (HYPE ≤10x,
-    // WLFI ≤5x — live probe 2026-07-24: 100% of their census notional sits in
+    // WLFI ≤5x - live probe 2026-07-24: 100% of their census notional sits in
     // the 5x/10x tiers; even BTC holds ~44% there). The LIQ LEV chips only go
     // down to 25x, so with ALL FOUR on (the default = "no filter") we show ALL
     // real tiers (0x3F) rather than silently hiding venue-capped positions; a
@@ -6277,20 +6277,20 @@ void ChartWidget::render_liq_census() {
     const double mark_price = snap->mark_price;
 
     // Selection cache: rebuilt only when the snapshot ts or the leverage mask
-    // changes (mirrors liq_shelf_cache_ — never per frame).
+    // changes (mirrors liq_shelf_cache_ - never per frame).
     if (snap->timestamp_ms != liq_census_cache_ts_ || lmask != liq_census_cache_mask_) {
         liq_census_cache_ts_ = snap->timestamp_ms;
         liq_census_cache_mask_ = lmask;
         liq_census_cache_.clear();
         liq_census_cache_max_usd_ = 0.0;
-        // Bands ARE the discrete census buckets (0.25% of mark) — no re-bucketing.
+        // Bands ARE the discrete census buckets (0.25% of mark) - no re-bucketing.
         // Floor against the ALL-tier max, same mask-thinning rule as the shelves:
         // a masked view goes sparser + dimmer, never renormalizes back to bright.
         //
         // SCOPED floor (2026-07-28): the max is taken PER SIDE over bands within
         // liq_census_rel_window_ of mark, not globally. The census is REAL positions, so on
         // a thin alt one whale's far-away liq can sit orders of magnitude above every level
-        // near price — a global floor then erases the whole near-price layer while the whale
+        // near price - a global floor then erases the whole near-price layer while the whale
         // itself is culled off-screen anyway, leaving a COV badge over an empty chart.
         // Measured on KAITO: a single $305k position at +81% floored out all 12 levels.
         // Bands outside the window are floored against the same per-side number, so they are
@@ -6332,14 +6332,14 @@ void ChartWidget::render_liq_census() {
             liq_hist_per_side_cap_, 0, sel_max);
         // Brightness still normalizes against the GLOBAL max on purpose: the floor decides
         // what is worth drawing, the ramp encodes how big it actually is. A near-price level
-        // that is small next to the venue's biggest real position should read as small — and
+        // that is small next to the venue's biggest real position should read as small - and
         // it stays legible regardless, since the census alpha ramp floors at 190/255.
         liq_census_cache_max_usd_ = full_max;
         liq_census_cache_.reserve(sel.size());
         for (const auto& s2 : sel) liq_census_cache_.push_back({ s2.price, s2.usd, s2.is_long });
     }
 
-    // Coverage badge — always on while the layer has data (coverage honesty).
+    // Coverage badge - always on while the layer has data (coverage honesty).
     {
         const double cov = std::clamp(snap->flow_intensity, 0.0, 1.0);
         char cov_buf[48];
@@ -6390,7 +6390,7 @@ void ChartWidget::render_liq_census() {
             ? static_cast<float>(std::clamp(lv.usd / max_usd, 0.0, 1.0)) : 0.0f;
         const float s = std::pow(lin, 0.5f);
         // DISTINCT census ramp: violet (real long liqs, below mark) / mint (real
-        // short liqs, above) — never the modelled amber/cyan.
+        // short liqs, above) - never the modelled amber/cyan.
         float cr, cg, cb;
         if (lv.is_long) { cr = 150.0f + s * 60.0f; cg = 85.0f + s * 55.0f;  cb = 235.0f + s * 20.0f; }
         else            { cr = 45.0f + s * 65.0f;  cg = 190.0f + s * 65.0f; cb = 150.0f + s * 60.0f; }
@@ -6408,14 +6408,14 @@ void ChartWidget::render_liq_census() {
     }
 }
 
-// Liquidation Profile — the price-marginal of STANDING fuel (WS1 Option A, 2026-07-03; replaces the
+// Liquidation Profile - the price-marginal of STANDING fuel (WS1 Option A, 2026-07-03; replaces the
 // time-averaged rendered-brightness marginal, which was window-length-dependent and needed an
 // arbitrary width gain to be visible at all). Each visible price row takes the MAX of the field's
-// own rendered brightness (fixed dual-percentile log map + gamma — the exact tv the forward cascade
+// own rendered brightness (fixed dual-percentile log map + gamma - the exact tv the forward cascade
 // projects with) across the PENDING segments covering it: the sidebar answers "which prices hold the
 // most fuel RIGHT NOW", agrees with the cascade by construction (a zone's cascade length IS its tv),
 // and is zoom/scroll/window-stable. NO adaptive re-normalization (the round-3/4 "orange wall"), NO
-// width gain. Consumed history doesn't count — the field itself already shows it. Buckets the live
+// width gain. Consumed history doesn't count - the field itself already shows it. Buckets the live
 // building candle is trading through are carved (same grid band as the field's live carve). Style =
 // design `profile` spec: slim right-edge silhouette, LUT tint at FLAT alpha, gaussian sigma = 3
 // field rows, 1px outline, baseline hairline. Candle-derived → universal + replay-identical;
@@ -6433,14 +6433,14 @@ void ChartWidget::render_liq_profile() {
     ImDrawList* dl = ImPlot::GetPlotDrawList();
     const double bw = liq_field_bw_;
 
-    // The field's FIXED log map (set at cache build) — the profile inherits Low/Peak/gamma directly
+    // The field's FIXED log map (set at cache build) - the profile inherits Low/Peak/gamma directly
     // and never re-normalizes.
     const float nlo = liq_field_norm_lo_;
     if (nlo <= 0.0f || liq_field_norm_hi_ <= nlo) return;
     const float inv_lr = 1.0f / std::log(liq_field_norm_hi_ / nlo);
     const float pgamma = std::max(0.1f, liq_field_gamma_);
 
-    // Live building-candle carve — the same bucket-grid band as render_liq_dense_field: fuel the
+    // Live building-candle carve - the same bucket-grid band as render_liq_dense_field: fuel the
     // current candle is trading through is being consumed NOW, so it no longer stands.
     double carve_glo = 0.0, carve_ghi = -1.0;
     {
@@ -6484,7 +6484,7 @@ void ChartWidget::render_liq_profile() {
         const float tl = std::min(std::log(sg.intensity / nlo) * inv_lr, 1.0f);
         const float tv = std::pow(tl, pgamma);                  // the field's rendered brightness
         if (tv <= 0.0f) continue;
-        // A merged segment spans several buckets — test/deposit per bucket, exactly like pre-merge.
+        // A merged segment spans several buckets - test/deposit per bucket, exactly like pre-merge.
         const int nb = (sg.price_hi > sg.price_lo && sg.price_lo > 0.0f)
             ? 1 + static_cast<int>(std::lround(std::log(static_cast<double>(sg.price_hi) /
                                                         static_cast<double>(sg.price_lo)) / bw))
@@ -6506,9 +6506,9 @@ void ChartWidget::render_liq_profile() {
         }
     }
 
-    // 2) Gaussian smooth — design `profile.smoothingGaussianSigmaRows` = 3 FIELD price rows.
+    // 2) Gaussian smooth - design `profile.smoothingGaussianSigmaRows` = 3 FIELD price rows.
     //    The marginal is sampled at ~1 row/pixel, so the sigma is converted from field rows to
-    //    samples via the current zoom (field row height in px = plot_h · bw / ln(y_span)) — the
+    //    samples via the current zoom (field row height in px = plot_h · bw / ln(y_span)) - the
     //    profile's smoothness tracks the field's visible row size. True gaussian, kernel on the stack.
     {
         const double span_l = (y_min > 0.0 && y_max > y_min) ? std::log(y_max / y_min) : 0.0;
@@ -6539,7 +6539,7 @@ void ChartWidget::render_liq_profile() {
     }
 
     // 3) Design render (export `profile` spec): a slim silhouette growing left from the right plot
-    //    edge — LUT-tinted per row at a FLAT liq_profile_alpha_, one 1px outline at
+    //    edge - LUT-tinted per row at a FLAT liq_profile_alpha_, one 1px outline at
     //    kLiqProfileOutline, and a 1px baseline hairline at the plot edge. Width AND tint are the
     //    SAME bounded standing-fuel brightness (no re-normalization, no gain) → the silhouette can
     //    never read hotter or wider than the fuel the field/cascade actually draw: quiet prices hug
@@ -6806,10 +6806,10 @@ void ChartWidget::render_tpo(double visible_x_min, double visible_x_max) {
                 int period_idx = row.blocks[b].period_idx;
 
                 if (row.is_poc) {
-                    // POC row — white (MMT style)
+                    // POC row - white (MMT style)
                     color = IM_COL32(220, 220, 230, 230);
                 } else if (row.is_value_area) {
-                    // Value area — blue with brightness by period
+                    // Value area - blue with brightness by period
                     float brightness = 0.4f + 0.5f *
                         (static_cast<float>(period_idx) / std::max(1, sess.total_periods - 1));
                     color = IM_COL32(
@@ -6817,7 +6817,7 @@ void ChartWidget::render_tpo(double visible_x_min, double visible_x_max) {
                         static_cast<int>(60 + 90 * brightness),
                         static_cast<int>(140 + 80 * brightness), 220);
                 } else {
-                    // Outside value area — grey with brightness by period
+                    // Outside value area - grey with brightness by period
                     float brightness = 0.25f + 0.5f *
                         (static_cast<float>(period_idx) / std::max(1, sess.total_periods - 1));
                     int grey = static_cast<int>(60 + 120 * brightness);
@@ -6838,7 +6838,7 @@ void ChartWidget::render_tpo(double visible_x_min, double visible_x_max) {
                     color = IM_COL32(80, 160, 210, 170); // light blue
                 }
 
-                // Poor High/Low row — white blocks (MMT style)
+                // Poor High/Low row - white blocks (MMT style)
                 if (tpo.show_poor_high_low) {
                     if (sess.has_poor_high && &row == &sess.rows.back()) {
                         color = IM_COL32(220, 220, 230, 230);
@@ -6867,7 +6867,7 @@ void ChartWidget::render_tpo(double visible_x_min, double visible_x_max) {
         // Labels positioned just past line end (always shown, may overlap next session like MMT)
         float label_x = line_end_x + 3.0f;
 
-        // ── POC line (solid white, short — from profile edge) ────
+        // ── POC line (solid white, short - from profile edge) ────
         if (tpo.show_poc_ray && sess.poc_row_idx >= 0) {
             ImVec2 poc_px = ImPlot::PlotToPixels(sess_start, sess.poc_price);
             draw_list->AddLine(
@@ -6977,19 +6977,19 @@ void ChartWidget::render_tpo(double visible_x_min, double visible_x_max) {
                 tpo.toggle_expand(pair_.symbol, ctx_si);
             }
 
-            // Merge right — greyed out if rightmost session
+            // Merge right - greyed out if rightmost session
             bool can_merge_right = (ctx_si + 1 < static_cast<int>(sessions->size()));
             if (!can_merge_right) ImGui::BeginDisabled();
             if (ImGui::Selectable("Merge right \xe2\x86\x92|")) {
-                // TODO: Phase 2 — merge sessions
+                // TODO: Phase 2 - merge sessions
             }
             if (!can_merge_right) ImGui::EndDisabled();
 
-            // Merge left — greyed out if leftmost session
+            // Merge left - greyed out if leftmost session
             bool can_merge_left = (ctx_si > 0);
             if (!can_merge_left) ImGui::BeginDisabled();
             if (ImGui::Selectable("Merge left |\xe2\x86\x90")) {
-                // TODO: Phase 2 — merge sessions
+                // TODO: Phase 2 - merge sessions
             }
             if (!can_merge_left) ImGui::EndDisabled();
 
@@ -7050,7 +7050,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
     const double visible_candles = (visible_x_max - visible_x_min) / tf_ms;
     const int64_t tf_ms_i = static_cast<int64_t>(tf_sec) * 1000;
 
-    // Hard cutoff — too many candles, skip entirely
+    // Hard cutoff - too many candles, skip entirely
     if (visible_candles > 500.0) return;
 
     const double pixels_per_candle = ImPlot::GetPlotSize().x / visible_candles;
@@ -7058,7 +7058,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
 
     // Zoom modes:
     //   zoomed_out_block: single colored rect per candle (no per-level detail)
-    //                     Kicks in when candles are too narrow for text — matches MMT behavior
+    //                     Kicks in when candles are too narrow for text - matches MMT behavior
     //   show_text:        draw text labels inside cells
     const bool zoomed_out_block = (pixels_per_candle < 55.0);
     const bool show_text = !zoomed_out_block;
@@ -7090,7 +7090,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
     ImFont* font = ImGui::GetFont();
     const float fp_font_size = ImGui::GetFontSize() * font_scale;
 
-    // Tick per row — with minimum pixel height guarantee
+    // Tick per row - with minimum pixel height guarantee
     double tick_per_row = fp_mgr.ticks_per_row > 0
         ? fp_mgr.ticks_per_row * tick_size_ : 0.0;
 
@@ -7115,7 +7115,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
         // ── ZOOMED OUT BLOCK MODE ──────────────────────────────────────
         // Single colored rectangle per candle, delta-colored (blue/pink)
         if (zoomed_out_block) {
-            // Use cached merge — no per-frame allocation
+            // Use cached merge - no per-frame allocation
             const auto* mc = fp_mgr.get_merged_grouped(
                 pair_.symbol, timestamps[i], tf_sec, 0.0);
             if (!mc) continue;
@@ -7174,7 +7174,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
             }
         }
 
-        // Use cached merge+group — no per-frame vector allocations
+        // Use cached merge+group - no per-frame vector allocations
         const auto* mc = fp_mgr.get_merged_grouped(
             pair_.symbol, timestamps[i], tf_sec, effective_tpr);
         if (!mc) continue;
@@ -7190,7 +7190,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
         }
         if (max_vol < 1e-8) continue;
 
-        // Candle pixel bounds — footprint box IS the candle body
+        // Candle pixel bounds - footprint box IS the candle body
         const double half_w = tf_ms * 0.35;
         const ImVec2 px_left  = ImPlot::PlotToPixels(candle_center - half_w, 0.0);
         const ImVec2 px_right = ImPlot::PlotToPixels(candle_center + half_w, 0.0);
@@ -7198,7 +7198,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
         if (cell_width < 2.0f) continue;
 
         for (const auto& gl : grouped) {
-            // Vertical culling — skip levels off-screen
+            // Vertical culling - skip levels off-screen
             if (gl.price_hi < visible_y_min || gl.price_lo > visible_y_max) continue;
 
             const ImVec2 px_top    = ImPlot::PlotToPixels(candle_center, gl.price_hi);
@@ -7294,7 +7294,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
                 }
             }
 
-            // Imbalance highlight — subtle border
+            // Imbalance highlight - subtle border
             if (fp_mgr.show_imbalances && gl.is_imbalance) {
                 ImU32 imb_color = gl.buy_dominant
                     ? IM_COL32(80, 180, 120, 160)
@@ -7303,7 +7303,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
                                    imb_color, 0.0f, 0, 1.0f);
             }
 
-            // POC — subtle horizontal line
+            // POC - subtle horizontal line
             if (fp_mgr.show_poc && gl.is_poc) {
                 float poc_y = row_top + row_height * 0.5f;
                 draw_list->AddLine(ImVec2(left, poc_y), ImVec2(right, poc_y),
@@ -7345,7 +7345,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Footprint Profile — MMT-style per-candle volume profile bars
+// Footprint Profile - MMT-style per-candle volume profile bars
 //
 // Like Cluster mode but with proportional-width bar backgrounds behind the
 // sell|buy text. Each row has two columns (sell left, buy right) filling the
@@ -7489,7 +7489,7 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
         }
         if (max_side_vol < 1e-8) continue;
 
-        // Candle pixel bounds — same width as cluster mode
+        // Candle pixel bounds - same width as cluster mode
         const double half_w = tf_ms * 0.35;
         const ImVec2 px_left  = ImPlot::PlotToPixels(candle_center - half_w, 0.0);
         const ImVec2 px_right = ImPlot::PlotToPixels(candle_center + half_w, 0.0);
@@ -7519,7 +7519,7 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
             float sell_bar_w = sell_frac * half_cell;
             float buy_bar_w  = buy_frac * half_cell;
 
-            // Sell bar — fills from LEFT edge rightward within left half
+            // Sell bar - fills from LEFT edge rightward within left half
             if (sell_bar_w > 0.5f) {
                 float si = std::sqrt(sell_frac);
                 ImU32 sell_color = IM_COL32(
@@ -7531,7 +7531,7 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
                     ImVec2(mid_x, row_bot), sell_color);
             }
 
-            // Buy bar — fills from mid_x rightward within right half
+            // Buy bar - fills from mid_x rightward within right half
             if (buy_bar_w > 0.5f) {
                 float bi = std::sqrt(buy_frac);
                 ImU32 buy_color = IM_COL32(
@@ -7550,14 +7550,14 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
                 format_fp_volume(buy_buf, sizeof(buy_buf), gl.buy_volume);
                 float text_y = row_top + (row_height - fp_font_size) * 0.5f;
 
-                // Sell text — centered in left half
+                // Sell text - centered in left half
                 ImVec2 sell_size = font->CalcTextSizeA(fp_font_size, FLT_MAX, 0.0f, sell_buf);
                 float sell_x = left + (half_cell - sell_size.x) * 0.5f;
                 draw_list->AddText(font, fp_font_size,
                     ImVec2(sell_x, text_y),
                     IM_COL32(230, 215, 215, 255), sell_buf);
 
-                // Buy text — centered in right half
+                // Buy text - centered in right half
                 ImVec2 buy_size = font->CalcTextSizeA(fp_font_size, FLT_MAX, 0.0f, buy_buf);
                 float buy_x = mid_x + (half_cell - buy_size.x) * 0.5f;
                 draw_list->AddText(font, fp_font_size,
@@ -7569,7 +7569,7 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
             draw_list->AddLine(ImVec2(mid_x, row_top), ImVec2(mid_x, row_bot),
                                IM_COL32(100, 100, 120, 60), 1.0f);
 
-            // POC — white outline box around the highest-volume row (MMT style)
+            // POC - white outline box around the highest-volume row (MMT style)
             if (fp_mgr.show_poc && gl.is_poc) {
                 draw_list->AddRect(ImVec2(left, row_top), ImVec2(right, row_bot),
                                    IM_COL32(220, 220, 220, 200), 0.0f, 0, 1.5f);

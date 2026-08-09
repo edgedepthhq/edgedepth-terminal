@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// studio_runtime.cpp — see studio_runtime.h
+// studio_runtime.cpp - see studio_runtime.h
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "education/studio_runtime.h"
@@ -23,13 +23,13 @@
 
 using json = nlohmann::json;
 
-// Defined at global scope in main.cpp — true while the replay clock is held for
+// Defined at global scope in main.cpp - true while the replay clock is held for
 // priming / a post-scrub re-buffer. The export must not start capturing a blank
 // buffering chart. (Same extern pattern as lesson_runtime.cpp.)
 extern bool g_lesson_loading;
 
 namespace {
-// Monotonic wall ms — emscripten_get_now with a no-op native fallback so this
+// Monotonic wall ms - emscripten_get_now with a no-op native fallback so this
 // file keeps compiling off-Emscripten (matches the recorder's convention).
 inline double studio_now_ms() {
 #ifdef __EMSCRIPTEN__
@@ -78,11 +78,11 @@ void StudioRuntime::cmd_export_stop() {
 }
 
 void StudioRuntime::update(const AppContext& ctx) {
-    // ── Export session (CLIP_FACTORY P3-v1) — drains + per-frame tick ───────
+    // ── Export session (CLIP_FACTORY P3-v1) - drains + per-frame tick ───────
     // While an export runs the take is sacrosanct: drop any queued seek/skip/
     // speed/source (the React footer disables them, but a stray command must
     // not seek the recording out from under the author). Pause/play stays
-    // allowed — pausing mid-take is a legitimate narration beat.
+    // allowed - pausing mid-take is a legitimate narration beat.
     if (export_session_active()) {
         if (pending_seek_ || pending_skip_ ||
             pending_transport_ == TransportCmd::SetSpeed) {
@@ -101,7 +101,7 @@ void StudioRuntime::update(const AppContext& ctx) {
             ClipRecorder::export_stop();          // → Saving via tick below
             export_phase_ = ExportPhase::Saving;
         } else if (export_phase_ == ExportPhase::Arming) {
-            end_export_session();                 // never started — clean cancel
+            end_export_session();                 // never started - clean cancel
         }
     }
     drain_export_start(ctx);
@@ -121,7 +121,7 @@ void StudioRuntime::update(const AppContext& ctx) {
         }
     }
 
-    // Drain seek/skip (own latches — don't clobber a queued pause/speed).
+    // Drain seek/skip (own latches - don't clobber a queued pause/speed).
     if (pending_seek_) {
         pending_seek_ = false;
         if (ctx.replayer) {
@@ -140,11 +140,11 @@ void StudioRuntime::update(const AppContext& ctx) {
         pending_skip_ = false;
         if (ctx.replayer) {
             auto& rm = ctx.replay_mgr();
-            // Use the debounced, clock-only skip path (skip_*_to) — the same one
+            // Use the debounced, clock-only skip path (skip_*_to) - the same one
             // the live terminal's >>/<< buttons use. It coalesces rapid presses,
             // preserves OB continuity, and only re-buffers on a large cumulative
             // jump. Crucially, compute the target from the LIVE interpolated clock,
-            // NOT info_.current_time_ms (which lags the backend status sync) — the
+            // NOT info_.current_time_ms (which lags the backend status sync) - the
             // naive skip_forward()/skip_backward() helpers use the stale field and
             // route through the heavy seek(), which caused the "jump back then
             // overshoot + future-data burst" bug.
@@ -158,11 +158,11 @@ void StudioRuntime::update(const AppContext& ctx) {
     if (!has_pending_) return;
 
     // HOLD the pending source until the replay manager exists. React can deliver
-    // the command the moment calledRun goes true — potentially frames before the
+    // the command the moment calledRun goes true - potentially frames before the
     // async init constructs the manager. Consuming-and-dropping here would eat
     // the source with no error (the silent black studio); keep it queued instead
     // and drain on a later frame. (React also re-pushes until a state emit
-    // confirms the window — this is the belt to that suspenders.)
+    // confirms the window - this is the belt to that suspenders.)
     if (!ctx.replayer) return;
 
     has_pending_ = false;           // consume before dispatch (re-entrancy safe)
@@ -204,7 +204,7 @@ void StudioRuntime::update(const AppContext& ctx) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Export session (CLIP_FACTORY P3-v1) — StudioRuntime owns WHEN, ClipRecorder HOW
+// Export session (CLIP_FACTORY P3-v1) - StudioRuntime owns WHEN, ClipRecorder HOW
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void StudioRuntime::drain_export_start(const AppContext& ctx) {
@@ -236,7 +236,7 @@ void StudioRuntime::drain_export_start(const AppContext& ctx) {
 
     // The React shell keys the canvas mount on the lesson's symbol and pushes
     // the lesson window as the studio source BEFORE enabling Export, so a
-    // mismatch here is a bug — but never record the wrong symbol: bail hard.
+    // mismatch here is a bug - but never record the wrong symbol: bail hard.
     if (has_source_ && !src_symbol_.empty() && sym != src_symbol_) {
         lr.unload();
         export_phase_    = ExportPhase::Error;
@@ -256,7 +256,7 @@ void StudioRuntime::drain_export_start(const AppContext& ctx) {
 
     // Same-window fast path: scrub the live session to the lesson start (one
     // deliberate seek, gate re-armed by scrub_to_progress). Different/absent
-    // window: request a fresh replay of the lesson window — it plays from the
+    // window: request a fresh replay of the lesson window - it plays from the
     // start on arrival, exactly like the lesson player's boot path.
     const std::string key = sym + "|" + std::to_string(export_start_ms_) + "|" +
                             std::to_string(export_end_ms_);
@@ -287,7 +287,7 @@ void StudioRuntime::tick_export(const AppContext& ctx) {
             ReplayManager& rm = ctx.replay_mgr();
             const bool primed = rm.is_active() && !::g_lesson_loading;
             if (primed) {
-                // A deliberate seek preserves a pre-export pause — nudge into
+                // A deliberate seek preserves a pre-export pause - nudge into
                 // playing unless the intro beat's card is (correctly) holding.
                 if (rm.is_paused() && !lr.card_up()) rm.resume();
                 if (rm.is_playing() || (rm.is_paused() && lr.card_up())) {
@@ -303,7 +303,7 @@ void StudioRuntime::tick_export(const AppContext& ctx) {
                     }
                 }
             }
-            // Buffer-stall bailout — don't arm forever against a dead window.
+            // Buffer-stall bailout - don't arm forever against a dead window.
             if (export_phase_ == ExportPhase::Arming &&
                 studio_now_ms() - arming_since_ms_ > 90000.0) {
                 lr.unload();
@@ -314,7 +314,7 @@ void StudioRuntime::tick_export(const AppContext& ctx) {
         }
         case ExportPhase::Recording: {
             // Recorder-side terminal states first (cap / session death / error
-            // are enforced in export_tick_and_render — mirror them here).
+            // are enforced in export_tick_and_render - mirror them here).
             if (ClipRecorder::state() == ClipRecorder::State::Error) {
                 lr.unload();
                 export_phase_    = ExportPhase::Error;
@@ -327,7 +327,7 @@ void StudioRuntime::tick_export(const AppContext& ctx) {
                 break;
             }
             // Lesson end: past the window with no card up (if the final beat's
-            // card is showing, let the author finish talking — they Continue or
+            // card is showing, let the author finish talking - they Continue or
             // Stop from the footer; the 15:00 cap still backstops).
             if (ctx.replayer) {
                 const int64_t now_ms = ctx.replay_mgr().interpolated_time_ms();
@@ -360,13 +360,13 @@ void StudioRuntime::tick_export(const AppContext& ctx) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Draw/capture overlay — the studio's phase-1 capture gesture
+// Draw/capture overlay - the studio's phase-1 capture gesture
 // ═══════════════════════════════════════════════════════════════════════════════
 
 namespace {
 
 // One-shot capture result → React. JSON over CustomEvent (NOT raw float export
-// args — the known f64→f32 marshal trap). Times are absolute unix ms.
+// args - the known f64→f32 marshal trap). Times are absolute unix ms.
 void emit_capture(int mode, int64_t t0, int64_t t1, double p_top, double p_bot) {
 #ifdef __EMSCRIPTEN__
     json j;
@@ -498,7 +498,7 @@ void StudioRuntime::render_capture_overlay(const AppContext& ctx) {
                                          : (x1 - x0 >= 6.0f && y1 - y0 >= 6.0f);
             if (big_enough) {
                 // Inverse-project the CLAMPED pixel rect → chart space. pTop is the
-                // HIGHER price (smaller screen y) — resolve_target normalizes anyway,
+                // HIGHER price (smaller screen y) - resolve_target normalizes anyway,
                 // but emit them ordered so the React side never has to think.
                 int64_t t0 = static_cast<int64_t>(std::llround(proj.time_of_x(x0)));
                 int64_t t1 = static_cast<int64_t>(std::llround(proj.time_of_x(x1)));
@@ -509,7 +509,7 @@ void StudioRuntime::render_capture_overlay(const AppContext& ctx) {
                              std::max(p_top, p_bot), std::min(p_top, p_bot));
                 capture_mode_ = 0;   // one-shot: disarm after a successful capture
             }
-            // Too-small drag: stay armed, the author fumbled — hint remains up.
+            // Too-small drag: stay armed, the author fumbled - hint remains up.
         }
     } else if (ImGui::IsItemDeactivated()) {
         capture_dragging_ = false;
@@ -548,7 +548,7 @@ void StudioRuntime::emit_state(const AppContext& ctx) {
         export_phase_ == ExportPhase::Saving    ? "saving" :
         export_phase_ == ExportPhase::Error     ? "error"  : "idle";
 
-    // Discrete-field signature (clock/progress EXCLUDED — React interpolates the clock
+    // Discrete-field signature (clock/progress EXCLUDED - React interpolates the clock
     // between emits, so we emit on transitions + a clock cadence, not every frame).
     transport::SigHasher hasher;
     hasher.mix(active  ? 1u : 0u);
@@ -590,7 +590,7 @@ void StudioRuntime::emit_state(const AppContext& ctx) {
         const int64_t off  = std::clamp<int64_t>(now_ms - src_start_ms_, 0, span);
         st["progress"] = active ? (static_cast<double>(off) / static_cast<double>(span)) : 0.0;
     }
-    // Export session (P3-v1) — drives the studio footer's export cluster.
+    // Export session (P3-v1) - drives the studio footer's export cluster.
     st["exporting"]   = exporting;
     st["exportPhase"] = export_phase_name;
     st["exportMs"]    = ClipRecorder::export_ms();
@@ -607,12 +607,12 @@ void StudioRuntime::emit_state(const AppContext& ctx) {
 } // namespace edu
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// KEEPALIVE command callback — React calls Module.__studio_cmd_set_source().
+// KEEPALIVE command callback - React calls Module.__studio_cmd_set_source().
 // Mirrors the _edu_cmd_* convention: defined WITH a leading underscore, exported
 // as __studio_cmd_set_source (double underscore) in CMake EXPORTED_FUNCTIONS.
 //
 // The source crosses as a JSON STRING via a window GLOBAL (window.__STUDIO_SOURCE__),
-// NOT as a char* arg — exactly how EducationBoot::detect() reads __EDGEDEPTH_LESSON__.
+// NOT as a char* arg - exactly how EducationBoot::detect() reads __EDGEDEPTH_LESSON__.
 // This avoids needing malloc/free/stringToUTF8 exported to EXTERNAL JS (they're only
 // in EXPORTED_RUNTIME_METHODS-as-needed); inside an EM_ASM block they're always
 // available. JS sets the global, then calls this no-arg export to consume it.
@@ -645,7 +645,7 @@ EMSCRIPTEN_KEEPALIVE void _studio_cmd_set_source(void) {
 }
 
 // Transport: pause/play (int bool) and speed (int centi-speed, 400 = 4.0×). Both
-// mirror the _edu_cmd_* family — int args marshal cleanly across the raw export,
+// mirror the _edu_cmd_* family - int args marshal cleanly across the raw export,
 // unlike a float (which mis-marshals f64→f32 and corrupted the lesson speed).
 EMSCRIPTEN_KEEPALIVE void _studio_cmd_set_paused(int paused) {
     edu::StudioRuntime::instance().cmd_set_paused(paused != 0);
@@ -656,7 +656,7 @@ EMSCRIPTEN_KEEPALIVE void _studio_cmd_set_speed(int centi_speed) {
 }
 
 // Seek to milli-progress (0..1000 = 0.0..1.0). deliberate!=0 bypasses the
-// scrubber-drag debounce — pass 1 for a click/drop, 0 for a live drag.
+// scrubber-drag debounce - pass 1 for a click/drop, 0 for a live drag.
 EMSCRIPTEN_KEEPALIVE void _studio_cmd_seek(int milli_progress, int deliberate) {
     edu::StudioRuntime::instance().cmd_seek_progress(milli_progress, deliberate != 0);
 }
@@ -671,7 +671,7 @@ EMSCRIPTEN_KEEPALIVE void _studio_cmd_skip(int seconds) {
 // __STUDIO_SOURCE__): React sets __STUDIO_EXPORT_LESSON__ (LessonDoc JSON) and
 // __STUDIO_EXPORT_SLUG__, then calls this no-arg export. The A/V MediaStream
 // rides window.__EDGEDEPTH_EXPORT_MEDIA__ and is consumed by the recorder glue
-// at capture start — nothing marshals across the wasm boundary here.
+// at capture start - nothing marshals across the wasm boundary here.
 EMSCRIPTEN_KEEPALIVE void _studio_cmd_export_start(void) {
     char* doc = reinterpret_cast<char*>(EM_ASM_PTR({
         try {

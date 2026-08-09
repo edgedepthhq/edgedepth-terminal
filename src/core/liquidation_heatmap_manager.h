@@ -32,7 +32,7 @@ public:
     // (stream 34), keyed by UNDERLYING ({"hl","BTC"}). Same wire message as
     // the modelled snapshot but a SEPARATE store: an HL pair's modelled
     // heatmap and its census would otherwise collide on the same key, and
-    // real-vs-modelled must never conflate. Straight field copy — no
+    // real-vs-modelled must never conflate. Straight field copy - no
     // obs-peak blending, timeline, or reach recompute (snapshot-only layer);
     // flow_intensity carries coverage_frac verbatim (0 must stay 0).
     void apply_census_update(const Terminal::Pair& pair, const pb::LiquidationHeatmapUpdate& update_pb);
@@ -49,20 +49,20 @@ public:
 
     // ─── Discrete historical band tracks (MMT-style line render) ──
     // Aggregates the per-minute timeline (raw_timeline_protos_) into ONE track per price
-    // level: when it first appeared, when it was last significant, and its peak USD — for
+    // level: when it first appeared, when it was last significant, and its peak USD - for
     // the enabled leverage tiers only. This is the data behind the discrete band-lines
     // (NOT the GPU field). Cached; rebuilt when proto count or leverage mask changes.
     struct BandTrack { double price = 0; int64_t first_ms = 0; int64_t last_ms = 0; int64_t consume_ms = 0; double peak_usd = 0; double last_usd = 0; };
     const std::vector<BandTrack>& get_band_history(const Terminal::Pair& pair, uint8_t mask);
 
     // ─── Observed @forceOrder events (WS4 "Observed" chart layer) ─────────
-    // Discrete REAL liquidations, time-ordered per symbol — the fact layer
+    // Discrete REAL liquidations, time-ordered per symbol - the fact layer
     // next to the estimated Field. Fed by the live LIQUIDATIONS stream; in
     // replay by the archive bundle / the liquidation_events DB seed (same
     // STREAM_LIQUIDATIONS payload). Bounded per symbol (oldest dropped).
     void add_observed_event(const Terminal::Pair& pair, const Terminal::Liquidation& liq);
     const std::vector<Terminal::Liquidation>& observed_events(const Terminal::Pair& pair) const;
-    // Replay rewind (<<): drop events past the rewind target — they are the
+    // Replay rewind (<<): drop events past the rewind target - they are the
     // replay's "future" now and would paint markers ahead of the playback head.
     void trim_observed_after(int64_t cutoff_ms);
 
@@ -89,7 +89,7 @@ private:
     // HL census layer: latest real-position snapshot per underlying ({"hl","BTC"}).
     std::map<LiqHeatmapKey, Terminal::LiquidationHeatmapSnapshot> census_snapshots_;
 
-    // Observed liquidation peak tracker — accumulates observed USD values
+    // Observed liquidation peak tracker - accumulates observed USD values
     // across updates so they don't visually disappear when the server
     // recalculates with a new mark price. Uses max(server, local) blending
     // with gradual client-side decay.
@@ -116,7 +116,7 @@ private:
     std::map<LiqHeatmapKey, std::map<int64_t, pb::LiquidationHeatmapUpdate>> raw_timeline_protos_;
     static constexpr size_t kMaxCachedProtos = 4000; // Match backend's 4000 candle limit
 
-    // Cache for get_band_history's return value — rebuilt from the latest snapshot's backend rails
+    // Cache for get_band_history's return value - rebuilt from the latest snapshot's backend rails
     // list only when that snapshot's timestamp changes (~1/min), NOT every render frame.
     std::map<LiqHeatmapKey, std::vector<BandTrack>> band_history_cache_;
     std::map<LiqHeatmapKey, int64_t> band_history_ts_;   // latest snapshot ts the cache was built for
@@ -128,7 +128,7 @@ private:
     // Convert LiquidationHeatmapUpdate → synthetic HeatmapSnapshot for GPU pipeline
     // leverage_mask: bitmask of enabled leverage tiers (bit 0=5x, 1=10x, 2=25x, 3=50x, 4=75x, 5=100x)
     // ml_weight: if true, scale values by reach_prob from ML model
-    // flow_intensity: MMT-style per-snapshot brightness scaling (0.0–1.0)
+    // flow_intensity: MMT-style per-snapshot brightness scaling (0.0-1.0)
     // Uses per-tier independent normalization via tier_maxes_.
     pb::HeatmapSnapshot convert_to_heatmap_snapshot(
         const pb::LiquidationHeatmapUpdate& update_pb,

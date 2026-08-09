@@ -1,10 +1,10 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// logo_manager.h — lazy async loader for coin + exchange logo images.
+// logo_manager.h - lazy async loader for coin + exchange logo images.
 //
 // Images are PNGs hosted on R2 (see logo_base_url()), decoded in the BROWSER via
 // an <img> element and uploaded straight into a GL texture with
-// texImage2D(HTMLImageElement) — the exact path recorder_glue uses for the cam
+// texImage2D(HTMLImageElement) - the exact path recorder_glue uses for the cam
 // bubble. No C++ PNG decoder, no stb_image.
 //
 //   coin("BTC")       -> https://<base>/logos/coins/btc.png     (LRU-capped)

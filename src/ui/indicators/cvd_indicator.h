@@ -16,14 +16,14 @@ namespace Indicators {
         else                      return snprintf(buf, size, "%7.0f",  value);
     }
 
-    // Cumulative Volume Delta indicator — rendered as candlesticks.
+    // Cumulative Volume Delta indicator - rendered as candlesticks.
     // Each CVD candle: open = prev cumulative CVD, close = current cumulative CVD,
     // high/low from intra-candle CVD extremes. Colored green when rising, red falling.
     class CVDIndicator : public IndicatorBase {
     public:
         CVDIndicator() { height_ratio_ = 0.25f; }
 
-        // Add a finalized candle's delta (from candle vbuy/vsell — no intra-candle H/L)
+        // Add a finalized candle's delta (from candle vbuy/vsell - no intra-candle H/L)
         void add_candle(int64_t time, double vbuy, double vsell);
 
         // Add with full intra-candle CVD OHLC (from Volume stream)

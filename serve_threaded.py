@@ -65,7 +65,7 @@ class COOPCOEPHandler(http.server.SimpleHTTPRequestHandler):
                           '.otf', '.png', '.jpg', '.svg', '.css', '.map', '.mem',
                           '.edpack')
             if any(self.path.endswith(ext) for ext in asset_exts):
-                # Strip path prefix — serve from root (e.g. /terminal/index.js -> /index.js)
+                # Strip path prefix - serve from root (e.g. /terminal/index.js -> /index.js)
                 basename = '/' + os.path.basename(self.path)
                 root_path = self.translate_path(basename)
                 if os.path.exists(root_path):
@@ -86,6 +86,6 @@ if __name__ == "__main__":
     os.chdir(directory)
     server = http.server.HTTPServer(("", port), COOPCOEPHandler)
     print(f"Serving {os.path.abspath('.')} on http://localhost:{port}")
-    print("COOP/COEP headers enabled — SharedArrayBuffer available")
+    print("COOP/COEP headers enabled - SharedArrayBuffer available")
     print("Ctrl+C to stop")
     server.serve_forever()

@@ -1,7 +1,7 @@
 #pragma once
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ReplayManager — Client-side replay orchestration
+// ReplayManager - Client-side replay orchestration
 //
 // Lifecycle:
 //   1. User initiates replay (chart right-click, keyboard R, alert button)
@@ -11,7 +11,7 @@
 //   4. Backend streams protobuf frames → same message pipeline as live
 //   5. Control bar: play/pause, speed, seek/scrub, step, stop
 //
-// The render pipeline is agnostic — replay data flows through the same
+// The render pipeline is agnostic - replay data flows through the same
 // MessageHandler → StreamManager → Widget path as live data.
 //
 // State machine:
@@ -48,7 +48,7 @@ public:
         Buffering,  // Joined, backend is buffering initial data
         Playing,    // Replay playing at speed_
         Paused,     // Replay paused, can resume/seek
-        Seeking,    // Seek in progress (brief — backend re-buffers)
+        Seeking,    // Seek in progress (brief - backend re-buffers)
         Stopped,    // Replay ended (completed or user stopped)
         Error,      // Something went wrong
     };
@@ -95,7 +95,7 @@ public:
 
     // ─── Construction ────────────────────────────────────────────────────
     explicit ReplayManager(WebSocketClient* ws_client);
-    ~ReplayManager();  // Defined in .cpp — DataContext has unique_ptr members
+    ~ReplayManager();  // Defined in .cpp - DataContext has unique_ptr members
 
     // ─── Context Swap Callback ───────────────────────────────────────────
     // AppState provides this callback so ReplayManager can trigger
@@ -145,7 +145,7 @@ public:
     void request_archive_replay(const std::string& event_id, const std::string& symbol = "", float speed = 1.0f);
 
     // Pack replay (Hot Replay Path B): play a self-contained .edpack served
-    // static from R2/CDN — no session POST, no WebSocket, no token (public
+    // static from R2/CDN - no session POST, no WebSocket, no token (public
     // showcase packs). The PackReplayEngine reproduces the box's session
     // behavior client-side and drives this manager through the same
     // handle_ws_message / route_parsed entries the WS path uses; controls are
@@ -153,7 +153,7 @@ public:
     // (the pack header is authoritative).
     void request_pack_replay(const std::string& pack_url, const std::string& symbol_hint = "", float speed = 1.0f);
 
-    // Per-frame pack engine driver — call from the main loop alongside
+    // Per-frame pack engine driver - call from the main loop alongside
     // flush_pending_skip (no-op outside pack mode).
     void tick_pack_engine();
     bool is_pack_mode() const { return pack_mode_; }
@@ -176,18 +176,18 @@ public:
     void set_speed(float speed);
     void speed_up();            // Next preset
     void speed_down();          // Previous preset
-    // deliberate=true bypasses the scrubber-drag debounce — use for discrete
+    // deliberate=true bypasses the scrubber-drag debounce - use for discrete
     // nav (lesson rail click, Back, Restart) where a swallowed call = dead button.
     void seek(int64_t timestamp_ms, bool deliberate = false);
     void seek_to_progress(float progress); // 0.0 to 1.0
     void skip_forward(int64_t seconds = SKIP_MEDIUM);
     void skip_backward(int64_t seconds = SKIP_MEDIUM);
 
-    // Clock-only forward skip — sends "skip_forward" control message.
+    // Clock-only forward skip - sends "skip_forward" control message.
     // No consumer teardown, no buffer clearing. Instant.
     void skip_forward_to(int64_t timestamp_ms);
 
-    // Clock-only backward skip — repositions clock + trims future candles.
+    // Clock-only backward skip - repositions clock + trims future candles.
     // No consumer teardown. The playback loop will re-deliver data naturally
     // when the clock catches up to the buffer position.
     void skip_backward_to(int64_t timestamp_ms);
@@ -209,7 +209,7 @@ public:
     // Per-frame. Promotes Buffering→Playing once the replay context is primed
     // (candles populated + orderbook seed received). Call every frame from the
     // main loop alongside flush_pending_skip / drip_feed_pending_replay. This is
-    // what holds the replay clock until real data is flowing — for ALL replays
+    // what holds the replay clock until real data is flowing - for ALL replays
     // (lessons AND the live terminal's "replay from here"), not just lessons.
     void tick_buffering_gate();
 
@@ -241,7 +241,7 @@ public:
 
     // ─── Seek ceiling (lesson scrub-forward lock) ────────────────────────
     // While armed, every FORWARD motion (seek, scrub commit, >> skip, step
-    // jump — all transports plus keyboard) clamps to this replay time, and the
+    // jump - all transports plus keyboard) clamps to this replay time, and the
     // ghost preview clamps with it. Backward motion is never restricted.
     // LessonRuntime re-pushes it EVERY frame while a lockForward step is
     // active (typically = the playhead); the ceiling self-expires when pushes
@@ -263,7 +263,7 @@ public:
     // the playback clock passes the cutoff (data is flowing again).
     int64_t rewind_cutoff_ms() const { return rewind_cutoff_ms_; }
 
-    // True while a rewind is in flight — binary frames should be dropped.
+    // True while a rewind is in flight - binary frames should be dropped.
     bool is_rewind_pending() const { return rewind_pending_; }
 
     // True during drip-feed catch-up after a client-only rewind.
@@ -276,7 +276,7 @@ public:
 
     // Flush a deferred WS join. join_session() latches instead of erroring when
     // the WS handshake hasn't completed yet (the studio boot path fires
-    // request_replay as soon as the wasm runtime is up — calledRun — which is
+    // request_replay as soon as the wasm runtime is up - calledRun - which is
     // EARLIER than the WS connect; the lesson path dodged this via g_init_complete).
     // Call this every frame from the main loop alongside flush_pending_skip().
     void flush_pending_join();
@@ -290,7 +290,7 @@ public:
     // Call this every frame from the main loop.
     void drip_feed_pending_replay();
 
-    // Smooth interpolated time for display — advances frame-by-frame between
+    // Smooth interpolated time for display - advances frame-by-frame between
     // server status updates using local wall clock × speed. Prevents the timer
     // from jumping in 2-second increments.
     int64_t interpolated_time_ms() const;
@@ -305,8 +305,8 @@ public:
     // Call this in main_loop after widgets. Only renders when is_active().
     void render_control_bar();
 
-    // Renders the free-window replay range picker (design §8.1–8.2): the hero
-    // FREE band (48–72h ago), locked RECENT/ARCHIVE bands, presets, live countdown,
+    // Renders the free-window replay range picker (design §8.1-8.2): the hero
+    // FREE band (48-72h ago), locked RECENT/ARCHIVE bands, presets, live countdown,
     // a tier-locked speed row, and the "N of 6 today" chip. Renders only when the
     // launcher is open (open_replay_launcher). Call from the main loop.
     void render_replay_launcher();
@@ -388,7 +388,7 @@ private:
     // discard/hide data with timestamps after this value.
     int64_t rewind_cutoff_ms_ = 0;
 
-    // True between skip_backward_to() and replay_seeked — during this window,
+    // True between skip_backward_to() and replay_seeked - during this window,
     // all binary frames are dropped because they're stale data from before
     // the backend processed the rewind. The backend pauses its playback loop
     // during rewind, so no NEW-position data arrives until after replay_seeked.
@@ -406,7 +406,7 @@ private:
     };
     PendingRequest pending_;
 
-    // ─── Replay range picker (free-window launcher, §8.1–8.2) ─────────────
+    // ─── Replay range picker (free-window launcher, §8.1-8.2) ─────────────
     bool        launcher_open_        = false;
     std::string launcher_symbol_;                  // symbol the picker will replay
     int64_t     launcher_tf_seconds_  = 300;       // initial replay timeframe
@@ -425,7 +425,7 @@ private:
     // ─── History Buffer (client-side rewind) ─────────────────────────────
     // Stores last 10 minutes of delivered replay messages for instant << rewind.
     // Created on replay start, destroyed on stop/reset.
-    // NOT created in pack mode — pack rewinds are local block re-reads (CDN
+    // NOT created in pack mode - pack rewinds are local block re-reads (CDN
     // range GETs), so the buffer's RAM cost buys nothing there.
     std::unique_ptr<ReplayHistoryBuffer> history_buffer_;
 
@@ -460,7 +460,7 @@ private:
     std::string usage_event_ref() const;
 
     // ─── Skip Debounce (coalesce rapid >> / << into one backend message) ──
-    // Only used for CASE 3 (backend skip — no drip-feed active, or target
+    // Only used for CASE 3 (backend skip - no drip-feed active, or target
     // past drip-feed end). During drip-feed, >> is a pure client-side
     // buffer fast-forward and doesn't need debouncing or backend messages.
     // Trailing-edge: every press resets the 200ms timer. One message sent
@@ -471,7 +471,7 @@ private:
     bool pending_skip_is_forward_ = false;    // Direction of pending skip
     bool pending_skip_needs_flush_ = false;   // True when a debounced press deferred a send
     int64_t skip_origin_ms_ = 0;             // Clock position before first >> in debounce sequence
-    bool last_flushed_skip_large_ = false;   // Flushed skip crossed the large threshold (book was cleared) — pack engine mirrors the box's reconnect re-seed
+    bool last_flushed_skip_large_ = false;   // Flushed skip crossed the large threshold (book was cleared) - pack engine mirrors the box's reconnect re-seed
 
     // ─── Deferred join latch (WS-not-connected-yet at join time) ──────────
     // Set by join_session() when the session is created but the WS isn't up.
@@ -506,7 +506,7 @@ private:
     bool context_primed() const;
     // Safety valve: if data never arrives, release after this long in Buffering
     // so a stalled/empty window doesn't hang the spinner forever. Sized to exceed
-    // the legitimate worst case — depth/DOM ticks come from TimescaleDB and can
+    // the legitimate worst case - depth/DOM ticks come from TimescaleDB and can
     // take ~10s to retrieve + buffer + send, while candles/heatmap are near-instant.
     int64_t buffering_since_ms_ = 0;
     static constexpr int64_t BUFFERING_MAX_MS = 20000;
@@ -522,7 +522,7 @@ private:
 
     // Control bar sub-renderers
     void render_transport_controls();
-    void render_record_button();   // CLIP_FACTORY P1 — ⏺/⏹ share-clip recorder
+    void render_record_button();   // CLIP_FACTORY P1 - ⏺/⏹ share-clip recorder
     void render_speed_control();
     void render_timeline_scrubber();
     void render_time_display();

@@ -73,7 +73,7 @@ void CandleManager::request_historical(size_t count, int64_t end_time_ms) {
 }
 
 void CandleManager::update(double visible_x_min, double visible_x_max) {
-    // Time-based candle finalization — live mode only.
+    // Time-based candle finalization - live mode only.
     // During replay, candle period transitions are driven by trade/candle
     // handlers detecting timestamp changes. Wall clock is meaningless for
     // replay candles (always in the past → instant finalization every frame).
@@ -139,7 +139,7 @@ void CandleManager::change_timeframe(const int64_t new_timeframe_seconds) {
     stream_mgr_.subscribe_trades(trade_stream_key_, trade_handler);
     stream_mgr_.subscribe_candles_batch(candle_stream_key_, batch_handler);
     stream_mgr_.subscribe_candles(candle_stream_key_, live_handler);
-    // Trigger reload — replay mode requests candles ending at replay start time
+    // Trigger reload - replay mode requests candles ending at replay start time
     is_loading_ = true;
     if (replay_start_time_ms_ > 0) {
         // Use the latest replay position, not the start time. Otherwise
@@ -203,7 +203,7 @@ void CandleManager::trim_candles_after(int64_t cutoff_ms) {
 
     // If the building candle survived (its bucket starts at or before the
     // cutoff), truncate its OHLC. The candle may contain price data from
-    // AFTER the cutoff time (e.g., rewinding from 10:49:45 to 10:49:00 —
+    // AFTER the cutoff time (e.g., rewinding from 10:49:45 to 10:49:00 -
     // the 10:49 candle's wick includes the spike at :45s). Reset to open
     // so incoming replay data rebuilds the correct OHLC.
     if (has_current_candle_ && current_candle_.timestamp_ms <= cutoff_ms) {
@@ -223,7 +223,7 @@ void CandleManager::trim_candles_after(int64_t cutoff_ms) {
         candles_.pop_back();
         has_current_candle_ = true;
 
-        // Same OHLC reset — this candle's bucket is at or before the cutoff
+        // Same OHLC reset - this candle's bucket is at or before the cutoff
         // but it was finalized with a full minute of data.
         current_candle_.close = current_candle_.open;
         current_candle_.high = current_candle_.open;
@@ -259,7 +259,7 @@ void CandleManager::handle_trade(const Terminal::Trade& trade) {
     if (!initial_load_complete_) return;  // Don't build candles until batch arrives
     // After a seek, suppress trade-based candle building until the historical
     // batch arrives. Without this, trades create a building candle at the seek
-    // target before the batch, then the batch collides with it — producing
+    // target before the batch, then the batch collides with it - producing
     // doubled candles with wrong open/high/low.
     if (is_loading_) return;
     // Track latest replay time for timeframe-change batch requests
@@ -328,7 +328,7 @@ void CandleManager::build_candle_from_trade(const Terminal::Trade& trade) {
                 return;
             }
         }
-        return;  // No matching candle — drop the out-of-order trade
+        return;  // No matching candle - drop the out-of-order trade
     }
 
     // Finalize previous candle if we've moved to a new period
@@ -440,7 +440,7 @@ void CandleManager::handle_candle(const Terminal::Candle& candle) {
     // After a seek, suppress streaming candle messages until the historical
     // batch arrives. Without this, streaming ticks from the new consumer
     // create a building candle before the batch, then the batch arrives and
-    // collides — producing doubled candles and mixed green/red bodies.
+    // collides - producing doubled candles and mixed green/red bodies.
     if (is_loading_) {
         return;
     }
@@ -488,13 +488,13 @@ void CandleManager::handle_candle(const Terminal::Candle& candle) {
     }
 
     if (!aligned.final) {
-        // LIVE coexistence guard (2026-06-28, §3C — higher-TF price-follow bug):
+        // LIVE coexistence guard (2026-06-28, §3C - higher-TF price-follow bug):
         // If this period is ALREADY a finalized candle (the wall-clock finalizer in update()
         // closed it at the TF boundary, or a server final landed) and it is NOT the current
         // building candle, do NOT spawn a building candle at that same timestamp. A
         // finalized+building pair at one ts makes plot_candles skip the building candle
         // (already_in_finalized), so the STALE finalized candle renders while the live price
-        // tag (= building close) floats above it — the "5m/15m building candle goes invisible /
+        // tag (= building close) floats above it - the "5m/15m building candle goes invisible /
         // close not pinned / price mid-body" bug. 1m hid it because next-period trades recreate
         // the building candle almost instantly; on 5m/15m the client boundary races the server's
         // late partials and next-period trades are sparser, so it lingers. build_candle_from_trade
@@ -518,7 +518,7 @@ void CandleManager::handle_candle(const Terminal::Candle& candle) {
             mark_dirty();
             return;
         }
-        // Partial update — merge with building candle
+        // Partial update - merge with building candle
         if (has_current_candle_ && current_candle_.timestamp_ms == aligned.timestamp_ms) {
             // During replay, keep the continuity-fixed open from the first tick.
             // In live mode, server is authoritative for open price.
@@ -529,7 +529,7 @@ void CandleManager::handle_candle(const Terminal::Candle& candle) {
             current_candle_.low = std::min(current_candle_.low, aligned.low);
             // Close: in LIVE mode the trade tape is the real-time price. The server's
             // partial candle for an aggregated TF (5m/15m/1h/…) carries a close built
-            // from completed sub-candles, so it LAGS the tape — adopting it here
+            // from completed sub-candles, so it LAGS the tape - adopting it here
             // stalled the building candle below price on every TF above 1m (1m looked
             // fine only because its server close already equals the latest trade).
             // Let trades own the live close (build_candle_from_trade); take the server
@@ -542,7 +542,7 @@ void CandleManager::handle_candle(const Terminal::Candle& candle) {
             current_candle_.vsell = aligned.vsell;
             current_candle_.tbuy = aligned.tbuy;
             current_candle_.tsell = aligned.tsell;
-            // Enforce OHLC invariants — prevents mixed red/green rendering
+            // Enforce OHLC invariants - prevents mixed red/green rendering
             // when continuity-open diverges from tick data
             current_candle_.high = std::max({current_candle_.open, current_candle_.close, current_candle_.high});
             current_candle_.low = std::min({current_candle_.open, current_candle_.close, current_candle_.low});
@@ -554,7 +554,7 @@ void CandleManager::handle_candle(const Terminal::Candle& candle) {
             // alone. The 15s candle-tick stream and the trade stream are delivered
             // independently and the tick stream often races a beat ahead, so a tick
             // for period T+1 can arrive before T's last trades. Advancing here would
-            // finalize the still-active T and make T+1 the building candle — then T's
+            // finalize the still-active T and make T+1 the building candle - then T's
             // trailing trades land via the out-of-order path and keep updating T,
             // which now renders 2nd-from-last, while the premature T+1 sits (near-)
             // empty at the rightmost. That's the "1m candle updates the 2nd-from-last
@@ -572,7 +572,7 @@ void CandleManager::handle_candle(const Terminal::Candle& candle) {
             current_candle_ = aligned;
             has_current_candle_ = true;
             // During REPLAY only: fix open for continuity with previous candle's close.
-            // In live mode, server's open is authoritative — don't override.
+            // In live mode, server's open is authoritative - don't override.
             if (replay_start_time_ms_ > 0 && !candles_.empty()) {
                 current_candle_.open = candles_.back().close;
                 current_candle_.high = std::max(current_candle_.high, current_candle_.open);
@@ -665,7 +665,7 @@ void CandleManager::handle_candle_batch(std::span<const Terminal::Candle> batch)
         return;
     }
     // Trim excess from FRONT (oldest prepended data), not back (newest live data).
-    // The old pop_back() approach was wrong — it removed the most recent candles
+    // The old pop_back() approach was wrong - it removed the most recent candles
     // when historical data was loaded, causing "recent data gets cut" on zoom-out.
     while (candles_.size() > MAX_CANDLES) {
         candles_.pop_front();
@@ -685,7 +685,7 @@ void CandleManager::handle_candle_batch(std::span<const Terminal::Candle> batch)
         // the current replay position; 15s ticks will arrive for that period or
         // later. If we leave the last batch candle finalized, the first 15s tick
         // creates a building candle with open = candles_.back().close (the SAME
-        // period's historical close, not the PREVIOUS period's close) — wrong.
+        // period's historical close, not the PREVIOUS period's close) - wrong.
         //
         // LIVE MODE: Only pop if wall clock is still within the candle's period
         // (the candle hasn't finished yet).
@@ -717,7 +717,7 @@ void CandleManager::handle_candle_batch(std::span<const Terminal::Candle> batch)
                     has_current_candle_ = true;
                 }
                 // During replay, the batch candle has FULL historical H/L/close
-                // for the entire period — data that hasn't been replayed yet.
+                // for the entire period - data that hasn't been replayed yet.
                 // Reset to just the open so ticks progressively fill in H/L/close.
                 // Without this, the building candle renders with the full period's
                 // range immediately (giant candle covering the entire 5m/1m move).
@@ -781,7 +781,7 @@ void CandleManager::check_and_load_more(double visible_x_min) {
 
 void CandleManager::rebuild_cache() const {
     // Runs at most once/frame (lazy, via ensure_cache) but copies the WHOLE
-    // deque — cost scales with loaded candles. Section shows up in the perf
+    // deque - cost scales with loaded candles. Section shows up in the perf
     // overlay when replay 15s-tick merges keep dirtying the cache.
     ProfileScope _ps("SoARebuild");
     const size_t n = candles_.size();
@@ -819,7 +819,7 @@ void CandleManager::rebuild_cache() const {
     // HA_close = (O+H+L+C)/4; HA_open seeds at (O0+C0)/2 then rolls forward as
     // (HA_open[i-1]+HA_close[i-1])/2; HA_high/low fold in the HA body. Path-
     // dependent from the oldest loaded candle, so a scroll-load prepend repaints
-    // the left edge slightly (matches every platform) — automatic via this
+    // the left edge slightly (matches every platform) - automatic via this
     // full rebuild under cache_dirty_.
     cached_ha_opens_.clear();
     cached_ha_highs_.clear();

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// preview_candle_store.cpp — replay scrub-preview candle store
+// preview_candle_store.cpp - replay scrub-preview candle store
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "preview_candle_store.h"

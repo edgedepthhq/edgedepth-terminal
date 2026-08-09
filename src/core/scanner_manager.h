@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// scanner_manager.h — Market scanner data for symbol picker
+// scanner_manager.h - Market scanner data for symbol picker
 //
 // Receives MarketScannerUpdate protobufs from the DataThread.
 // Provides per-symbol microstructure scores (EdgeDepth Score, VPIN,
@@ -53,7 +53,7 @@ public:
     int64_t last_update_ms() const { return last_update_ms_; }
     size_t count() const { return entries_.size(); }
 
-    // make_key builds "{exchange}:{lowercased symbol}" — the single normalization
+    // make_key builds "{exchange}:{lowercased symbol}" - the single normalization
     // point for apply_update (write) and get (read).
     static std::string make_key(const std::string& exchange, const std::string& symbol) {
         std::string k;

@@ -62,7 +62,7 @@ if(NOT json_POPULATED)
 endif()
 
 # ────────────────────────────────────────────────────────────────────
-# ImGui (docking branch — pinned to pre-glBindSampler commit for WebGL2/GLES3.0 compat)
+# ImGui (docking branch - pinned to pre-glBindSampler commit for WebGL2/GLES3.0 compat)
 # [2026-04-24] Latest docking branch added glBindSampler which requires GLES 3.2,
 # but Emscripten targets WebGL2 (GLES 3.0). Pin to last known-good commit.
 # To update: check https://github.com/ocornut/imgui/commits/docking for a commit
@@ -87,7 +87,7 @@ set(IMGUI_DIR ${imgui_SOURCE_DIR})
 # ImPlot (pinned)
 # [2026-08-06] Pinned to the commit the drawing-tools input arbitration was
 # verified against (GetInputMap()/ImPlotInputMap semantics: mutable ref read
-# live at EndPlot; Pan/Fit/Select index size-5 IO arrays — see
+# live at EndPlot; Pan/Fit/Select index size-5 IO arrays - see
 # src/ui/drawing/drawing_layer.cpp). Was GIT_TAG master; re-verify the input
 # map before moving the pin.
 # ────────────────────────────────────────────────────────────────────
@@ -527,7 +527,7 @@ set(DEBUG_LINK_FLAGS
         --source-map-base http://localhost:8000/
         -g3
         -sENVIRONMENT=web
-        # Education bridge exports — MUST match Release. The C functions are defined
+        # Education bridge exports - MUST match Release. The C functions are defined
         # WITH a leading underscore in source (e.g. `void _edu_cmd_continue()`), same
         # as the pre-existing `_education_on_lesson_fetch`. Emscripten strips ONE
         # leading underscore for the JS-prefix convention, so the EXPORTED_FUNCTIONS

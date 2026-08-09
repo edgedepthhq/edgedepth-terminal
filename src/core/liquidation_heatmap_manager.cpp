@@ -54,7 +54,7 @@ void LiquidationHeatmapManager::apply_update(
         band.long_stop_density  = (i < update_pb.long_stop_density_size())  ? update_pb.long_stop_density(i)  : 0.0;
         band.short_stop_density = (i < update_pb.short_stop_density_size()) ? update_pb.short_stop_density(i) : 0.0;
 
-        // Accumulate observed peaks — use max(server, local) so observed
+        // Accumulate observed peaks - use max(server, local) so observed
         // liquidations don't visually disappear when mark price shifts
         if (band.obs_long_usd > 0.0 || band.obs_short_usd > 0.0) {
             const double bw = snapshot.band_width_pct / 100.0 * snapshot.mark_price;
@@ -105,7 +105,7 @@ void LiquidationHeatmapManager::apply_update(
     finalize_timeline_column(pair, update_pb);
 
     // Phase 2a: Recompute reach_timeline_ from CURRENT mark price.
-    // This creates a dynamic "cone" that moves with price — bands near current
+    // This creates a dynamic "cone" that moves with price - bands near current
     // mark are bright, far away are dim, regardless of when they were created.
     // Throttled to >0.1% mark movement to avoid per-tick recompute.
     {
@@ -114,7 +114,7 @@ void LiquidationHeatmapManager::apply_update(
             auto& last_mark = last_reach_mark_[key];
             bool should_recompute = false;
             if (last_mark <= 0.0) {
-                // First live update after load — recompute all historical data
+                // First live update after load - recompute all historical data
                 // from current mark to create the initial cone effect.
                 last_mark = mark;
                 should_recompute = true;
@@ -144,7 +144,7 @@ LiquidationHeatmapManager::get_snapshot(const Terminal::Pair& pair) const {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// HL census layer ("Liq Levels HL", P2e) — real-position snapshots
+// HL census layer ("Liq Levels HL", P2e) - real-position snapshots
 // ═══════════════════════════════════════════════════════════════════
 
 void LiquidationHeatmapManager::apply_census_update(
@@ -160,7 +160,7 @@ void LiquidationHeatmapManager::apply_census_update(
     snapshot.total_short_risk_usd = update_pb.total_short_risk_usd();
     snapshot.net_risk_bias = update_pb.net_risk_bias();
     snapshot.band_width_pct = update_pb.band_width_pct();
-    // Census reuse: flow_intensity carries coverage_frac (0..1). Verbatim —
+    // Census reuse: flow_intensity carries coverage_frac (0..1). Verbatim -
     // apply_update's >0.001→1.0 defaulting would turn "no coverage" into "full".
     snapshot.flow_intensity = update_pb.flow_intensity();
 
@@ -219,7 +219,7 @@ void LiquidationHeatmapManager::clear_all() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// WS4 Observed markers — discrete @forceOrder event store
+// WS4 Observed markers - discrete @forceOrder event store
 // ═══════════════════════════════════════════════════════════════════
 
 void LiquidationHeatmapManager::add_observed_event(const Terminal::Pair& pair,
@@ -227,7 +227,7 @@ void LiquidationHeatmapManager::add_observed_event(const Terminal::Pair& pair,
     if (liq.timestamp_ms <= 0) return;
     auto& evs = observed_events_[LiqHeatmapKey{pair.exchange, pair.symbol}];
     // Near-monotonic input: append, or short back-scan insert to keep sorted
-    // (out-of-order arrivals are rare and shallow — reconnect races, replay
+    // (out-of-order arrivals are rare and shallow - reconnect races, replay
     // buffer boundaries). Renderer binary-searches on timestamp_ms.
     // Exact-duplicate skip makes replay rewind re-delivery idempotent (the
     // history buffer / backend may re-stream the trimmed window).
@@ -298,7 +298,7 @@ void LiquidationHeatmapManager::rebuild_timeline(const LiqHeatmapKey& key) {
         it->second->clear();
     }
 
-    // Reset per-tier maxes — they'll be recomputed from the proto replay
+    // Reset per-tier maxes - they'll be recomputed from the proto replay
     for (int i = 0; i < 6; ++i) tier_maxes_[i] = 0.0;
 
     // Re-process all cached protos with current settings
@@ -346,7 +346,7 @@ ShaderHeatmapRenderer& LiquidationHeatmapManager::get_or_create_timeline(const L
         // Was GL_LINEAR "cloud" (blurry) + extend OFF; the discrete bands need GL_NEAREST to
         // read as crisp lines and extend-levels to draw them as continuous forward streaks.
         renderer->set_extend_levels(true);      // forward-fill levels into persistent horizontal streaks
-        renderer->set_linear_filtering(false);  // GL_NEAREST — crisp discrete cells (was GL_LINEAR blur)
+        renderer->set_linear_filtering(false);  // GL_NEAREST - crisp discrete cells (was GL_LINEAR blur)
         it = timeline_heatmaps_.emplace(key, std::move(renderer)).first;
     }
     return *it->second;
@@ -436,7 +436,7 @@ void LiquidationHeatmapManager::finalize_timeline_column(
         // V3: Per-tier independent normalization.
         // Each tier is sqrt-normalized against its OWN running max, then the
         // normalized [0-1] contributions are summed. This means toggling a
-        // tier is purely additive — it adds/removes that tier's bands without
+        // tier is purely additive - it adds/removes that tier's bands without
         // changing the brightness of other tiers. Matches MMT's behavior.
         //
         // Without this, toggling 5x/10x would change the global max and
@@ -456,7 +456,7 @@ void LiquidationHeatmapManager::finalize_timeline_column(
             };
             // V9: Absolute log-USD brightness (replaces per-tier running-max
             // normalization, which crushed the dense field to the few dominant
-            // bands — the rails-only look; see LIQ_MAP_PLAN render reframe). Sum the
+            // bands - the rails-only look; see LIQ_MAP_PLAN render reframe). Sum the
             // enabled tiers' USD at this band, then log-scale against the $500 floor
             // so the dim background survives and the dominant levels stay bright.
             // No running max → stable, doesn't shift brightness frame-to-frame.
@@ -542,7 +542,7 @@ LiquidationHeatmapManager::get_band_history(const Terminal::Pair& pair, uint8_t 
     // levels. The list is cumulative, so the latest snapshot holds the full picture.
     const pb::LiquidationHeatmapUpdate& latest = pit->second.rbegin()->second;
     const int64_t latest_ts = latest.timestamp_ms();
-    // Rebuild when a NEW snapshot arrives (rails change ~1/min) OR the leverage mask changes — both
+    // Rebuild when a NEW snapshot arrives (rails change ~1/min) OR the leverage mask changes - both
     // alter per-rail magnitude/visibility, so a stale cache would silently ignore a toggle.
     if (latest_ts != 0 && band_history_ts_[key] == latest_ts && band_history_mask_[key] == mask) return cache;
     band_history_ts_[key] = latest_ts;
@@ -553,7 +553,7 @@ LiquidationHeatmapManager::get_band_history(const Terminal::Pair& pair, uint8_t 
         const pb::LiqRail& r = latest.rails(i);
         if (r.price() <= 0.0) continue;
         // Sum the enabled leverage tiers (mask bits 0x01=5x .. 0x20=100x). If the snapshot predates
-        // per-tier rails (all tier fields 0 — e.g. older/archive baked data), fall back to the
+        // per-tier rails (all tier fields 0 - e.g. older/archive baked data), fall back to the
         // blended peak_usd so rails still show (unfiltered) rather than vanishing.
         const double tier_all = r.peak_5x_usd() + r.peak_10x_usd() + r.peak_25x_usd()
                               + r.peak_50x_usd() + r.peak_75x_usd() + r.peak_100x_usd();
@@ -614,7 +614,7 @@ pb::HeatmapSnapshot LiquidationHeatmapManager::convert_to_heatmap_snapshot(
 
     const int n = update_pb.price_mid_size();
 
-    // Check if per-leverage data is available (use 25x as probe — always populated)
+    // Check if per-leverage data is available (use 25x as probe - always populated)
     const bool has_per_leverage = (update_pb.est_25x_usd_size() == n);
 
     // Track price range
@@ -631,7 +631,7 @@ pb::HeatmapSnapshot LiquidationHeatmapManager::convert_to_heatmap_snapshot(
 
         // Estimated: always use per-leverage filtering when available.
         // This ensures toggling tiers only affects bands at those tiers'
-        // price distances — never changes values of other tiers' bands.
+        // price distances - never changes values of other tiers' bands.
         // Fallback to combined totals only for old protos without per-tier data.
         // V3: Per-tier independent normalization (same as live path)
         double norm_value = 0.0;
@@ -647,7 +647,7 @@ pb::HeatmapSnapshot LiquidationHeatmapManager::convert_to_heatmap_snapshot(
             };
             // V9: Absolute log-USD brightness (replaces the per-tier decaying-max
             // + pow(0.6) normalization, which compressed the dense field to the few
-            // dominant bands — the rails-only look). Sum the enabled tiers' USD at this
+            // dominant bands - the rails-only look). Sum the enabled tiers' USD at this
             // band, then log-scale against the $500 floor: dim background survives,
             // dominant levels stay bright, no running-max twitch. Kept identical to the
             // live finalize_column path so live == timeline by construction.
@@ -671,7 +671,7 @@ pb::HeatmapSnapshot LiquidationHeatmapManager::convert_to_heatmap_snapshot(
             norm_value *= std::sqrt(reach);
         }
         norm_value *= flow_intensity;
-        // V6: Unified colormap — no directional encoding. Both long and short
+        // V6: Unified colormap - no directional encoding. Both long and short
         // liq use the same positive values and same colormap. Direction is
         // conveyed by position relative to mark price, not by color.
         snapshot.add_bid_qty(norm_value);

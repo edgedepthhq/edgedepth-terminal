@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// volume_profile_manager.h — VPVR (Volume Profile Visible Range) state
+// volume_profile_manager.h - VPVR (Volume Profile Visible Range) state
 //
 // Stores aggregated volume profiles per symbol for the visible chart range.
 // ChartWidget reads this during render to draw the VPVR sidebar.
@@ -75,7 +75,7 @@ public:
     // Read by ChartWidget during render. Returns nullptr if no valid profile.
     const ProfileData* get_profile(const std::string& symbol) const;
 
-    // Invalidate cached profile — forces re-request on next chart render.
+    // Invalidate cached profile - forces re-request on next chart render.
     // Used on replay rewind to discard stale future volume data.
     void invalidate(const std::string& symbol);
     void invalidate_all();
@@ -105,7 +105,7 @@ private:
     float width_pct_    = 0.20f;  // 20% of chart width
     bool  enabled_      = false;
 
-    // Debounce — avoid re-requesting on every frame during scroll
+    // Debounce - avoid re-requesting on every frame during scroll
     int64_t last_request_time_ms_ = 0;
     int64_t last_start_ms_        = 0;
     int64_t last_end_ms_          = 0;

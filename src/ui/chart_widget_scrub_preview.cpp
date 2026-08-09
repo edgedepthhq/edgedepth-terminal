@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// chart_widget_scrub_preview.cpp — ghost scrub-preview candle pass
+// chart_widget_scrub_preview.cpp - ghost scrub-preview candle pass
 //
 // While the user aims a scrub on the replay transport (hover with intent delay,
 // or an active drag), this pass renders the PreviewCandleStore's candles AHEAD
@@ -8,8 +8,8 @@
 //   - beyond the aimed-at time: faint ghost (context for aiming further)
 //   - a vertical line at the aimed-at time (the landing marker)
 // Up/down tint is preserved at low alpha deliberately: direction IS the
-// information users scrub by. Reads ONLY the preview store — never
-// CandleManager — and mirrors plot_candles' three zoom tiers so a fitted map
+// information users scrub by. Reads ONLY the preview store - never
+// CandleManager - and mirrors plot_candles' three zoom tiers so a fitted map
 // view stays cheap. Lives in its own translation unit per the God-file rule
 // (chart_widget.cpp is slated for splits, not growth).
 // ═══════════════════════════════════════════════════════════════════════════════

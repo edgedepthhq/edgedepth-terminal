@@ -26,7 +26,7 @@ void LayoutManager::setup_default_layout(const std::string& exchange, const std:
 
     if (EducationBoot::instance().is_embedded()) {
         // Lesson/Studio layout: NO Watchlist, NO Depth. Chart fills the center;
-        // the right column is the Order Flow read — DOM ladder on top, tape below.
+        // the right column is the Order Flow read - DOM ladder on top, tape below.
         //
         // Size the right column in PIXELS (~RIGHTCOL_W) rather than a flat ratio.
         // The DOM ladder carries ~272px of FIXED columns (BUYS/PRICE/SELLS/DELTA)
@@ -41,7 +41,7 @@ void LayoutManager::setup_default_layout(const std::string& exchange, const std:
         ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, right_ratio, &dock_right, &dock_main);
 
         // DOM over TAPE at a ~63/37 split (DOM ~15% taller, tape ~15% shorter than the
-        // old 56/44) — the ladder is the focus of the read, the tape is the single
+        // old 56/44) - the ladder is the focus of the read, the tape is the single
         // order-flow scan column under it.
         ImGuiID dock_right_trades;
         ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Down, 0.365f, &dock_right_trades, &dock_right);
@@ -55,7 +55,7 @@ void LayoutManager::setup_default_layout(const std::string& exchange, const std:
         return;
     }
 
-    // Watchlist sidebar — fixed-ish WATCHLIST_W via ratio of viewport width
+    // Watchlist sidebar - fixed-ish WATCHLIST_W via ratio of viewport width
     const float vw = ImGui::GetMainViewport()->Size.x;
     const float wl_ratio = std::clamp(Theme::Layout::WATCHLIST_W / std::max(vw, 1.0f), 0.10f, 0.30f);
     ImGuiID dock_left;

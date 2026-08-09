@@ -173,7 +173,7 @@ const FootprintManager::MergedCache* FootprintManager::get_merged_grouped(
         }
     }
 
-    // Cache miss — need to merge and group
+    // Cache miss - need to merge and group
     const int buckets = std::max(1, static_cast<int>(tf_sec / 60));
     int64_t base_ms = (candle_ts / 60000) * 60000;
 

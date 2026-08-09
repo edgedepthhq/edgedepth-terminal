@@ -1,5 +1,5 @@
 /* ============================================================
-   edgedepth — design system v0.1
+   edgedepth - design system v0.1
    Near-black cool charcoal · teal/magenta · viridis heatmap
    Tokens first, then components. Tweak hooks live on <body data-*>.
    ============================================================ */
@@ -13,7 +13,7 @@ input{font:inherit;color:inherit}
 
 /* ---- Tokens ----------------------------------------------- */
 :root{
-  /* surfaces — cool near-black ramp */
+  /* surfaces - cool near-black ramp */
   --bg-base:#05070a;
   --bg-panel:#0a0e12;
   --bg-elev:#0d1217;
@@ -33,7 +33,7 @@ input{font:inherit;color:inherit}
   --tx-3:#5f6f7c;
   --tx-4:#3a4651;
 
-  /* semantic — teal up / magenta-rose down (colorblind-safer) */
+  /* semantic - teal up / magenta-rose down (colorblind-safer) */
   --up:#15c99e;
   --down:#ff4d6d;
   --up-soft:rgba(21,201,158,.13);
@@ -41,7 +41,7 @@ input{font:inherit;color:inherit}
   --up-line:rgba(21,201,158,.5);
   --down-line:rgba(255,77,109,.5);
 
-  /* brand accent — cyan, used sparingly for focus/active/replay */
+  /* brand accent - cyan, used sparingly for focus/active/replay */
   --brand:#22c5db;
   --brand-soft:rgba(34,197,219,.14);
   --brand-line:rgba(34,197,219,.55);
@@ -273,7 +273,7 @@ body[data-mode="replay"] .replay-chip{display:flex}
 .tape-row.big{background:linear-gradient(90deg,transparent,var(--brand-soft))}
 
 /* ============================================================
-   REPLAY TRANSPORT — the hero
+   REPLAY TRANSPORT - the hero
    ============================================================ */
 .transport{display:flex;align-items:center;gap:14px;padding:0 14px;
   background:linear-gradient(var(--bg-panel),var(--bg-elev));

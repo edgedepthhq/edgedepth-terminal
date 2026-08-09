@@ -3,13 +3,13 @@
 
 using json = nlohmann::json;
 
-// Pack replay request hook (Hot Replay Path B) — consulted by REPLAY-mode
+// Pack replay request hook (Hot Replay Path B) - consulted by REPLAY-mode
 // managers before the WebSocket; see stream_handler.h.
 std::function<bool(const std::string&)> StreamManager::pack_request_hook_;
 
 void StreamManager::send_message(const std::string& message) const {
     // Pack replay: the engine owns every replay-context request (candle
-    // backfills etc.) — nothing may leak to the box from a pack session.
+    // backfills etc.) - nothing may leak to the box from a pack session.
     if (replay_mode_ && pack_request_hook_ && pack_request_hook_(message)) {
         return;
     }
@@ -58,7 +58,7 @@ void StreamManager::subscribe_orderbook(const StreamKey& key) {
 void StreamManager::subscribe_candles(const StreamKey& key, StreamHandler<Terminal::Candle> handler) {
     // Only send server-side subscribe if neither candle_subs_ nor candle_batch_subs_
     // have registered for this key yet. subscribe_candles_batch() may have already
-    // sent the subscribe — sending it twice causes the server to create duplicate
+    // sent the subscribe - sending it twice causes the server to create duplicate
     // NATS consumers, doubling every candle/stat/volume message on this stream.
     if (candle_subs_.find(key) == candle_subs_.end() &&
         candle_batch_subs_.find(key) == candle_batch_subs_.end()) {
@@ -83,7 +83,7 @@ void StreamManager::subscribe_stats(const StreamKey& key, StreamHandler<Terminal
 }
 
 void StreamManager::subscribe_volume(const StreamKey& key, StreamHandler<Terminal::Volume> handler) {
-    // Volume stream is already subscribed by default — don't re-subscribe.
+    // Volume stream is already subscribed by default - don't re-subscribe.
     // Just register the callback for dispatch.
     volume_subs_[key].push_back(handler);
 }
@@ -141,7 +141,7 @@ void StreamManager::unsubscribe_stats(const StreamKey &key, void* widget_ptr) {
     unsubscribe_impl(stats_subs_, key, widget_ptr);
 }
 
-// WS4 Observed markers — discrete @forceOrder liquidation events. Live comes
+// WS4 Observed markers - discrete @forceOrder liquidation events. Live comes
 // from the LIQUIDATIONS NATS stream (numeric stream id 5 in the subscribe
 // JSON); replay comes from the archive bundle / the liquidation_events DB
 // seed, delivered through the same STREAM_LIQUIDATIONS payload path.
@@ -263,7 +263,7 @@ void StreamManager::request_historical_vpin(const Terminal::Pair& pair, int64_t 
             {"count", count}
         }}
     };
-    // F3 absolute range — only send what's set; the server defaults +
+    // F3 absolute range - only send what's set; the server defaults +
     // replay-clamps the rest (no future leak during replay sessions).
     if (start_ms > 0) request["data"]["start_ms"] = start_ms;
     if (end_ms > 0)   request["data"]["end_ms"] = end_ms;

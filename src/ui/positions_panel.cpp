@@ -10,7 +10,7 @@
 #include <chrono>
 #include <unordered_map>
 
-// ASCII bullet for hit indicator. Avoids font-pack assumptions — most ImGui
+// ASCII bullet for hit indicator. Avoids font-pack assumptions - most ImGui
 // builds restrict to ASCII unless extended ranges were configured. If the
 // theme later loads a glyph range that supports U+2713, swap to "✓".
 #define ICON_HIT "*"
@@ -30,7 +30,7 @@ static double tp_progress_pct(const Terminal::PaperPosition& pos, double tp_leve
         num = pos.entry_price - pos.mark_price;
         den = pos.entry_price - tp_level;
     }
-    if (den <= 0) return -1.0; // misconfigured TP — silently skip
+    if (den <= 0) return -1.0; // misconfigured TP - silently skip
     double pct = (num / den) * 100.0;
     if (pct < 0)   pct = 0;
     if (pct > 100) pct = 100;
@@ -74,7 +74,7 @@ const char* PositionsPanel::format_duration(int64_t seconds, char* buf, size_t b
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Account summary bar — horizontal compact row
+// Account summary bar - horizontal compact row
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void PositionsPanel::render_account_summary(const Terminal::PaperAccount& acct, double open_pnl) {
@@ -204,7 +204,7 @@ void PositionsPanel::render_positions_tab() {
                         case 8:  va = a->mfe_pct;              vb = b->mfe_pct;              break;
                         case 9:  va = a->notional_usd;         vb = b->notional_usd;         break;
                         case 10: va = a->leverage;             vb = b->leverage;             break;
-                        case 13: return false; // TP2 column — no sort
+                        case 13: return false; // TP2 column - no sort
                         case 14: va = (double)a->duration_seconds; vb = (double)b->duration_seconds; break;
                         default: return false;
                     }
@@ -226,7 +226,7 @@ void PositionsPanel::render_positions_tab() {
         for (auto& c : sym_upper) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
         ImGui::Text("%s", sym_upper.c_str());
 
-        // Side — colored
+        // Side - colored
         ImGui::TableNextColumn();
         if (pos.is_long()) {
             ImGui::TextColored(Theme::Colors::BUY_GREEN, "LONG");
@@ -247,7 +247,7 @@ void PositionsPanel::render_positions_tab() {
         ImGui::TableNextColumn();
         ImGui::Text(fmt.price_fmt, pos.mark_price);
 
-        // Unrealized P&L — colored
+        // Unrealized P&L - colored
         ImGui::TableNextColumn();
         ImVec4 pnl_color = pos.unrealized_pnl >= 0
             ? Theme::Colors::BUY_GREEN : Theme::Colors::SELL_RED;
@@ -265,7 +265,7 @@ void PositionsPanel::render_positions_tab() {
         ImGui::TableNextColumn();
         ImGui::TextColored(Theme::Colors::BUY_GREEN, "%.2f%%", pos.mfe_pct);
 
-        // Size (notional USD) — show remaining pill when partially closed
+        // Size (notional USD) - show remaining pill when partially closed
         ImGui::TableNextColumn();
         if (pos.is_partially_closed()) {
             ImGui::Text("$%.0f", pos.notional_usd);
@@ -292,7 +292,7 @@ void PositionsPanel::render_positions_tab() {
             ImGui::Text(fmt.price_fmt, pos.stop_level);
         }
 
-        // TP1 level — render with state context
+        // TP1 level - render with state context
         //  - if tp1_hit: green ✓ + price
         //  - else if tp1_level > 0: price + colored progress pct (50%/90% bands)
         //  - else if tp_strategy == "trail_only": "Trail" (no fixed TP by design)
@@ -315,7 +315,7 @@ void PositionsPanel::render_positions_tab() {
             ImGui::TextColored(Theme::Colors::TEXT_SECONDARY, "-");
         }
 
-        // TP2 level — same logic
+        // TP2 level - same logic
         ImGui::TableNextColumn();
         if (pos.tp2_hit) {
             ImGui::TextColored(Theme::Colors::BUY_GREEN, "%s ", ICON_HIT);
@@ -332,7 +332,7 @@ void PositionsPanel::render_positions_tab() {
             ImGui::TextColored(Theme::Colors::TEXT_SECONDARY, "-");
         }
 
-        // Duration — compute live from opened_at for open positions
+        // Duration - compute live from opened_at for open positions
         ImGui::TableNextColumn();
         char dur_buf[32];
         {
@@ -390,7 +390,7 @@ void PositionsPanel::render_equity_tab() {
         zero_spec.LineWeight = 1.0f;
         ImPlot::PlotLine("##zero", x_range, y_zero, 2, zero_spec);
 
-        // Equity line — green if positive final, red if negative
+        // Equity line - green if positive final, red if negative
         ImPlotSpec line_spec;
         line_spec.LineColor = ys.back() >= 0
             ? Theme::Colors::BUY_GREEN : Theme::Colors::SELL_RED;
@@ -402,7 +402,7 @@ void PositionsPanel::render_equity_tab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Trade journal — closed trades
+// Trade journal - closed trades
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void PositionsPanel::render_journal_tab() {
@@ -488,7 +488,7 @@ void PositionsPanel::render_journal_tab() {
         ImGui::TableNextColumn();
         ImGui::Text(fmt.price_fmt, pos.mark_price);  // mark_price = exit price for closed
 
-        // Realized P&L — annotate with partial-fill indicator if TP fired
+        // Realized P&L - annotate with partial-fill indicator if TP fired
         ImGui::TableNextColumn();
         ImVec4 c = pos.realized_pnl >= 0
             ? Theme::Colors::BUY_GREEN : Theme::Colors::SELL_RED;
@@ -607,7 +607,7 @@ void PositionsPanel::render_by_type_tab() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Main render — tab bar with all sections
+// Main render - tab bar with all sections
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void PositionsPanel::render() {

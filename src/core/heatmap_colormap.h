@@ -11,7 +11,7 @@ namespace HeatmapColormap {
 enum class Type { Orderbook, Liquidation, LiquidationWarm };
 
 // Liquidation-field colormap selection (Tweaks panel: Ember/Inferno/Magma/Viridis).
-// Routes every Type::Liquidation apply()/LUT build — consumers don't change.
+// Routes every Type::Liquidation apply()/LUT build - consumers don't change.
 // Ember-K is the default (2026-07-02 redesign): a hand ramp with a
 // long black→violet toe and a rare orange→yellow ignition top. Stop table =
 // the design system's liq-heatmap-colormap.json.

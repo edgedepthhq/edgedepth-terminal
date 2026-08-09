@@ -31,7 +31,7 @@ private:
     size_t         last_count_       = 0;
     bool prev_range_active_ = false;
 
-    // ── Filters (client-side only — no re-subscribe on change) ───────────
+    // ── Filters (client-side only - no re-subscribe on change) ───────────
     static constexpr const char* kActors[] = {
         "All", "pattern", "notification", "vpin",
         "orderbook", "positioning", "stat",

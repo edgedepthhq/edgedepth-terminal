@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// message_context.h — Context for message routing
+// message_context.h - Context for message routing
 //
 // Subset of AppContext containing only the managers needed by MessageHandler.
 // Eliminates the 7-parameter cascade through handle_message → route_message.
@@ -43,7 +43,7 @@ struct MessageContext {
     // Set this when processing messages on the data thread.
     DispatchQueue* dispatch_queue = nullptr;
 
-    // Indicators V1 SeriesCache (VPIN et al). Declared LAST — existing call
+    // Indicators V1 SeriesCache (VPIN et al). Declared LAST - existing call
     // sites build this struct positionally; keep it after dispatch_queue and
     // set it by member assignment.
     IndicatorSeriesManager* series = nullptr;

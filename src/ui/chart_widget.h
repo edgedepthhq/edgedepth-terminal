@@ -34,7 +34,7 @@ class ReplayManager;
 #include "ui/settings_panel.h"
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ChartWidget — RENDERING + UI ONLY
+// ChartWidget - RENDERING + UI ONLY
 //
 // Does NOT own candle data. Reads from CandleManager via const accessors.
 // Responsible for: ImPlot chart, candle drawing, heatmap overlays,
@@ -92,7 +92,7 @@ public:
 
     void change_timeframe(int new_tf_seconds);
 
-    // Current chart timeframe in seconds — live source of truth is the
+    // Current chart timeframe in seconds - live source of truth is the
     // CandleManager (the title's tf field lags a frame). Lets the topbar TF
     // segment both highlight the active TF and drive timeframe changes.
     int64_t timeframe_seconds() const { return ctx_.candle_mgr().timeframe_seconds(); }
@@ -106,7 +106,7 @@ public:
 
     float liq_opacity() const { return liq_opacity_; }   // liq-heatmap opacity (Tweaks panel)
     void  set_liq_opacity(float v);                      // set + push to the reconstructor
-    // WS2 A/B: Field render path — texture quad (GPU) vs per-rect (CPU). The
+    // WS2 A/B: Field render path - texture quad (GPU) vs per-rect (CPU). The
     // rect path stays selectable until the texture pass is screenshot-approved.
     bool liq_field_use_texture() const { return liq_field_use_texture_; }
     void set_liq_field_use_texture(bool v) { liq_field_use_texture_ = v; }
@@ -253,7 +253,7 @@ private:
     // ─── Real-time view (RT) ──────────────────────────────────────────────
     // RT mode (any chart type): engage follow-live so the chart streams and
     // keeps the live edge current, while normal ImPlot zoom/pan stay fully
-    // interactive (the follow-live latch clears on the first user pan/scroll —
+    // interactive (the follow-live latch clears on the first user pan/scroll -
     // handle_plot_interaction). No per-frame axis pin. For the Line, plot_line
     // also draws the live-edge dot. Toggled from the TIMEFRAME dropdown
     // (app_shell render_tf_menu). rt_was_on_ edge-detects the toggle so RT
@@ -296,10 +296,10 @@ private:
     bool liq_heatmap_enabled_ = true;
     bool liq_heatmap_subscribed_ = false;
     bool liq_timeline_requested_ = false;
-    bool liq_extend_levels_ = false;     // V3: OFF — backend EMA provides persistence, forward-fill smears bands
+    bool liq_extend_levels_ = false;     // V3: OFF - backend EMA provides persistence, forward-fill smears bands
 
     // ─── Liq Heatmap Visual Controls (MMT-style) ────────────────────────
-    float liq_opacity_ = 0.85f;          // Global opacity multiplier (0.0–1.0)
+    float liq_opacity_ = 0.85f;          // Global opacity multiplier (0.0-1.0)
     float liq_color_low_ = 0.0f;         // Low cutoff: values below → transparent (noise filter)
     float liq_color_peak_ = 100000.0f;   // Peak: values at/above → max intensity
     bool liq_color_auto_ = true;         // Auto-compute Low/Peak from data distribution
@@ -313,7 +313,7 @@ private:
     bool liq_lev_100x_ = true;
 
     // PERF: cached live standing-shelf selection (price/usd/side), recomputed ONLY when the snapshot
-    // ts or the leverage mask changes — the agg-over-~800-bands + sort/merge/cap was running EVERY
+    // ts or the leverage mask changes - the agg-over-~800-bands + sort/merge/cap was running EVERY
     // frame (the liq-map FPS hit). Per-frame now only resolves pixel x for the ~N kept shelves + draws.
     struct ShelfSel { double price = 0.0; double usd = 0.0; bool is_long = false; };
     std::vector<ShelfSel> liq_shelf_cache_;
@@ -322,18 +322,18 @@ private:
     double  liq_shelf_cache_max_usd_ = 0.0;
     bool    liq_shelf_cache_dense_   = false;  // rebuild the cache when liq_dense_field_ is toggled
 
-    // (MMT rail-behavior flags — extend_to_candle / truncate_at_take / min_frac / show_labels — were
+    // (MMT rail-behavior flags - extend_to_candle / truncate_at_take / min_frac / show_labels - were
     //  removed with the rails pivot 2026-06-29; consume + truncation are backend-baked now.)
-    // (The stateful per-level discharge tracker — LiqLevelState, liq_levels_, liq_track_*,
-    //  liq_discharge_* — was REMOVED with the rails pivot 2026-06-29. "Taken" is now the backend
+    // (The stateful per-level discharge tracker - LiqLevelState, liq_levels_, liq_track_*,
+    //  liq_discharge_* - was REMOVED with the rails pivot 2026-06-29. "Taken" is now the backend
     //  RailTracker's consume_ms, delivered per rail on the wire; no client candle-scan inference.)
     // ── Historical line rendering (MMT "rich chart": show past levels, not just the live ones) ──
     // Every tracked level draws as a horizontal line from where it first appeared. A consumed
     // level stops at the take candle and dims to a remnant (KEPT, not deleted) so the chart reads
     // as a cohesive record of where liquidity built and where price took it.
-    bool    liq_hist_bands_ = true;             // historical rails ON — backend-baked consume (rails list, RailTracker); LIQMAP_RAILS_DECISION_2026-06-29
-    bool    liq_show_lines_ = true;             // standing-shelf overlay — now the LIVE fallback (drawn only when no backend rails) + rollback
-    // (liq_consume_cache_ + its candle-set keys were removed with the rails pivot 2026-06-29 — the
+    bool    liq_hist_bands_ = true;             // historical rails ON - backend-baked consume (rails list, RailTracker); LIQMAP_RAILS_DECISION_2026-06-29
+    bool    liq_show_lines_ = true;             // standing-shelf overlay - now the LIVE fallback (drawn only when no backend rails) + rollback
+    // (liq_consume_cache_ + its candle-set keys were removed with the rails pivot 2026-06-29 - the
     //  per-rail consume time is now BandTrack.consume_ms, baked by the backend RailTracker.)
     int     liq_hist_max_lines_ = 0;            // max drawn lines (0 = unlimited; strongest kept)
     int     liq_hist_max_lines_cap_ = 400;      // hard safety cap (perf), applied even when unlimited
@@ -348,7 +348,7 @@ private:
 
     // liq_dense_field_ toggles the dense projection Field ("Liq Heatmap" pill). §12 cleanup
     // 2026-07-03: the old kLiqDense* constants (pre-Field "dense mode" that flipped the SHELF
-    // floor/contrast) are deleted — the Field toggle no longer re-tunes the Levels shelf.
+    // floor/contrast) are deleted - the Field toggle no longer re-tunes the Levels shelf.
     // Default ON: the dense projection Field ("Liq Heatmap" pill) is a headline layer, so the
     // bare terminal boots with it active alongside Levels + Profile.
     bool liq_dense_field_ = true;
@@ -358,22 +358,22 @@ private:
     // Field (render_liq_dense_field), NOT the old line-dense rail tweak. Recomputed each frame
     // into this reused scratch buffer.
     // The Field is computed in ABSOLUTE price buckets over ALL loaded candles with a robust
-    // global normalization (dual-percentile Low/Peak clips + LOG mapping — 2026-07-02b), then CACHED. A band at price P therefore has the same price + brightness + consume
-    // time regardless of zoom/scroll (pan/zoom only re-maps buckets to pixels) — the "strictly static,
+    // global normalization (dual-percentile Low/Peak clips + LOG mapping - 2026-07-02b), then CACHED. A band at price P therefore has the same price + brightness + consume
+    // time regardless of zoom/scroll (pan/zoom only re-maps buckets to pixels) - the "strictly static,
     // trustworthy" requirement. Rebuilt only when the closed-candle set / leverage mask / timeframe
     // changes; the live building candle's consume is folded in per-frame at render (no overlap lag).
-    // §5b(b) — 2D time×price field, stored as horizontal SEGMENTS (a level's fuel run over a time
+    // §5b(b) - 2D time×price field, stored as horizontal SEGMENTS (a level's fuel run over a time
     // interval). A level emits a new segment each time it's swept + re-lit, each with its own intensity
     // → the time-varying color + dense fill MMT shows. Purely candle-derived → 100% replayable from the
     // (replayable) candle history; recomputed + cached, never stored/streamed.
     // Run intensity = the run's AGE-DECAYED sum of deposit weights (round 6; half-life knob below).
     // The sum carries the wide dynamic range the percentile map needs (rounds 4/5: reshaping the
-    // distribution — far gate, per-plot max — just made the adaptive map re-normalize the whole field
+    // distribution - far gate, per-plot max - just made the adaptive map re-normalize the whole field
     // bright); the decay bounds standing accumulation, which was the actual belt mechanism.
     // A segment covers a CONTIGUOUS vertical run of price buckets [price_lo..price_hi] (bucket centers;
     // single buckets have price_lo == price_hi). The build-time merge pass (2026-07-02, perf) fuses
     // vertically-adjacent same-interval same-quantized-intensity buckets into one run so the renderer
-    // issues one AddRectFilled per run instead of per bucket — no visual change, big rect-count drop.
+    // issues one AddRectFilled per run instead of per bucket - no visual change, big rect-count drop.
     // LiqFieldSeg now lives in rendering/liq_field_texture_renderer.h (shared
     // with the WS2 texture rasterizer); layout + semantics unchanged.
     std::vector<LiqFieldSeg> liq_field_segs_;   // cached field segments, sorted ascending by price_lo
@@ -398,7 +398,7 @@ private:
     // Intensity Low/Peak dual-slider semantics). Segment mass spans 2-3 orders of magnitude; a single
     // power curve either crushes the tail (old max-norm + 3.4) or bunches everything into flat
     // saturated slabs (p98.5 + 1.45). Log spreads it: singles ≈ purple, fast-move fuel ≈ blue/teal,
-    // stacked magnets ≈ green→yellow (rare) — the MMT distribution, robust per symbol.
+    // stacked magnets ≈ green→yellow (rare) - the MMT distribution, robust per symbol.
     // Knob values = the design system's proposed set (liq-heatmap-colormap.json
     // `knobs`, 2026-07-02 redesign). The percentile-log map MECHANICS are pinned; only values move.
     float liq_field_gamma_    = 2.2f;    // shaping applied to the LOG-mapped t (design: deeper black
@@ -407,12 +407,12 @@ private:
                                          // near-full presence (was MMT default 0.85)
     int   liq_field_kernel_   = 0;       // deposit kernel half-width K in buckets (design round: 1 → 0.
                                          // liq_field_min_row_px_ replaces the kernel's thickening job
-                                         // cheaper — 3× fewer deposits; round 7 had raised 0 → 1 for
+                                         // cheaper - 3× fewer deposits; round 7 had raised 0 → 1 for
                                          // sub-pixel alt rows. If movers thin out by screenshot,
                                          // restore 1 before touching anything else)
     float liq_field_bps_      = 6.0f;    // Tick-Per-Row on the LOG grid: every bucket is this many bps
                                          // of its OWN price (uniform relative rows across a multi-×
-                                         // loaded range — a linear grid was sub-pixel at the top of
+                                         // loaded range - a linear grid was sub-pixel at the top of
                                          // TAIKO's 8× range and giant solid blocks at the bottom)
     float liq_field_lo_pct_   = 0.30f;   // Intensity LOW clip percentile (≤ this intensity → dark).
                                          // MMT-parity sparsity knob: higher → fewer, more discrete bands
@@ -427,13 +427,13 @@ private:
     float liq_field_floor_    = 0.02f;   // rendered-intensity noise floor (design: culls sub-visible
                                          // fuel earlier, reopens black gaps; was 0.010)
     float liq_field_wcap_     = 6.0f;    // hard cap on the per-candle relative-volume weight
-    float liq_field_wbase_    = 0.7f;    // ANOMALY baseline: the excess term is max(0, vr - wbase) —
+    float liq_field_wbase_    = 0.7f;    // ANOMALY baseline: the excess term is max(0, vr - wbase) -
                                          // only genuinely anomalous volume builds BRIGHT fuel (MMT's
                                          // flow-DEVIATION weight).
     float liq_field_wfloor_   = 0.15f;   // …but every candle still leaves this dim floor trace on the
                                          // NEAR tiers only (50/75/100×, ≤2% offsets) → MMT's short
                                          // in-channel fragments (pure-excess left the channel hollow).
-    float liq_field_halflife_h_ = 16.0f; // AGE-DECAY half-life (hours) on STANDING fuel — the task-1
+    float liq_field_halflife_h_ = 16.0f; // AGE-DECAY half-life (hours) on STANDING fuel - the task-1
                                          // belt fix (round 6). Bounds every bucket's steady state so
                                          // week-old far-zone ghosts fade to dark while continuously-
                                          // refed shelves (true magnets) stay bright; recency gives the
@@ -441,16 +441,16 @@ private:
                                          // static across zoom/scroll + replay-identical; consumed
                                          // segments decay only to their consume time (fixed record).
                                          // ≤0 disables. NOTE: bites harder on higher TFs (longer
-                                         // loaded spans) — that is the honest reading of stale fuel.
+                                         // loaded spans) - that is the honest reading of stale fuel.
                                          // Design: 24 → 16 (stale far-history fuel dims a stop
-                                         // sooner; replay-safe — still candle-timestamp-driven).
+                                         // sooner; replay-safe - still candle-timestamp-driven).
     // ── Field render-side look (2026-07-02; alphaCurve in the colormap JSON) ──
-    // alpha(t) = opacity · (alphaFloor + (1 − alphaFloor) · t^alphaPow) — replaces the old
+    // alpha(t) = opacity · (alphaFloor + (1 − alphaFloor) · t^alphaPow) - replaces the old
     // (0.55 + 0.45·t)·opacity linear blend: dim fuel melts much further into the background
     // (t=0 → 0.072 vs 0.468) while magnets keep near-full presence (t=1 → 0.90).
     float liq_field_alpha_floor_ = 0.08f;
     float liq_field_alpha_pow_   = 1.5f;
-    float liq_field_min_row_px_  = 2.0f; // minimum painted row height (px), clamped in emit_rect —
+    float liq_field_min_row_px_  = 2.0f; // minimum painted row height (px), clamped in emit_rect -
                                          // alt-tier rows on wide-span movers stay legible bands
                                          // instead of hairlines (replaces the ±1 deposit kernel
                                          // cheaper, on the render side)
@@ -467,14 +467,14 @@ private:
     uint32_t liq_field_rebuild_gen_ = 0;   // bumped by ensure_liq_field_cache on rebuild
 
     bool  liq_field_extend_   = true;    // MMT future CASCADE: each standing level projects right of
-                                         // the live edge by a length ∝ its strength — the band length
+                                         // the live edge by a length ∝ its strength - the band length
                                          // IS the histogram bar (their "profile" look). false = stop
                                          // at the live edge + a 6% magnet. History stays static; only
                                          // this forward projection is live-edge-anchored.
-    // §8 Liq Profile — price-marginal of STANDING fuel (WS1 Option A, 2026-07-03: per visible
-    // price row, the MAX of the field's rendered brightness across PENDING segments — the same tv
+    // §8 Liq Profile - price-marginal of STANDING fuel (WS1 Option A, 2026-07-03: per visible
+    // price row, the MAX of the field's rendered brightness across PENDING segments - the same tv
     // the forward cascade projects with. No time-averaging → no window-length dependence; no
-    // adaptive re-norm; no width gain — the old liq_profile_gain_ 2.75 hack is deleted).
+    // adaptive re-norm; no width gain - the old liq_profile_gain_ 2.75 hack is deleted).
     // Style = the design system's `profile` spec (liq-heatmap-colormap.json):
     // width 0.12 of plot, LUT-tinted fill at FLAT 0.26 alpha, gaussian sigma = 3 field rows,
     // 1px outline rgba(154,164,178,.50), 1px baseline hairline @ 8% white at the plot edge.
@@ -489,16 +489,16 @@ private:
     static constexpr ImU32 kLiqProfileOutline  = IM_COL32(154, 164, 178, 128);  // 1px outline @ .50
     static constexpr ImU32 kLiqProfileBaseline = IM_COL32(255, 255, 255, 20);   // 1px hairline @ 8%
 
-    // Cascade (the pending branch's forward projection) — the `cascade` spec:
+    // Cascade (the pending branch's forward projection) - the `cascade` spec:
     // alpha ×0.78 vs history behind a 1px 7%-white seam at the live edge; the projection tail
-    // steps down 88/95/100% of its length at 100/55/28% alpha (interim — a linear fade over the
+    // steps down 88/95/100% of its length at 100/55/28% alpha (interim - a linear fade over the
     // final 12% arrives with the future texture-quad pass).
     float liq_cascade_alpha_ = 0.78f;
     static constexpr float kLiqCascadeTailFrac[3]  = {0.88f, 0.95f, 1.00f};
     static constexpr float kLiqCascadeTailAlpha[3] = {1.00f, 0.55f, 0.28f};
     static constexpr ImU32 kLiqCascadeSeam = IM_COL32(255, 255, 255, 18);       // 1px @ 7% white
 
-    // Legend ignition notch — the ramp position where the rare orange→yellow
+    // Legend ignition notch - the ramp position where the rare orange→yellow
     // "ignition" top begins (the Ember-K 0.945 stop; see the annotated mockup).
     static constexpr float kLiqLegendNotchT = 0.945f;
 
@@ -509,33 +509,33 @@ private:
     int64_t vpvr_last_request_end_ = 0;
 
     // ─── Liquidation Profile Overlay (right-edge sidebar histogram, mirrors VPVR) ────────
-    // Reuses the shared Profile:: renderer (price_profile_renderer.h) — same one VPVR uses —
+    // Reuses the shared Profile:: renderer (price_profile_renderer.h) - same one VPVR uses -
     // fed from the current liq heatmap snapshot instead of volume levels. Default ON: it ships
     // as an active headline layer ("Liq Profile" pill) on the bare terminal.
     bool liq_profile_enabled_ = true;
 
-    // ─── Observed layer (WS4 §7) — REAL @forceOrder liquidation markers ──────────────────
+    // ─── Observed layer (WS4 §7) - REAL @forceOrder liquidation markers ──────────────────
     // Discrete dots at (time, price), area ∝ USD, side-tinted (forced BUY = short liquidated
     // → Tokens::UP; forced SELL = long liquidated → Tokens::DOWN). The fact layer next to
-    // the estimated Field — deliberately a different visual grammar (glyphs, not bands).
+    // the estimated Field - deliberately a different visual grammar (glyphs, not bands).
     bool  liq_observed_enabled_ = false;
     float liq_obs_min_usd_ = 0.0f;       // dust filter (USD); 0 = show all
     float liq_obs_ref_usd_ = 25000.0f;   // USD at which a marker reads clearly (~2.5px radius)
     static constexpr int kLiqObsMaxDraw = 4000;  // per-frame draw cap → nth_element USD cutoff
 
-    // ─── "Liq Levels HL" (P2e) — REAL predictive liq levels (HL census) ──────────────────
+    // ─── "Liq Levels HL" (P2e) - REAL predictive liq levels (HL census) ──────────────────
     // Ground-truth clusters from the HL clearinghouseState census (stream 34,
-    // LiquidationHeatmapManager census store) — real open positions, NOT the modelled
+    // LiquidationHeatmapManager census store) - real open positions, NOT the modelled
     // heatmap. Keyed by UNDERLYING ({"hl","BTC"}), so it overlays cross-venue: a Binance
-    // btcusdt chart subscribes the same HL BTC feed (headline feature — real liq levels
+    // btcusdt chart subscribes the same HL BTC feed (headline feature - real liq levels
     // on a CEX chart). Distinct colormap (violet longs / mint shorts vs the modelled
     // amber/cyan) + an always-on coverage badge: the census is hot-set-only (the at-risk
     // leveraged tail, ~1-10% of OI notional) and must never read as a complete liq map.
     // The LIQ LEV chips filter this layer by REAL leverage tier (est_Nx = actual
-    // position leverage) — same control as the modelled layer, venue-aware meaning.
+    // position leverage) - same control as the modelled layer, venue-aware meaning.
     bool liq_census_enabled_ = false;      // ctor: defaults ON for HL-native pairs
     bool liq_census_subscribed_ = false;
-    Terminal::Pair liq_census_pair_;       // {"hl", UNDERLYING} — resolved at construction
+    Terminal::Pair liq_census_pair_;       // {"hl", UNDERLYING} - resolved at construction
     // PERF: cached band selection (price/usd/side), recomputed only when the census
     // snapshot ts or the leverage mask changes (mirrors liq_shelf_cache_).
     struct CensusSel { double price = 0.0; double usd = 0.0; bool is_long = false; };
@@ -552,7 +552,7 @@ private:
 
     // ─── Drawing tools ───────────────────────────────────────────────────
     // All logic lives in drawing::DrawingLayer (ui/drawing/) + DrawingManager
-    // (ctx_.drawing_mgr()) — this widget only calls render_in_plot()/
+    // (ctx_.drawing_mgr()) - this widget only calls render_in_plot()/
     // end_frame() and gates its own handlers on captures_mouse().
     drawing::DrawingLayer drawing_layer_;
 
@@ -590,7 +590,7 @@ private:
     // Close-price polyline (ChartType::Line). Uses the recent-tick ring buffer
     // where available and falls back to candle closes for older regions.
     void plot_line(double visible_x_min, double visible_x_max);
-    // Preallocated pixel-space path for plot_line (reused each frame — no STL
+    // Preallocated pixel-space path for plot_line (reused each frame - no STL
     // churn in the render loop).
     std::vector<ImVec2> line_pts_;
 
@@ -630,7 +630,7 @@ private:
     // the transport, renders the PreviewCandleStore's future candles ahead of
     // the playhead at reduced alpha (two tiers: playhead→aim stronger, beyond
     // the aim faint) plus a vertical line at the aimed-at time. Reads ONLY the
-    // preview store — never CandleManager. Defined in
+    // preview store - never CandleManager. Defined in
     // chart_widget_scrub_preview.cpp (keep it out of this God file).
     void render_scrub_preview(double visible_x_min, double visible_x_max);
 
@@ -655,13 +655,13 @@ private:
     void render_liq_dense_field();   // dense candle×leverage projection Field (MMT-style backdrop)
     bool render_liq_field_textured(int64_t tf_ms);  // WS2 texture-quad path; false → rect fallback
     void rebuild_liq_field_cache(uint8_t lmask, int64_t tf_ms);  // (re)build the absolute-price Field cache (§5b)
-    void ensure_liq_field_cache();  // rebuild the Field cache if stale — shared by the Field + Profile
+    void ensure_liq_field_cache();  // rebuild the Field cache if stale - shared by the Field + Profile
     void request_liq_heatmap_data();
     void update_liq_heatmap_scroll();
     void toggle_liquidation_heatmap();
     void render_liq_profile();   // right-edge sidebar histogram (Profile:: renderer, mirrors VPVR)
-    void render_liq_observed();  // WS4 Observed markers — real @forceOrder dots (drawn over candles)
-    void toggle_liq_census();    // "Liq Levels HL" — subscribe/unsubscribe stream 34 (census)
+    void render_liq_observed();  // WS4 Observed markers - real @forceOrder dots (drawn over candles)
+    void toggle_liq_census();    // "Liq Levels HL" - subscribe/unsubscribe stream 34 (census)
     void render_liq_census();    // HL census shelves (REAL liq levels) + coverage badge
 
     // VPVR overlay
@@ -710,7 +710,7 @@ private:
     bool stats_subscribed_ = false;
     int64_t stats_sub_tf_ms_ = 0;
 
-    // Liquidation event stream (WS4 Observed markers) — TF-independent (timeframe 0),
+    // Liquidation event stream (WS4 Observed markers) - TF-independent (timeframe 0),
     // subscribed once in the ctor, events stored in LiquidationHeatmapManager.
     bool liq_events_subscribed_ = false;
     bool funding_history_requested_ = false;
@@ -720,7 +720,7 @@ private:
     void populate_funding_data(Indicators::FundingRateIndicator* ind) const;
     void update_funding_indicator();
 
-    // VPIN / Toxicity indicator helpers (Indicators V1 S1b — pathfinder).
+    // VPIN / Toxicity indicator helpers (Indicators V1 S1b - pathfinder).
     // Data lives in the shared IndicatorSeriesManager (ctx_.series_mgr());
     // the indicator's render cache repopulates when the series revision
     // moves. Live sub = STATE_VPIN (tf 0), lazy on first add; history =
@@ -732,10 +732,10 @@ private:
     uint64_t vpin_populated_revision_ = 0;
     // F3 chunk-until-covered history loop: the server returns the MOST
     // RECENT `count` rows of a window, so one request never guarantees
-    // coverage — chunk toward the candle window's start until the gap
+    // coverage - chunk toward the candle window's start until the gap
     // closes or a chunk brings nothing older (series floor / retention).
     int64_t vpin_hist_last_oldest_ = 0;   // oldest at last chunk (progress check)
-    bool vpin_hist_exhausted_ = false;    // no older data — stop chunking
+    bool vpin_hist_exhausted_ = false;    // no older data - stop chunking
     std::chrono::steady_clock::time_point vpin_hist_last_req_{};
 
     // OI indicator helpers

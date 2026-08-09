@@ -21,7 +21,7 @@ struct DebugEntry {
     float       score     = 0.0f;
     float       thresh    = 0.0f;
     double      price     = 0.0;
-    // msg is the longest field — cap at 256 to stay on stack
+    // msg is the longest field - cap at 256 to stay on stack
     char        msg[256]  = {};
 };
 
@@ -79,7 +79,7 @@ private:
     Terminal::Pair  pair_;
     std::string     subscribed_symbol_;
 
-    // Ring buffer — fixed allocation, no heap in hot path
+    // Ring buffer - fixed allocation, no heap in hot path
     std::array<DebugEntry, MAX_ENTRIES> ring_{};
     size_t write_head_  = 0;   // next write position (mod MAX_ENTRIES)
     size_t entry_count_ = 0;   // total entries ever written (not capped)
@@ -90,7 +90,7 @@ private:
     bool range_loading_ = false;   // true = waiting for server batches
     int64_t range_start_ms_ = 0;
     int64_t range_end_ms_   = 0;
-    std::vector<DebugEntry> range_entries_;  // flat vector, not ring — range is bounded
+    std::vector<DebugEntry> range_entries_;  // flat vector, not ring - range is bounded
 
     void push_entry(const DebugEntry& e);
 

@@ -176,7 +176,7 @@ void TPOManager::build_single_session(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// POC — widest row. Tie-break: closest to session midpoint.
+// POC - widest row. Tie-break: closest to session midpoint.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void TPOManager::compute_poc(TPOSession& session) {
@@ -206,7 +206,7 @@ void TPOManager::compute_poc(TPOSession& session) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Value Area — expand from POC until value_area_pct of total blocks captured.
+// Value Area - expand from POC until value_area_pct of total blocks captured.
 // Compare row above vs below, take whichever has more blocks.
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -257,7 +257,7 @@ void TPOManager::compute_value_area(TPOSession& session) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Single Prints — rows with exactly 1 block, where row above AND below
+// Single Prints - rows with exactly 1 block, where row above AND below
 // each have >1 block. Top and bottom rows are excluded.
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -275,7 +275,7 @@ void TPOManager::detect_single_prints(TPOSession& session) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Poor High/Low — top/bottom row has ≥2 blocks (price stayed there)
+// Poor High/Low - top/bottom row has ≥2 blocks (price stayed there)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void TPOManager::detect_poor_high_low(TPOSession& session) {
@@ -285,7 +285,7 @@ void TPOManager::detect_poor_high_low(TPOSession& session) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Initial Balance — range of first 2 periods (00:00-01:00 UTC)
+// Initial Balance - range of first 2 periods (00:00-01:00 UTC)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void TPOManager::compute_initial_balance(
@@ -304,7 +304,7 @@ void TPOManager::compute_initial_balance(
         // We use row blocks to tag IB rows, but for the range we use candle data
     }
 
-    // Mark IB rows — rows touched by periods 0 and 1
+    // Mark IB rows - rows touched by periods 0 and 1
     for (auto& row : session.rows) {
         for (const auto& blk : row.blocks) {
             if (blk.period_idx < 2) {

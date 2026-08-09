@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// ticker_manager.cpp — Apply protobuf Ticker24hUpdate to ticker map
+// ticker_manager.cpp - Apply protobuf Ticker24hUpdate to ticker map
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "core/ticker_manager.h"

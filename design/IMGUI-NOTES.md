@@ -1,7 +1,7 @@
-# edgedepth — ImGui / ImPlot mapping notes
+# edgedepth - ImGui / ImPlot mapping notes
 
 Practical notes for porting the HTML reference into C++ / ImGui (docking) / ImPlot.
-Values come from `tokens.json`. ImGui colors are `ImVec4` (0–1 floats, RGBA).
+Values come from `tokens.json`. ImGui colors are `ImVec4` (0-1 floats, RGBA).
 
 ---
 
@@ -60,7 +60,7 @@ Semantic shorthands to reuse everywhere:
 
 Load two faces (bundle the TTFs, or embed). Build a small atlas with sizes you actually use.
 
-- **Hanken Grotesk** → chrome, labels, headings (13–17px; 9.5px caps for labels).
+- **Hanken Grotesk** → chrome, labels, headings (13-17px; 9.5px caps for labels).
 - **JetBrains Mono** → **all** numerics, every table/ladder/clock. ImGui mono is already
   fixed-advance; that gives you the tabular alignment the CSS gets via `tabular-nums`.
 
@@ -77,7 +77,7 @@ ImFont* monoSm = io.Fonts->AddFontFromFileTTF("JetBrainsMono-Regular.ttf", 11.f)
 Each HTML panel = one ImGui dockable window. Use the **docking branch** with a default
 layout that matches `terminal.html`: watchlist (left, ~254px) · chart center · DOM+tape
 (right, ~388px) · transport (bottom, full width, fixed 66px) · stats strip under the menu
-bar. Panel headers in the HTML are 31px uppercase labels — emulate with a custom title bar
+bar. Panel headers in the HTML are 31px uppercase labels - emulate with a custom title bar
 or `MenuBar` per window; keep chrome quiet.
 
 ---
@@ -124,7 +124,7 @@ Full-width bottom dock, 66px. Build the scrubber as a custom widget over an
   draggable thumb (white + brand glow).
 - event flags = thin verticals on the rail (`WARN`, or `DOWN` for severe), hover tooltip,
   click to seek.
-- speed pills 0.1×–10× as a segmented row; active = solid `BRAND`, dark text.
+- speed pills 0.1×-10× as a segmented row; active = solid `BRAND`, dark text.
 - play orb = filled `BRAND` circle. Spacebar toggles.
 
 ---

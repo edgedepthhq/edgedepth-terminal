@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// drawing_types.h — user drawing-tools data model (TradingView-style annotations)
+// drawing_types.h - user drawing-tools data model (TradingView-style annotations)
 //
 // Pure data: no ImGui/ImPlot includes. Anchors are (epoch_ms, price) so drawings
 // survive pan/zoom, timeframe changes, replay, and display-timezone changes
@@ -14,7 +14,7 @@
 namespace drawing {
 
 enum class Tool : uint8_t {
-    Cursor = 0,     // default — select / drag / edit
+    Cursor = 0,     // default - select / drag / edit
     Trendline,
     Arrow,          // trendline + oriented head at the second anchor
     Ray,            // through both anchors, extended to the plot edge
@@ -25,7 +25,7 @@ enum class Tool : uint8_t {
     CrossLine,      // H + V through one anchor
     Rectangle,      // 2 corner anchors, filled box
     Brush,          // freehand polyline stroke
-    Measure,        // EPHEMERAL 2-click readout — never stored/persisted
+    Measure,        // EPHEMERAL 2-click readout - never stored/persisted
     PriceRange,     // persistent vertical measure (delta price / %)
     DateRange,      // persistent horizontal measure (bars / duration)
     Fib,            // fibonacci retracement between 2 anchors
@@ -54,7 +54,7 @@ constexpr uint32_t with_alpha(uint32_t col, uint8_t a) {
     return (col & 0x00FFFFFFu) | (static_cast<uint32_t>(a) << 24);
 }
 
-// Default line color: the design system's primary text tone (#dfe6ee) — reads
+// Default line color: the design system's primary text tone (#dfe6ee) - reads
 // on the near-black canvas without stealing the accent role from BRAND.
 inline constexpr uint32_t kDefaultColor = pack_rgba(0xdf, 0xe6, 0xee, 0xff);
 
@@ -147,7 +147,7 @@ constexpr const char* tool_name(Tool t) {
     }
 }
 
-// Stable JSON key (schema v1) — never rename, unknown keys skip on load.
+// Stable JSON key (schema v1) - never rename, unknown keys skip on load.
 constexpr const char* tool_key(Tool t) {
     switch (t) {
         case Tool::Trendline:     return "trendline";
@@ -178,7 +178,7 @@ inline Tool tool_from_key(const std::string& key) {
         const char* k = tool_key(t);
         if (k[0] != '\0' && key == k) return t;
     }
-    return Tool::COUNT;  // unknown — caller skips
+    return Tool::COUNT;  // unknown - caller skips
 }
 
 // Capacity caps (enforced on mutation AND load).

@@ -17,7 +17,7 @@ namespace {
 
     struct Stop { float t; uint8_t r, g, b; };
 
-    // Ember-K — hand ramp (15 stops, liq-heatmap-colormap.json stops.ember)
+    // Ember-K - hand ramp (15 stops, liq-heatmap-colormap.json stops.ember)
     constexpr Stop EMBER_STOPS[] = {
         {0.000f,   0,   0,   0}, {0.060f,   6,   4,  15}, {0.140f,  14,   9,  34},
         {0.240f,  27,  13,  59}, {0.350f,  45,  17,  84}, {0.460f,  68,  22, 103},
@@ -25,7 +25,7 @@ namespace {
         {0.840f, 196,  62,  70}, {0.900f, 227,  84,  44}, {0.945f, 246, 114,  20},
         {0.975f, 252, 158,  28}, {0.992f, 253, 201,  62}, {1.000f, 252, 235, 140}};
 
-    // matplotlib viridis — stops match the design system's tokens.json
+    // matplotlib viridis - stops match the design system's tokens.json
     constexpr Stop VIRIDIS_STOPS[] = {
         {0.00f,  68,   1,  84}, {0.20f,  65,  68, 135}, {0.40f,  42, 120, 142},
         {0.60f,  34, 168, 132}, {0.80f, 122, 209,  81}, {1.00f, 253, 231,  37}};
@@ -65,7 +65,7 @@ void apply(Type type, float t, uint8_t& r, uint8_t& g, uint8_t& b) {
         if (g_liq_map == LiqMap::Ember)   { eval_stops(EMBER_STOPS, t, r, g, b); return; }
         if (g_liq_map == LiqMap::Viridis) { eval_stops(VIRIDIS_STOPS, t, r, g, b); return; }
         if (g_liq_map == LiqMap::Magma)   { eval_stops(MAGMA_STOPS, t, r, g, b); return; }
-        // LiqMap::Inferno — hand-tuned V7 ramp below.
+        // LiqMap::Inferno - hand-tuned V7 ramp below.
         // V7 Inferno colormap: black → indigo → purple → red → orange → yellow → white
         // Matches matplotlib's inferno perceptual colormap for "heat cloud" look.
         // Single ramp for both long (below mark) and short (above mark) liquidations.
@@ -174,10 +174,10 @@ void build_packed_lut(Type type, float opacity,
             // to fade smoothly into the background. Steep ramp from noise
             // floor creates "glowing cloud" effect.
             // t < 0.05: invisible (noise floor / Gaussian tails)
-            // t 0.05–0.15: faint glow (outer spread halo)
-            // t 0.15–0.35: emerging (band edges)
-            // t 0.35–0.60: visible (significant clusters)
-            // t 0.60–1.0: strong (peaks, near-opaque)
+            // t 0.05-0.15: faint glow (outer spread halo)
+            // t 0.15-0.35: emerging (band edges)
+            // t 0.35-0.60: visible (significant clusters)
+            // t 0.60-1.0: strong (peaks, near-opaque)
             if (t < 0.05f) {
                 a = 0;
             } else if (t < 0.15f) {

@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// app_shell.h — Fixed chrome: topbar (44px) + stats strip (33px)
+// app_shell.h - Fixed chrome: topbar (44px) + stats strip (33px)
 //
 // Ports the .topbar and .statsbar chrome from the design system. Rendered as
 // fixed, undockable ImGui windows pinned to the top of the viewport; the
@@ -23,7 +23,7 @@ class ChartWidget;
 
 namespace AppShell {
 
-    // TOPBAR_H + STATSBAR_H — dockspace top offset
+    // TOPBAR_H + STATSBAR_H - dockspace top offset
     float total_height();
 
     // Favourites timeframe bar + grouped dropdown, moved out of the top bar in

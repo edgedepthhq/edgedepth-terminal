@@ -42,7 +42,7 @@ namespace Indicators {
             snprintf(buf, size, get_y_format(), value);
         }
 
-        // OPTIONAL: explicit axis-tag fill color (Indicators V1, SPEC §0.2 —
+        // OPTIONAL: explicit axis-tag fill color (Indicators V1, SPEC §0.2 -
         // e.g. Toxicity's regime color). Returns false to keep the default
         // direction-based coloring (get_latest_direction()).
         virtual bool get_latest_tag_color(ImU32& /*out_color*/) const { return false; }
@@ -56,10 +56,10 @@ namespace Indicators {
         bool is_visible() const { return visible_; }
         void set_visible(bool v) { visible_ = v; }
 
-        // Get/set height in pixels — the stacked-plot height, adjustable by
+        // Get/set height in pixels - the stacked-plot height, adjustable by
         // the splitter drag between stacked panes. Floor = --pane-min-h-px
         // (120, tokens.json); ceiling 360 deviates from the token max (180)
-        // deliberately so resize is useful — flagged for design sign-off.
+        // deliberately so resize is useful - flagged for design sign-off.
         float get_height_pixels() const { return height_pixels_; }
         void set_height_pixels(float h) {
             height_pixels_ = std::clamp(h, 120.0f, 360.0f);

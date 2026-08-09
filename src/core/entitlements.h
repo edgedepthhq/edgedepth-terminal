@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// entitlements.h — client-side plan/tier gating for replay (UX layer only).
+// entitlements.h - client-side plan/tier gating for replay (UX layer only).
 //
 // The web host (Next/Payload) knows the signed-in user's tier; it hands it to the
 // WASM client via a window global set BEFORE the glue loads (mirrors how lessons
@@ -10,7 +10,7 @@
 //
 // We read it once at boot. This drives only the UX (locked menu items, the
 // scrubber's advertised archive depth, the upgrade nudge). It is NOT a security
-// boundary — the Go backend still enforces the real cap on every replay-session
+// boundary - the Go backend still enforces the real cap on every replay-session
 // request (a tampered global must not unlock data). Standalone / dev (no global)
 // defaults to Pro so local work is never gated.
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -39,7 +39,7 @@ namespace Entitlements {
 // inventing a research TokenTier.
 enum class Tier : uint8_t { Free, Trader, Pro, Research, Admin };
 
-// ── Free-tier replay limits (tunable in ONE place — MIRROR the backend's
+// ── Free-tier replay limits (tunable in ONE place - MIRROR the backend's
 //    replay-session TierConfigs["free"]) ───────────────────────────────────
 // D6 (amended 2026-07-11): the free replay window is the most recent fully-
 // archived UTC CALENDAR DAY (e.g. [9 Jul 00:00, 10 Jul 00:00) UTC), which only
@@ -47,7 +47,7 @@ enum class Tier : uint8_t { Free, Trader, Pro, Research, Admin };
 // single source of truth: /replay/availability injects the exact bounds via
 // window.__EDGEDEPTH_FREE_WINDOW__ (read in detect()), and free_window_range()
 // prefers them. When the fetch fails, the client computes the SAME day itself
-// (today-2, mirroring freeFloorDays/coldFloorDays) — see free_window_range.
+// (today-2, mirroring freeFloorDays/coldFloorDays) - see free_window_range.
 //
 // This REPLACES the older rolling [72h,48h]-ago band. The AGE constants below are
 // retained only as documentation of that band + the 2-day-back intuition; they
@@ -67,7 +67,7 @@ inline constexpr int64_t PRO_REPLAY_LOOKBACK_MS   = 30LL * 24LL * 3600LL * 1000L
 //
 // The host injects window.__EDGEDEPTH_REPLAY_LOOKBACK_DAYS__ from the SAME number
 // it mints into the token, so the client affordance and server enforcement cannot
-// disagree — exactly how the free window is already resolved. Absent or invalid
+// disagree - exactly how the free window is already resolved. Absent or invalid
 // leaves 30d, so an ordinary Pro user sees their real reach and never fires a
 // doomed POST.
 inline int64_t& pro_lookback_ms()   { static int64_t v = PRO_REPLAY_LOOKBACK_MS; return v; }
@@ -82,13 +82,13 @@ inline constexpr double  FREE_MAX_SPEED = 2.0;
 inline constexpr int     FREE_MAX_SESSIONS_PER_DAY = 6;
 
 // Symbols a non-Pro user may REPLAY (live data stays all-symbols for everyone).
-// The 6 most liquid majors — MIRROR handler.go FreeReplaySymbols (design P1: +DOGE,
+// The 6 most liquid majors - MIRROR handler.go FreeReplaySymbols (design P1: +DOGE,
 // whose constant liquidation action makes the free Liq Field demo dramatic).
 inline constexpr std::array<const char*, 6> FREE_REPLAY_SYMBOLS = {
     "btcusdt", "ethusdt", "solusdt", "xrpusdt", "bnbusdt", "dogeusdt"
 };
 
-// Current tier — read once at boot via detect(). Pro by default (dev/standalone).
+// Current tier - read once at boot via detect(). Pro by default (dev/standalone).
 inline Tier& current() { static Tier t = Tier::Pro; return t; }
 inline bool  is_pro()  {
     return current() == Tier::Pro || current() == Tier::Research || current() == Tier::Admin;
@@ -110,7 +110,7 @@ inline std::string& renews_label() { static std::string s; return s; }
 // ── Dynamic free-replay window (backend-authoritative) ───────────────────────
 // The host injects window.__EDGEDEPTH_FREE_WINDOW__ (from GET /replay/availability,
 // which the Go backend also ENFORCES) BEFORE the glue loads. When present it is the
-// most recent fully-archived UTC calendar day as absolute epoch-ms bounds — the REAL
+// most recent fully-archived UTC calendar day as absolute epoch-ms bounds - the REAL
 // replayable day, not the client's static [72h,48h] guess. detect() caches it here;
 // the window helpers below PREFER these values and fall back to the static band when
 // the fetch failed (or for Pro). free_window_dynamic() gates the override.
@@ -227,7 +227,7 @@ inline void detect() {
 inline bool is_free() { return current() == Tier::Free; }
 
 // True when the viewer is a signed-in account: Pro/admin, OR a logged-in free user
-// whose email the host provided. Drives the AUTH_REQUIRED UX — only a genuinely
+// whose email the host provided. Drives the AUTH_REQUIRED UX - only a genuinely
 // anonymous visitor should be told to "log in" (§8.4); a logged-in user hitting an
 // auth error has a token/session problem, not a login problem.
 inline bool is_authenticated() { return is_pro() || !user_email().empty(); }
@@ -248,7 +248,7 @@ inline int64_t replay_end_ceil_ms(int64_t now_ms) {
 inline int64_t replay_floor_ms(int64_t now_ms) { return replay_start_floor_ms(now_ms); }
 
 // Is a single timestamp replayable for the current tier? (used by the chart
-// right-click "Replay from here" gate — a point must sit inside the window).
+// right-click "Replay from here" gate - a point must sit inside the window).
 inline bool time_replayable(int64_t ts_ms, int64_t now_ms) {
     return ts_ms >= replay_start_floor_ms(now_ms) && ts_ms <= replay_end_ceil_ms(now_ms);
 }
@@ -302,7 +302,7 @@ inline int64_t wall_now_ms() {
 
 // The exact [start,end] the free-window replay requests. Dynamic: the backend's
 // absolute archived-day bounds (server-authoritative, no client-clock inset needed
-// — the backend enforces the same day ±5min). Static fallback: inset a few minutes
+// - the backend enforces the same day ±5min). Static fallback: inset a few minutes
 // inside the [72h,48h] band so a boundary request survives client/server clock drift.
 inline void free_window_range(int64_t now_ms, int64_t& start_ms, int64_t& end_ms) {
     if (free_window_dynamic()) {
@@ -311,7 +311,7 @@ inline void free_window_range(int64_t now_ms, int64_t& start_ms, int64_t& end_ms
         return;
     }
     // Static fallback (availability fetch failed): compute the SAME UTC calendar
-    // day the backend defaults to — today-2 (mirrors freeFloorDays/coldFloorDays).
+    // day the backend defaults to - today-2 (mirrors freeFloorDays/coldFloorDays).
     // Epoch ms is UTC, so flooring to the day needs no tz math. This keeps the
     // fallback request inside the backend's enforced calendar-day window; the OLD
     // rolling [72h,48h] band did NOT (its start reached ~a day before the archived
@@ -366,7 +366,7 @@ inline std::string free_window_label() {
     char sb[24], eb[24];
     fmt(s, sb, sizeof(sb));
     fmt(e, eb, sizeof(eb));
-    // ASCII "to" (not a → glyph — the mono atlas has no U+2192, it renders as "?").
+    // ASCII "to" (not a → glyph - the mono atlas has no U+2192, it renders as "?").
     return std::string(sb) + " to " + eb + " UTC";
 }
 
@@ -437,7 +437,7 @@ inline void open_login() {
 // ── Sessions-today mirror ("N of 6 today" chip) ──────────────────────────────
 // The SERVER is the real enforcer (TIER_DAILY); this is a UX counter in
 // localStorage keyed by the UTC date so it resets at 00:00 UTC. NOT a security
-// boundary — a tampered client can reset it and the server still 429s.
+// boundary - a tampered client can reset it and the server still 429s.
 inline int sessions_today() {
 #ifdef __EMSCRIPTEN__
     return EM_ASM_INT({

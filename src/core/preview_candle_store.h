@@ -1,12 +1,12 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// preview_candle_store.h — replay scrub-preview candles (ghost render source)
+// preview_candle_store.h - replay scrub-preview candles (ghost render source)
 //
 // Owns the FULL replay window's candles at a preview timeframe, fetched once per
 // replay session (get_replay_preview_candles) and re-fetched when the chart TF
 // changes. This is the ONE sanctioned future-leak in the client: the data is
 // read ONLY by the chart's ghost scrub-preview pass and the transport hover
-// chip — never by CandleManager, indicators, or the liq layers. Batches arrive
+// chip - never by CandleManager, indicators, or the liq layers. Batches arrive
 // on the dedicated STREAM_REPLAY_PREVIEW_CANDLES id (33), so they cannot be
 // dispatched into the main candle series by construction.
 //

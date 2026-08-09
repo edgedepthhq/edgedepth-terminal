@@ -104,7 +104,7 @@ void OrderbookWidget::render_asks_table(
     ImGui::TableHeadersRow();
 
     // Render highest price first. Loop over the actual ask count (the caller sizes it
-    // to the dock height) — no fixed-depth_ padding, so it never overflows the dock.
+    // to the dock height) - no fixed-depth_ padding, so it never overflows the dock.
     for (size_t i = 0; i < asks.size(); ++i) {
         ImGui::TableNextRow();
         ImGui::TableSetColumnIndex(0);
@@ -115,7 +115,7 @@ void OrderbookWidget::render_asks_table(
                 float bar_width = static_cast<float>((ask.cumulative / max_cumulative) * table_width);
                 ImVec2 row_pos = ImGui::GetCursorScreenPos();
                 float row_height = ImGui::GetTextLineHeightWithSpacing();
-                // right-aligned soft fill — keeps price text legible
+                // right-aligned soft fill - keeps price text legible
                 draw_list->AddRectFilled(
                     ImVec2(row_pos.x + table_width - bar_width, row_pos.y),
                     ImVec2(row_pos.x + table_width, row_pos.y + row_height),
@@ -155,7 +155,7 @@ void OrderbookWidget::render_bids_table(
             float bar_width = static_cast<float>((bid.cumulative / max_cumulative) * table_width);
             ImVec2 row_pos = ImGui::GetCursorScreenPos();
             float row_height = ImGui::GetTextLineHeightWithSpacing();
-            // right-aligned soft fill — keeps price text legible
+            // right-aligned soft fill - keeps price text legible
             draw_list->AddRectFilled(
                 ImVec2(row_pos.x + table_width - bar_width, row_pos.y),
                 ImVec2(row_pos.x + table_width, row_pos.y + row_height),

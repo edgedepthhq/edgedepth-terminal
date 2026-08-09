@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// drawing::DrawingLayer — chart-side engine for the drawing tools.
+// drawing::DrawingLayer - chart-side engine for the drawing tools.
 //
 // Owns the placement state machine (armed tool -> anchor clicks -> commit),
 // hit-testing/selection/drags, the ImPlot input-map arbitration, and all
@@ -8,21 +8,21 @@
 // AppContext); this class is a ChartWidget member and holds only transient
 // interaction state.
 //
-// Contract with ChartWidget (kept to ~10 lines there — God-file rule):
+// Contract with ChartWidget (kept to ~10 lines there - God-file rule):
 //   * render_in_plot() runs INSIDE the ##Price BeginPlot scope, immediately
 //     before handle_plot_interaction(), every frame the plot is live.
 //   * end_frame() runs right after render_chart() returns (after EndPlot,
-//     before render_indicators()) — restores the ImPlot input map so the
+//     before render_indicators()) - restores the ImPlot input map so the
 //     indicator subplots never see the overrides. Idempotent.
 //   * captures_mouse() gates the chart's own click/drag handlers (follow-live
 //     clear, Shift+drag replay selection, right-click context menu).
 //
 // Input arbitration (verified against the pinned ImPlot d65a2be):
-//   * While a tool is armed / placing: ImPlot::GetInputMap() is overridden —
+//   * While a tool is armed / placing: ImPlot::GetInputMap() is overridden -
 //     PanMod/SelectMod get an impossible 4-modifier chord, Fit and Menu move
 //     to the middle button. GetInputMap() returns a mutable ref that EndPlot
 //     reads LIVE, so a mid-frame override applies the same frame. Button
-//     fields must stay in [0,5) — they index size-5 IO arrays; the chord
+//     fields must stay in [0,5) - they index size-5 IO arrays; the chord
 //     trick is what makes Pan unreachable, never an out-of-range button.
 //     Crosshair, hover, and wheel zoom stay fully alive (the TV feel).
 //   * Cursor-mode drags do NOT touch the map: the drag claims the ImGui
@@ -81,7 +81,7 @@ private:
     uint64_t    hover_id_   = 0;
     int         hover_part_ = kPartNone;
 
-    // Measure (ephemeral — never stored): pending_[0..1] + frozen flag.
+    // Measure (ephemeral - never stored): pending_[0..1] + frozen flag.
     bool measure_frozen_ = false;
     // Brush: a stroke is being captured into pending_.
     bool stroke_active_ = false;

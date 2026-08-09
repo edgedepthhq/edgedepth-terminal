@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// data_context.h — Dual-context state isolation for live/replay modes
+// data_context.h - Dual-context state isolation for live/replay modes
 //
 // The DemoNetDriver pattern: create parallel data pipelines that feed into
 // the same rendering code. Live managers keep running during replay so
@@ -12,7 +12,7 @@
 // swapped to the active DataContext's managers.
 //
 // This avoids "if (is_replay)" branching in every widget. Same rendering
-// code, different data source — the pointer swap is invisible to widgets.
+// code, different data source - the pointer swap is invisible to widgets.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include <memory>
@@ -39,7 +39,7 @@ enum class DataSource : uint8_t {
     Replay
 };
 
-// DataContext — owns a complete set of data managers for one source.
+// DataContext - owns a complete set of data managers for one source.
 // Live context: wraps existing g_app managers (non-owning).
 // Replay context: owns fresh managers, destroyed on stop via RAII.
 struct DataContext {
@@ -47,7 +47,7 @@ struct DataContext {
     std::string session_id;
     std::vector<std::string> symbols;
 
-    // Owned managers — unique_ptr for RAII cleanup on replay stop.
+    // Owned managers - unique_ptr for RAII cleanup on replay stop.
     // For the live context these are null (g_app owns those managers).
     std::unique_ptr<StreamManager>              owned_streams;
     std::unique_ptr<OrderbookManager>           owned_orderbooks;
@@ -64,7 +64,7 @@ struct DataContext {
     // stays null for the live context (no future to preview in live mode).
     std::unique_ptr<PreviewCandleStore>         owned_preview;
 
-    // Non-owning raw pointers — always valid, point to either owned or
+    // Non-owning raw pointers - always valid, point to either owned or
     // external (g_app) managers depending on context type.
     StreamManager*              streams      = nullptr;
     OrderbookManager*           orderbooks   = nullptr;
@@ -83,8 +83,8 @@ struct DataContext {
     bool is_replay() const { return source == DataSource::Replay; }
 
     // Factory: create a replay DataContext with fresh managers.
-    // ws_handle: the LIVE WebSocket handle — needed to request historical data from server.
-    // start_time_ms: replay start timestamp — historical candles are loaded up to this point.
+    // ws_handle: the LIVE WebSocket handle - needed to request historical data from server.
+    // start_time_ms: replay start timestamp - historical candles are loaded up to this point.
     static DataContext create_replay_context(
         const std::string& session_id,
         const std::vector<std::string>& symbols,
@@ -92,7 +92,7 @@ struct DataContext {
         int64_t start_time_ms,
         int64_t default_timeframe_sec = 300);
 
-    // No copy — unique_ptrs own the managers.
+    // No copy - unique_ptrs own the managers.
     // Destructor + move ops defined in .cpp where full types are visible.
     DataContext() = default;
     ~DataContext();

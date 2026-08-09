@@ -79,7 +79,7 @@ void RenkoBuilder::build(const std::vector<double>& closes,
                             close_times[consumed_ - 1] == last_time_;
 
     if (!can_append) {
-        // Full (re)build — brick size change, seek/timeframe reload, or prepend.
+        // Full (re)build - brick size change, seek/timeframe reload, or prepend.
         bricks_.clear();
         building_.clear();
         brick_size_ = brick_size;

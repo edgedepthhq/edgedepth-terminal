@@ -274,7 +274,7 @@ namespace Terminal {
         // Count of INCREMENTAL depth deltas applied (NOT the seed/snapshot). The
         // replay seed fills the book fast; the live delta stream lags ~10s. This
         // counter distinguishes "seed loaded" (0 deltas) from "depth genuinely
-        // streaming" (deltas flowing) — used by ReplayManager::context_primed.
+        // streaming" (deltas flowing) - used by ReplayManager::context_primed.
         int64_t delta_updates = 0;
         struct Level {
             double price;
@@ -364,11 +364,11 @@ namespace Terminal {
         double total_short_risk_usd = 0.0;
         double net_risk_bias = 0.0;
         double band_width_pct = 0.0;
-        double flow_intensity = 1.0;  // 0.0–1.0: how unusual was flow when snapshot was generated
-        // Bayesian leverage uncertainty (Layer 1) — higher = more prior-dominated
+        double flow_intensity = 1.0;  // 0.0-1.0: how unusual was flow when snapshot was generated
+        // Bayesian leverage uncertainty (Layer 1) - higher = more prior-dominated
         double bayesian_uncertainty = 0.0;
         // Hawkes cascade dynamics (Layer 4)
-        double hawkes_branching_ratio = 0.0;  // α/β — <1 subcritical, ~1 critical, >1 supercritical
+        double hawkes_branching_ratio = 0.0;  // α/β - <1 subcritical, ~1 critical, >1 supercritical
         double hawkes_severity = 0.0;          // 0-1 normalized cascade severity
         std::vector<LiquidationBand> bands;
     };
@@ -393,7 +393,7 @@ namespace Terminal {
     };
 
     // ═══════════════════════════════════════════════════════════════
-    // VPVR — Volume Profile Visible Range
+    // VPVR - Volume Profile Visible Range
     // ═══════════════════════════════════════════════════════════════
     struct VPVRLevel {
         double price = 0;
@@ -418,7 +418,7 @@ namespace Terminal {
     };
 
     // ═══════════════════════════════════════════════════════════════
-    // TPO — Time Price Opportunity / Market Profile
+    // TPO - Time Price Opportunity / Market Profile
     // ═══════════════════════════════════════════════════════════════
     struct TPOBlock {
         double price = 0;

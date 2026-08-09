@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// watchlist_widget.cpp — dense-grid watchlist (edgedepth v2, treatment 1b)
+// watchlist_widget.cpp - dense-grid watchlist (edgedepth v2, treatment 1b)
 //
 // Header stack (non-scrolling): title bar · filter row · category + venue
 // selectors/popovers · SYMBOL/LAST/24H% sort chips. Then a scrolling
@@ -92,7 +92,7 @@ WatchlistWidget::WatchlistWidget(const Terminal::Pair& active_pair, const AppCon
 {}
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Update — sample sparkline ring buffers off the always-on ticker stream
+// Update - sample sparkline ring buffers off the always-on ticker stream
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void WatchlistWidget::update() {
@@ -139,7 +139,7 @@ void WatchlistWidget::build_category_counts() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Visible-list cache — filter (search + category) then sort.
+// Visible-list cache - filter (search + category) then sort.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void WatchlistWidget::rebuild_visible() {
@@ -201,7 +201,7 @@ void WatchlistWidget::rebuild_visible() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Render — header stack (title · filter · category · sort) then the scroll list
+// Render - header stack (title · filter · category · sort) then the scroll list
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void WatchlistWidget::render() {
@@ -258,7 +258,7 @@ void WatchlistWidget::render() {
     ImGui::End();
 }
 
-// ── Title bar (h28) — live dot · WATCHLIST · [compact][count][close] ─────────
+// ── Title bar (h28) - live dot · WATCHLIST · [compact][count][close] ─────────
 
 void WatchlistWidget::render_title_bar() {
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -295,7 +295,7 @@ void WatchlistWidget::render_title_bar() {
     x -= cnt_w + 9.0f;
     ImGui::PopFont();
 
-    // compact toggle — 3 stacked ticks (accent when on)
+    // compact toggle - 3 stacked ticks (accent when on)
     const float gx0 = x - 12.0f, gy = cy - 4.0f;
     const ImU32 gc = Theme::u32(compact_ ? Theme::Tokens::BRAND_TX : Theme::Tokens::TX3);
     for (int i = 0; i < 3; ++i)
@@ -312,7 +312,7 @@ void WatchlistWidget::render_title_bar() {
     ImGui::Dummy(ImVec2(w, h));
 }
 
-// ── Filter row (h28 controls) — "Filter pairs" input + Vol volume-sort toggle ─
+// ── Filter row (h28 controls) - "Filter pairs" input + Vol volume-sort toggle ─
 
 void WatchlistWidget::render_filter_bar() {
     const float pad = 10.0f;
@@ -431,7 +431,7 @@ void WatchlistWidget::render_category_selector() {
     dl->AddTriangleFilled(ImVec2(vqx, qy-2.0f), ImVec2(vqx+6.0f, qy-2.0f),
                           ImVec2(vqx+3.0f, qy+2.5f), Theme::u32(Theme::Tokens::TX3));
 
-    // taxonomy popover — searchable 2-column grid of name+count chips
+    // taxonomy popover - searchable 2-column grid of name+count chips
     // It spans the full rail and is opaque so the selector underneath cannot
     // leak into the first All / AI row at the popup margins.
     ImGui::SetNextWindowPos(ImVec2(bp.x, p0.y + h + 4.0f));
@@ -501,7 +501,7 @@ void WatchlistWidget::render_category_selector() {
     ImGui::PopStyleVar(3);
     ImGui::PopStyleColor(2);
 
-    // Venue popover — a compact three-row filter, defaulting to All venues.
+    // Venue popover - a compact three-row filter, defaulting to All venues.
     const float venue_popup_w = std::min(160.0f, ww);
     ImGui::SetNextWindowPos(ImVec2(bp.x + ww - venue_popup_w, p0.y + h + 4.0f));
     ImGui::SetNextWindowSize(ImVec2(venue_popup_w, 0.0f));
@@ -572,7 +572,7 @@ void WatchlistWidget::render_category_selector() {
     dl->AddLine(ImVec2(bp.x, hy), ImVec2(bp.x + ww, hy), Theme::u32(Theme::Tokens::BD1));
 }
 
-// ── Sort header — SYMBOL(+total) left, LAST / 24H% right; active chip arrow ───
+// ── Sort header - SYMBOL(+total) left, LAST / 24H% right; active chip arrow ───
 
 void WatchlistWidget::render_sort_header() {
     const float pad = 10.0f;
@@ -648,7 +648,7 @@ void WatchlistWidget::render_sort_header() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Rows — star · sparkline · symbol (ellipsized) · last · 24h% + a dim 24h-volume
+// Rows - star · sparkline · symbol (ellipsized) · last · 24h% + a dim 24h-volume
 // figure. A compact toggle (or a narrow rail, < 300px) drops the sparkline.
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -732,7 +732,7 @@ void WatchlistWidget::render_rows() {
                         spark_w, 14.0f, chg_col);
             }
 
-            // symbol — base (bright) + /quote (dim), ellipsized to its column so
+            // symbol - base (bright) + /quote (dim), ellipsized to its column so
             // long tickers (SKHYNIX/USDT, 1000PEPE/USDT) never reach the price cols
             {
                 const char* base = meta->base_asset.empty() ? meta->symbol.c_str()
@@ -788,7 +788,7 @@ void WatchlistWidget::render_rows() {
                 }
             }
 
-            // last · 24h% — mono, right-aligned in their fixed columns
+            // last · 24h% - mono, right-aligned in their fixed columns
             ImGui::PushFont(Theme::Fonts::mono());
             const float ly = cy_line - ImGui::GetFontSize() * 0.5f;
             if (t && t->last_price > 0.0) {
@@ -805,7 +805,7 @@ void WatchlistWidget::render_rows() {
             }
             ImGui::PopFont();
 
-            // 24h volume — compact grey figure left-aligned directly under the
+            // 24h volume - compact grey figure left-aligned directly under the
             // symbol (Binance-style); never interrupts the 24h% read on the right.
             if (t && t->volume_quote > 0.0) {
                 char vbuf[16];
@@ -830,7 +830,7 @@ void WatchlistWidget::render_rows() {
     ImGui::PopStyleVar();   // WindowPadding
 }
 
-// ── Sparkline — polyline of ring-buffer samples, min/max normalized ──────────
+// ── Sparkline - polyline of ring-buffer samples, min/max normalized ──────────
 
 void WatchlistWidget::draw_sparkline(const Spark& s, ImVec2 p0, float w, float h,
                                      const ImVec4& col) const {

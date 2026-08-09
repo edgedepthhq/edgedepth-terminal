@@ -7,34 +7,34 @@
 #include <vector>
 
 /**
- * LiqFieldTextureRenderer — WS2: the dense projection Field as ONE LUT-shaded
+ * LiqFieldTextureRenderer - WS2: the dense projection Field as ONE LUT-shaded
  * textured quad per frame (replaces the per-rect immediate-mode path when the
  * liq_field_use_texture_ A/B toggle is on; the rect path stays as fallback).
  *
  * Design:
  *  - R8 2D texture: x = candle column, y = ABSOLUTE log-price bucket row.
- *    Texels store t = ln(f/lo)/ln(hi/lo) clamped 0..1 — the PRE-gamma log-mapped
+ *    Texels store t = ln(f/lo)/ln(hi/lo) clamped 0..1 - the PRE-gamma log-mapped
  *    intensity. Gamma, noise floor, alpha floor/pow, opacity and the colormap
  *    stay LIVE shader uniforms (Tweaks/Settings changes don't re-upload;
  *    Low/Peak/bps/half-life already invalidate the segment cache upstream).
  *  - Rasterized ONCE per Field-cache rebuild from liq_field_segs_ (the cache
- *    stays the source of truth — this class renders it, never recomputes it).
+ *    stays the source of truth - this class renders it, never recomputes it).
  *    Column resolution reproduces no-overlap: the depositing candle's own
  *    column and the consuming candle's own column stay dark (the rect path's
- *    tf*0.35 sub-candle edge offsets become whole-column boundaries — flagged
+ *    tf*0.35 sub-candle edge offsets become whole-column boundaries - flagged
  *    parity risk, A/B at high zoom).
  *  - Per frame: ONE glTexSubImage2D of the live column (building-candle carve)
  *    plus the 1xH standing-fuel texture that drives the in-shader cascade.
  *  - Cascade is procedural in-shader right of the live-edge seam:
  *    len = span*(0.15 + 0.85*tv_row), alpha = history * cascade_alpha with a
- *    LINEAR fade over the final fade_frac (12%) of the projection — the design
+ *    LINEAR fade over the final fade_frac (12%) of the projection - the design
  *    target that retires the interim stepped tail.
  *  - GL_LINEAR sampling on the R8 texture gives the vertical feather; x is
  *    snapped to the column texel center in-shader so deposit/consume edges
  *    stay crisp (no horizontal smear across the no-overlap boundaries).
  *    At sub-pixel candles (>1 col/px) the history branch switches to a MAX
  *    over the fragment's column footprint on a stride grid anchored to
- *    ABSOLUTE column indices (≤8 taps) — scroll-invariant, so extreme
+ *    ABSOLUTE column indices (≤8 taps) - scroll-invariant, so extreme
  *    zoom-out can't shimmer (the OB shader's <0.3px/col bail was rejected:
  *    a 10-day 5m view is already ~0.55px/col and the Field must survive it).
  *
@@ -47,7 +47,7 @@
  * for render(). ensure() returning false => caller uses the rect path.
  */
 
-// Shared segment POD — the Field cache element (was a ChartWidget nested type;
+// Shared segment POD - the Field cache element (was a ChartWidget nested type;
 // moved here so the rasterizer can consume the cache directly).
 struct LiqFieldSeg {
     float   price_lo;   // bucket-center price of the run's lowest bucket
@@ -78,7 +78,7 @@ public:
 
     // ── Raster inputs (stable between Field-cache rebuilds) ─────────────────
     struct RasterParams {
-        uint32_t rebuild_gen = 0;  // ChartWidget's Field-cache rebuild counter — the raster key
+        uint32_t rebuild_gen = 0;  // ChartWidget's Field-cache rebuild counter - the raster key
         double   lbw = 0.0;        // log-price bucket width (liq_field_bw_)
         float    norm_lo = 0.0f;   // dual-percentile log-map clips (liq_field_norm_lo_/hi_)
         float    norm_hi = 0.0f;
@@ -104,12 +104,12 @@ public:
         float opacity = 0.90f;         // liq_field_opacity_
         float cascade_alpha = 0.78f;   // liq_cascade_alpha_
         float fade_frac = 0.12f;       // linear fade over the final 12% (design)
-        float min_row_px = 2.0f;       // liq_field_min_row_px_ — rect-path row clamp parity
+        float min_row_px = 2.0f;       // liq_field_min_row_px_ - rect-path row clamp parity
     };
 
     /// Re-rasterize liq_field_segs_ into the R8 texture if rebuild_gen changed.
     /// Returns false when this path can't serve (rows > kMaxRows, degenerate
-    /// params, GL/shader init failed) — caller falls back to the rect path.
+    /// params, GL/shader init failed) - caller falls back to the rect path.
     bool ensure(const std::vector<LiqFieldSeg>& segs, const RasterParams& p);
 
     /// Per-frame: upload the live column (carve applied) + the standing-fuel
@@ -167,7 +167,7 @@ private:
             static_cast<double>(ms - t0_ms_) / static_cast<double>(tf_ms_)));
     }
 
-    // ── Render callback payload (member — must outlive the draw list; the
+    // ── Render callback payload (member - must outlive the draw list; the
     //    callback receives `this` and reads uniforms_/locs_/GL handles) ──────
     struct Uniforms {
         float plot_pos_screen[2] = {};   // ImGui screen coords (Y-down)

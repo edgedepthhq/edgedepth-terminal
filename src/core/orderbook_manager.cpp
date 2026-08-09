@@ -44,7 +44,7 @@ void OrderbookManager::apply_book_update_from_pb(
         if (prev_last_update_id != orderbook.last_update_id) {
             int64_t diff = prev_last_update_id - orderbook.last_update_id;
             if (diff > 0 && diff <= 20000) {
-                // Small forward skip — tolerate (redelivery/minor gaps)
+                // Small forward skip - tolerate (redelivery/minor gaps)
             } else if (diff > 20000) {
                 orderbook.snapshot = false;
                 return;
@@ -71,16 +71,16 @@ void OrderbookManager::apply_book_update_from_pb(
             orderbook.bids.insert_or_assign(level.price(), level.size());
         }
     }
-    // REPLAY-ONLY post-event crossing resolution — the backend write path's
+    // REPLAY-ONLY post-event crossing resolution - the backend write path's
     // rule (internal/bookreplay.applyDiff) mirrored client-side. Archived depth
     // streams carry vendor/producer resume events whose CONTENT is stale on a
-    // formally intact pu chain — no update-id signal exists, so no reseed can
+    // formally intact pu chain - no update-id signal exists, so no reseed can
     // fire. A correct diff can never leave a correct book crossed (measured:
     // BTCUSDT 2026-06-11, 3.2M deltas, 0 crossings), so a book left crossed
     // after a whole event applied is vendor staleness: evict the crossing level
     // this event did NOT just state; when the event crossed itself, the ask
     // goes. Without this, a stale level pinned at the top renders a crossed DOM
-    // until the price re-touches it — measured on WMTUSDT 2026-06-05, crossed
+    // until the price re-touches it - measured on WMTUSDT 2026-06-05, crossed
     // from 00:04 for the REST OF THE DAY (154,438 of 154,617 deltas). Must run
     // at the event boundary only: one event may cross transiently while its own
     // levels apply (bid moves up before the old ask's removal lands).
@@ -106,7 +106,7 @@ void OrderbookManager::apply_book_update_from_pb(
     }
     // Only adopt a price when the update actually carries one. Pure depth
     // deltas (no trade on this tick) send last_price=0; assigning that would
-    // wipe the real price to 0.00 for a frame — the "price flashes to 0" glitch
+    // wipe the real price to 0.00 for a frame - the "price flashes to 0" glitch
     // seen on fast pairs (live AND replay). Keep the last known price instead.
     if (update_pb.last_price() > 0.0) {
         orderbook.last_price = update_pb.last_price();
@@ -127,7 +127,7 @@ void OrderbookManager::apply_book_update_from_pb(
     orderbook.last_update_id = last_update_id;
     orderbook.previous_update_id = prev_last_update_id;
     orderbook.timestamp_ms = update_pb.timestamp_ms();
-    orderbook.delta_updates++;  // incremental depth tick (not seed) — see context_primed
+    orderbook.delta_updates++;  // incremental depth tick (not seed) - see context_primed
 
     if (++orderbook.update_count_since_prune >= 100) {
         prune_orderbook(orderbook);
@@ -214,7 +214,7 @@ void OrderbookManager::note_trade_price(const Terminal::Pair& pair, double price
     if (price <= 0.0) return;
     const OrderbookKey key{pair.exchange, pair.symbol};
     auto it = orderbooks_.find(key);
-    if (it == orderbooks_.end()) return;  // no book yet — the seed will bootstrap
+    if (it == orderbooks_.end()) return;  // no book yet - the seed will bootstrap
     auto& db = it->second;
     std::lock_guard<std::mutex> lock(db.write_mutex);
     auto& orderbook = db.write_buf;
@@ -226,7 +226,7 @@ void OrderbookManager::note_trade_price(const Terminal::Pair& pair, double price
     // (cryptohftdata archives), where last_price would otherwise be the book
     // MID. The live actor sets last_price from the trade tape
     // (actor/orderbook/orderbook.go:147) and only falls back to a mid, so a mid
-    // here renders a DOM centre half a tick off the traded price — 62138.75
+    // here renders a DOM centre half a tick off the traded price - 62138.75
     // printing as 62138.8 while the tape and chart read 62138.7. The trades
     // stream is delivered on these days too, so use it and match live exactly.
     // The mid fallback in the update paths remains, covering the frames between
@@ -236,7 +236,7 @@ void OrderbookManager::note_trade_price(const Terminal::Pair& pair, double price
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Double-buffer swap — called once per frame
+// Double-buffer swap - called once per frame
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void OrderbookManager::swap_buffers() {
@@ -252,7 +252,7 @@ void OrderbookManager::swap_buffers() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Read access — always returns the stable read buffer
+// Read access - always returns the stable read buffer
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const Terminal::Orderbook* OrderbookManager::get_orderbook(const Terminal::Pair& pair) const {

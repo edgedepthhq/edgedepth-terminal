@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// symbol_metadata.h — Symbol metadata registry + PriceFormatter
+// symbol_metadata.h - Symbol metadata registry + PriceFormatter
 //
 // Single source of truth for tick_size, step_size, and derived formatting.
 // Fetched from https://api.edgedepth.com/symbols/metadata at startup.
@@ -132,7 +132,7 @@ private:
     std::unordered_map<std::string, SymbolMetadata> symbols_;
     bool loaded_ = false;
 
-    // Normalize to lowercase — API returns "XPLUSDT", url_router uses "xplusdt"
+    // Normalize to lowercase - API returns "XPLUSDT", url_router uses "xplusdt"
     static std::string make_key(const std::string& exchange, const std::string& symbol) {
         std::string key;
         key.reserve(exchange.size() + 1 + symbol.size());

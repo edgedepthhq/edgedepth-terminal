@@ -1,13 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// recorder_glue.cpp — P1 "Share clip" recorder (see recorder_glue.h)
+// recorder_glue.cpp - P1 "Share clip" recorder (see recorder_glue.h)
 //
 // ONE file owns every line of JS (EM_JS below) + the C++ state machine + the
 // burned-in watermark. Conventions:
 //   · JS state lives in Module['__edclip'] (module scope survives between calls)
 //   · JS→C++ is ONLY _recorder_on_state(int,double) (EXPORTED_FUNCTIONS:
-//     __recorder_on_state) — the transport button renders whatever the browser
+//     __recorder_on_state) - the transport button renders whatever the browser
 //     reports, never what C++ hopes happened
-//   · capture source is Module['canvas'] — the SAME lookup works bare
+//   · capture source is Module['canvas'] - the SAME lookup works bare
 //     (serve_threaded.py) and embedded (/terminal in the web app); never
 //     getElementById (the embed owns the element's id/placement).
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -25,7 +25,7 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
-#include <GLES3/gl3.h>   // cam-bubble texture (export mode) — repo GL header
+#include <GLES3/gl3.h>   // cam-bubble texture (export mode) - repo GL header
 #endif
 
 namespace {
@@ -35,14 +35,14 @@ bool                g_supported = false;
 double              g_bytes     = 0.0;
 double              g_start_now = 0.0;  // emscripten_get_now() at start (monotonic)
 double              g_error_at  = 0.0;  // when Error was reported (for decay)
-// Watermark line, built ONCE at start() — zero string work in the render loop.
+// Watermark line, built ONCE at start() - zero string work in the render loop.
 char                g_badge[96] = {0};
 
 // Focus layout (see header). Session-static default ON.
 bool    g_focus_enabled = true;
 // Deferred-start countdown: ⏺ sets 2, tick_and_render decrements once per frame
 // and fires the JS start at 0. Two frames because the click is processed AFTER
-// the current frame's chrome already rendered — frame N+1 is the first one laid
+// the current frame's chrome already rendered - frame N+1 is the first one laid
 // out chrome-free, so capture must not begin before its composite.
 int     g_start_pending = 0;
 char    g_pend_sym[24]  = {0};
@@ -52,7 +52,7 @@ constexpr double kErrorDecayMs = 4000.0;
 
 // ── Export mode (CLIP_FACTORY P3-v1) ─────────────────────────────────────────
 // True from export_start() until the recorder settles back to Idle/Error. While
-// set, the P1 tick_and_render() is a no-op — export_tick_and_render() owns the
+// set, the P1 tick_and_render() is a no-op - export_tick_and_render() owns the
 // cap/badge/cam-bubble for this mode. Shared g_state/g_bytes/g_start_now.
 bool         g_export_mode      = false;
 bool         g_export_has_audio = false;
@@ -63,7 +63,7 @@ unsigned int g_cam_tex          = 0;   // GL texture for the cam bubble (lazy, r
 #ifdef __EMSCRIPTEN__
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// JS glue — ALL of it, EM_JS only (no --js-library)
+// JS glue - ALL of it, EM_JS only (no --js-library)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Probe once at boot. Negotiates the container/codec (vp9 → vp8 → webm → mp4),
@@ -103,10 +103,10 @@ EM_JS(int, edclip_js_probe, (), {
 // encode, and at 60 that dragged the render loop from 170 to ~35 FPS (2026-07-05
 // regression). 30fps halves both costs, social clips are 30fps anyway, and
 // quality/frame is unchanged because the bitrate formula scales with fps.
-// Bitrate is explicit — the ~2.5Mbps MediaRecorder default smears candles/text.
+// Bitrate is explicit - the ~2.5Mbps MediaRecorder default smears candles/text.
 // We ask for ~0.1 bits/pixel/frame of the BACKING store (hiDPI canvases carry
 // the full backing resolution, which is exactly what captureStream records),
-// clamped to 8–20 Mbps. Filename = edgedepth_{symbol}_{date}.{ext} — date_str is
+// clamped to 8-20 Mbps. Filename = edgedepth_{symbol}_{date}.{ext} - date_str is
 // derived from the REPLAY DATA position (UTC), never wall clock; ext is the
 // negotiated container from the probe, never hardcoded.
 EM_JS(int, edclip_js_start, (const char* symbol_lower, const char* date_str), {
@@ -114,7 +114,7 @@ EM_JS(int, edclip_js_start, (const char* symbol_lower, const char* date_str), {
         var st = Module['__edclip'];
         if (!st || !st.mime || st.rec) return 0;
         var canvas = Module['canvas'];
-        var fps = 30;  // see header comment — 60 tanked render FPS (readback+encode)
+        var fps = 30;  // see header comment - 60 tanked render FPS (readback+encode)
         var bps = canvas.width * canvas.height * 0.1 * fps;
         bps = Math.max(8e6, Math.min(20e6, bps));
         var stream = canvas.captureStream(fps);
@@ -194,7 +194,7 @@ EM_JS(void, edclip_js_stop, (), {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Export mode JS (CLIP_FACTORY P3-v1) — same Module['__edclip'] slot, second
+// Export mode JS (CLIP_FACTORY P3-v1) - same Module['__edclip'] slot, second
 // entry point. Probes its OWN container ladder (audio-aware) per export; the P1
 // boot probe/pick (st.mime/st.ext) is never touched.
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -202,16 +202,16 @@ EM_JS(void, edclip_js_stop, (), {
 // Begin the export capture. Returns 0 = can't record, 1 = video-only, 2 = A/V.
 //
 // Reads window.__EDGEDEPTH_EXPORT_MEDIA__ = { ctx: AudioContext, stream:
-// MediaStream } (stashed by StudioShell inside the Export click — the
+// MediaStream } (stashed by StudioShell inside the Export click - the
 // AudioContext is constructed synchronously in the user gesture so it boots
 // 'running'; getUserMedia already carries the permission). Absent/denied media
-// ⇒ silent video export. The narration mic routes through a WebAudio graph —
+// ⇒ silent video export. The narration mic routes through a WebAudio graph -
 // MediaStreamSource → MediaStreamAudioDestinationNode → addTrack() onto the
-// canvas captureStream — so a stored narration track can later replace the mic
+// canvas captureStream - so a stored narration track can later replace the mic
 // by swapping the source node ONLY (P3-v2/P2 reuse this path unchanged).
 //
 // The cam track (if any) feeds a detached muted <video> (st.exCam) that
-// edclip_js_cam_upload() samples into a GL texture each frame — the bubble is
+// edclip_js_cam_upload() samples into a GL texture each frame - the bubble is
 // composited IN-RENDER because captureStream sees only the canvas.
 EM_JS(int, edclip_js_export_begin, (const char* slug, const char* date_str), {
     try {
@@ -236,7 +236,7 @@ EM_JS(int, edclip_js_export_begin, (const char* slug, const char* date_str), {
         var videoTracks = mediaStream ? mediaStream.getVideoTracks() : [];
         var wantAudio = audioTracks.length > 0;
 
-        // Container ladder — WITH audio codecs when a mic track is present
+        // Container ladder - WITH audio codecs when a mic track is present
         // (mimeType must name both codecs or Chrome records silent video).
         var picks = wantAudio
             ? [['video/webm;codecs=vp9,opus', 'webm'],
@@ -274,7 +274,7 @@ EM_JS(int, edclip_js_export_begin, (const char* slug, const char* date_str), {
                 st.exAudioSrc = srcNode;   // keep the graph alive for the take
                 st.exAudioDst = destNode;
             } catch (ae) {
-                console.warn('[ClipRecorder] audio graph failed — exporting silent', ae);
+                console.warn('[ClipRecorder] audio graph failed - exporting silent', ae);
             }
         }
 
@@ -365,7 +365,7 @@ EM_JS(int, edclip_js_export_begin, (const char* slug, const char* date_str), {
 });
 
 // Release an UNCONSUMED media stash (export cancelled before capture start).
-// While an export capture runs, its own cleanup owns the media — skip.
+// While an export capture runs, its own cleanup owns the media - skip.
 EM_JS(void, edclip_js_export_release_media, (), {
     try {
         var st = Module['__edclip'];
@@ -390,7 +390,7 @@ EM_JS(int, edclip_js_cam_dims, (), {
 
 // Upload the current cam frame into the GL texture `tex` (a C++-side
 // glGenTextures handle → GL.textures[tex] in Emscripten's GL layer). Runs on
-// the main thread between NewFrame and Render — no draw is in flight, so the
+// the main thread between NewFrame and Render - no draw is in flight, so the
 // transient TEXTURE_2D binding can't corrupt anyone (every renderer in this
 // codebase re-binds before drawing). Returns 1 on upload.
 EM_JS(int, edclip_js_cam_upload, (int tex), {
@@ -411,7 +411,7 @@ EM_JS(int, edclip_js_cam_upload, (int tex), {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// JS→C++ — the ONE exported callback (CMakeLists: __recorder_on_state)
+// JS→C++ - the ONE exported callback (CMakeLists: __recorder_on_state)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 extern "C" EMSCRIPTEN_KEEPALIVE void _recorder_on_state(int state, double bytes) {
@@ -454,7 +454,7 @@ double bytes()       { return g_bytes; }
 
 bool focus_enabled() { return g_focus_enabled; }
 void set_focus_enabled(bool on) {
-    // Locked while recording (or a start is pending) — no mid-clip layout jump.
+    // Locked while recording (or a start is pending) - no mid-clip layout jump.
     if (g_state == State::Recording || g_start_pending > 0) return;
     g_focus_enabled = on;
 }
@@ -471,11 +471,11 @@ double elapsed_ms() {
 }
 
 #ifdef __EMSCRIPTEN__
-// The actual JS start — filename/watermark build + edclip_js_start. Split from
+// The actual JS start - filename/watermark build + edclip_js_start. Split from
 // start() so the focus path can defer it behind the chrome-hide (see header).
 static void do_start_js(const char* symbol_upper, int64_t replay_data_ms) {
     // Filename symbol (lowercase) + REPLAY-DATA timestamps (UTC). Wall clock
-    // never appears anywhere — the filename matches the burned watermark date.
+    // never appears anywhere - the filename matches the burned watermark date.
     char sym_lower[24];
     size_t n = 0;
     for (; symbol_upper[n] != '\0' && n < sizeof(sym_lower) - 1; ++n) {
@@ -500,7 +500,7 @@ static void do_start_js(const char* symbol_upper, int64_t replay_data_ms) {
 
     if (edclip_js_start(sym_lower, date_str)) {
         // The synchronous __recorder_on_state(1,0) inside the glue already set
-        // Recording — here we only anchor the monotonic elapsed/cap base.
+        // Recording - here we only anchor the monotonic elapsed/cap base.
         g_start_now = emscripten_get_now();
     }
 }
@@ -538,7 +538,7 @@ void stop() {
 
 void tick_and_render(bool replay_active) {
 #ifdef __EMSCRIPTEN__
-    // Export mode owns its own tick (export_tick_and_render) — cap, badge and
+    // Export mode owns its own tick (export_tick_and_render) - cap, badge and
     // stop rules differ. Bail so the P1 path can't double-render or 3:00-cap a
     // 15:00 export. P1 behavior outside export mode is byte-identical.
     if (g_export_mode) return;
@@ -561,7 +561,7 @@ void tick_and_render(bool replay_active) {
 
     const double elapsed = emscripten_get_now() - g_start_now;
 
-    // AUTHORITATIVE 3:00 cap — takes the identical stop/download path as ⏹.
+    // AUTHORITATIVE 3:00 cap - takes the identical stop/download path as ⏹.
     if (elapsed >= kMaxClipMs) {
         stop();
         return;
@@ -572,7 +572,7 @@ void tick_and_render(bool replay_active) {
         return;
     }
 
-    // ── Watermark badge — FOREGROUND draw list: always on top of every widget,
+    // ── Watermark badge - FOREGROUND draw list: always on top of every widget,
     //    so it's composited into canvas.captureStream frames (the whole point).
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     const ImGuiIO& io = ImGui::GetIO();
@@ -585,7 +585,7 @@ void tick_and_render(bool replay_active) {
     ImFont* f_clock = Theme::Fonts::mono();         // mm:ss numerics
     ImFont* f_line  = Theme::Fonts::ui_semibold();  // EDGEDEPTH · SYMBOL · DATE
 
-    // Measure with each font pushed (repo pattern — ImFont::FontSize is gone in
+    // Measure with each font pushed (repo pattern - ImFont::FontSize is gone in
     // this ImGui; CalcTextSize + the font-less AddText read the pushed font).
     ImGui::PushFont(f_rec);
     const ImVec2 rec_sz = ImGui::CalcTextSize("REC");
@@ -619,7 +619,7 @@ void tick_and_render(bool replay_active) {
     const float cy = y + h * 0.5f;
     float cx = x + pad_x + dot_r;
 
-    // REC dot — classic gentle blink; floor keeps it legible in every frame.
+    // REC dot - classic gentle blink; floor keeps it legible in every frame.
     const float pulse = 0.35f + 0.65f *
         (0.5f + 0.5f * sinf(static_cast<float>(ImGui::GetTime()) * 4.0f));
     dl->AddCircleFilled(ImVec2(cx, cy), dot_r, Theme::u32(Theme::Tokens::DOWN, pulse));
@@ -651,7 +651,7 @@ void tick_and_render(bool replay_active) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Export mode (CLIP_FACTORY P3-v1) — see recorder_glue.h
+// Export mode (CLIP_FACTORY P3-v1) - see recorder_glue.h
 // ═══════════════════════════════════════════════════════════════════════════════
 
 bool export_active() { return g_export_mode; }
@@ -691,7 +691,7 @@ void export_start(const char* slug, const char* symbol_upper, int64_t lesson_sta
     slug_clean[o] = '\0';
 
     // Filename timestamp + badge date = the lesson window START (replay DATA
-    // date, UTC) — the P1 rule, wall clock never appears anywhere.
+    // date, UTC) - the P1 rule, wall clock never appears anywhere.
     const time_t s = static_cast<time_t>(lesson_start_ms / 1000);
     struct tm tmv;
     gmtime_r(&s, &tmv);
@@ -748,7 +748,7 @@ void export_tick_and_render(bool session_alive) {
 
     const double elapsed = emscripten_get_now() - g_start_now;
 
-    // AUTHORITATIVE 15:00 ceiling — identical stop/download path as ⏹/P1.
+    // AUTHORITATIVE 15:00 ceiling - identical stop/download path as ⏹/P1.
     if (elapsed >= kMaxExportMs) { export_stop(); return; }
     // Replay session died under the export → finish + download what we have.
     if (!session_alive) { export_stop(); return; }
@@ -756,7 +756,7 @@ void export_tick_and_render(bool session_alive) {
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     const ImGuiIO& io = ImGui::GetIO();
 
-    // ── Badge — the EDGEDEPTH line only. No REC dot, no elapsed timer: this is
+    // ── Badge - the EDGEDEPTH line only. No REC dot, no elapsed timer: this is
     //    a produced video, not a live share-clip (P3-v1 policy decision).
     ImFont* f_line = Theme::Fonts::ui_semibold();
     ImGui::PushFont(f_line);
@@ -780,7 +780,7 @@ void export_tick_and_render(bool session_alive) {
                 Theme::u32(Theme::Tokens::TX1, 0.95f), g_badge);
     ImGui::PopFont();
 
-    // ── Cam bubble — bottom-right circle, composited IN-RENDER so the capture
+    // ── Cam bubble - bottom-right circle, composited IN-RENDER so the capture
     //    sees it. Per-frame video→GL upload (tiny vs the full-canvas readback
     //    the capture itself already does at 30fps).
     const int dims = edclip_js_cam_dims();

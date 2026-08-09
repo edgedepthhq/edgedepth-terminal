@@ -13,12 +13,12 @@
 #include "pb/messages.pb.h"
 
 /**
- * ShaderHeatmapRenderer — GPU ring buffer + custom fragment shader.
+ * ShaderHeatmapRenderer - GPU ring buffer + custom fragment shader.
  *
  * Replaces HeatmapReconstructorGPU. Each instance owns a ring buffer data
  * texture (R32F) and metadata texture (RGBA32F). Rendering is done via
  * ImDrawList::AddCallback which injects a custom shader into ImPlot's
- * draw list. Scroll/zoom changes only uniforms — zero CPU work.
+ * draw list. Scroll/zoom changes only uniforms - zero CPU work.
  *
  * Used by both HeatmapManager (orderbook) and LiquidationHeatmapManager.
  * Shared GPU resources (shader, VAO, colormaps) live in ShaderHeatmapResources.
@@ -42,7 +42,7 @@ public:
                            const std::unordered_map<double, float>& price_reach_map);
 
     /// Phase 2a: Recompute ALL reach_timeline_ values using current_mark as reference.
-    /// Creates a dynamic "cone" that moves with price — bands near mark are bright,
+    /// Creates a dynamic "cone" that moves with price - bands near mark are bright,
     /// far away are dim. Only re-uploads the reach texture (no data rebuild).
     /// Called by LiquidationHeatmapManager when mark_price moves >0.1%.
     void recompute_reach_from_mark(double current_mark, double sigma, double time_hours);
@@ -59,7 +59,7 @@ public:
     void mark_dirty();
 
     // ── Rendering ───────────────────────────────────────────────────
-    /// Main render call — injects shader callback into ImPlot draw list.
+    /// Main render call - injects shader callback into ImPlot draw list.
     /// Must be called between ImPlot::BeginPlot() and EndPlot().
     void render_cells(int64_t candle_timeframe_ms,
                       float sensitivity = 1.0f,
@@ -133,7 +133,7 @@ public:
     };
     ViewportStats get_viewport_stats(double price_min, double price_max) const;
 
-    // Cached viewport stats — avoids iterating all timeline entries every frame
+    // Cached viewport stats - avoids iterating all timeline entries every frame
     mutable ViewportStats cached_vp_stats_;
     mutable double cached_vp_price_min_ = 0.0;
     mutable double cached_vp_price_max_ = 0.0;
@@ -149,7 +149,7 @@ public:
 private:
     // ── GPU resources (per-instance) ────────────────────────────────
     GLuint data_texture_ = 0;   // R32F, RING_SIZE × MAX_ROWS
-    GLuint reach_texture_ = 0;  // R32F, RING_SIZE × MAX_ROWS — reach_prob per cell (Phase 2a)
+    GLuint reach_texture_ = 0;  // R32F, RING_SIZE × MAX_ROWS - reach_prob per cell (Phase 2a)
     GLuint meta_texture_ = 0;   // RGBA32F, RING_SIZE × 1
 
     void create_textures();
@@ -159,7 +159,7 @@ private:
     static constexpr int RING_SIZE = 8192;
     static constexpr int MAX_ROWS = 1024;
 
-    // Sequential ring buffer — rebuilt from sorted timeline_ on data change.
+    // Sequential ring buffer - rebuilt from sorted timeline_ on data change.
     int ring_count_ = 0;        // Number of valid columns currently in ring
     int snapshot_count_ = 0;    // Total snapshots ever processed (for time_step detection)
     int64_t first_seen_ts_ = 0; // First snapshot ts (for time_step detection)
@@ -195,11 +195,11 @@ private:
     // ── Column building helpers ─────────────────────────────────────
     // Temp buffer for building a column before GPU upload
     std::vector<float> column_build_buf_;  // MAX_ROWS
-    std::vector<float> reach_build_buf_;   // MAX_ROWS — reach_prob per row (Phase 2a)
+    std::vector<float> reach_build_buf_;   // MAX_ROWS - reach_prob per row (Phase 2a)
 
     // Staging buffer for batch meta upload (avoids thousands of glTexSubImage2D calls)
     // Data is uploaded per-column directly from column_build_buf_ (cache-friendly).
-    std::vector<float> meta_staging_;   // RING_SIZE * 4 — entire meta texture
+    std::vector<float> meta_staging_;   // RING_SIZE * 4 - entire meta texture
 
     // Forward-fill carry state for extend_levels (liq heatmap)
     std::vector<float> prev_column_carry_;  // MAX_ROWS
@@ -235,7 +235,7 @@ private:
     int64_t time_step_ms_ = 300000; // Detected snapshot interval (default 5min)
 
     // ── Render callback data ────────────────────────────────────────
-    // Must persist until RenderDrawData() — stored as member.
+    // Must persist until RenderDrawData() - stored as member.
     struct RenderUniforms {
         GLuint data_tex = 0;
         GLuint reach_tex = 0;   // Phase 2a: reach_prob R32F texture

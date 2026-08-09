@@ -1,8 +1,8 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// drawing_style_editor — floating mini-toolbar for the selected drawing.
+// drawing_style_editor - floating mini-toolbar for the selected drawing.
 //
-// A floating ImGui window (NOT a popup — sidesteps OpenPopup scope rules and
+// A floating ImGui window (NOT a popup - sidesteps OpenPopup scope rules and
 // survives clicks into the chart), rendered late in the frame from main.cpp.
 // Shown while a drawing is selected: color swatches, width, line pattern,
 // hide/lock/delete, plus per-tool extras (fib level toggles, text size).

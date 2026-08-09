@@ -58,7 +58,7 @@ private:
     double volume_sell_1m_ = 0.0;
     float buy_pressure_ = 0.5f;
     size_t trades_per_second_ = 0;
-    // Rolling qty EMA — flags outsized prints ("big" rows, brand-soft wash)
+    // Rolling qty EMA - flags outsized prints ("big" rows, brand-soft wash)
     double qty_ema_ = 0.0;
     // UI state
     bool auto_scroll_ = true;

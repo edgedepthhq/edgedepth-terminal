@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// stats_widget.cpp — Stats panel v2 (see stats_widget.h + stats-panel.SPEC.md).
+// stats_widget.cpp - Stats panel v2 (see stats_widget.h + stats-panel.SPEC.md).
 //
 // STEP 1 (shell): window + status strip + header/price block + collapsible section
 // headers (with PRO tags and free-tier UNLOCK -> UpsellModal) + pinned settings
@@ -121,7 +121,7 @@ void StatsWidget::render() {
     const bool vis = ImGui::Begin(title_.c_str(), &is_open, ImGuiWindowFlags_NoScrollbar);
     if (!vis) { ImGui::End(); ImGui::PopStyleVar(2); return; }
 
-    // TODO(step 3): replay-aware — warn dot + AS OF banner + scrubber-time values.
+    // TODO(step 3): replay-aware - warn dot + AS OF banner + scrubber-time values.
     const bool live = true;
 
     render_status_strip(live);
@@ -215,7 +215,7 @@ void StatsWidget::render_header_price() {
                 upper(pair_.exchange).c_str());
     ImGui::PopFont();
 
-    // Mark price (large mono) + 24h change (placeholder — no 24h field on the stream)
+    // Mark price (large mono) + 24h change (placeholder - no 24h field on the stream)
     y += 21.0f;
     char mk[40];
     snprintf(mk, sizeof(mk), fmt_.price_fmt, current_stat_.mark_price);
@@ -227,7 +227,7 @@ void StatsWidget::render_header_price() {
     dl->AddText(ImVec2(org.x + PADX + mw + 10.0f, y + 9.0f), col(Tokens::TX3), "-- %");
     ImGui::PopFont();
 
-    // Sub-pairs: 24H H/L and 24H VOL (placeholders — TODO 24h ticker source)
+    // Sub-pairs: 24H H/L and 24H VOL (placeholders - TODO 24h ticker source)
     y += 31.0f;
     auto sub = [&](float x, const char* label, const char* value) {
         ImGui::PushFont(Fonts::label());
@@ -259,7 +259,7 @@ bool StatsWidget::render_section_header(Section s, const char* name, bool pro_se
         ImGui::PopFont();
     }
 
-    // Toggle hit target — kept clear of the UNLOCK chip so clicks never overlap.
+    // Toggle hit target - kept clear of the UNLOCK chip so clicks never overlap.
     const float toggle_w = show_unlock ? (ww - uw - PADX * 2.0f) : ww;
     ImGui::SetCursorScreenPos(org);
     ImGui::InvisibleButton("##hdr", ImVec2(toggle_w > 1.0f ? toggle_w : 1.0f, H));
@@ -319,7 +319,7 @@ void StatsWidget::render_settings_row() {
     ImGui::PushFont(Fonts::label());
     dl->AddText(ImVec2(cx + 15.0f, cy - ImGui::GetFontSize() * 0.5f), col(Tokens::TX2), "SETTINGS");
     ImGui::PopFont();
-    // TODO(step 3): expanded body — density, sparklines, OI/VPIN window, collapse-all.
+    // TODO(step 3): expanded body - density, sparklines, OI/VPIN window, collapse-all.
 
     ImGui::SetCursorScreenPos(ImVec2(org.x, org.y + H));
 }
@@ -406,7 +406,7 @@ void StatsWidget::metric_row(const Row& r) {
 
     const float top = org.y + 7.0f;
 
-    // Label (always crisp — the value proposition stays readable when locked)
+    // Label (always crisp - the value proposition stays readable when locked)
     ImGui::PushFont(Fonts::label());
     dl->AddText(ImVec2(org.x + PADX, top + 1.0f), col(Tokens::TX3), r.label);
     ImGui::PopFont();
@@ -461,7 +461,7 @@ void StatsWidget::metric_row(const Row& r) {
     }
 
     // Submit a real item (not just a cursor move) so the scroll child grows its
-    // content size / boundaries — otherwise ImGui warns and can't size/scroll.
+    // content size / boundaries - otherwise ImGui warns and can't size/scroll.
     ImGui::Dummy(ImVec2(ww, (y2 + 7.0f) - org.y));
 }
 
@@ -513,7 +513,7 @@ void StatsWidget::render_order_flow() {
         metric_row(Row{ .label = "CVD (SESSION)", .pro = true, .value = val, .value_col = vcol,
                         .detail = det, .meter = 1, .meter_a = mval });
     }
-    // Trades / sec — LIVE from the stat stream (buys/sells/imbalance). FREE.
+    // Trades / sec - LIVE from the stat stream (buys/sells/imbalance). FREE.
     {
         const long long b = static_cast<long long>(current_stat_.trade_buy);
         const long long s = static_cast<long long>(current_stat_.trade_sell);
@@ -527,10 +527,10 @@ void StatsWidget::render_order_flow() {
         snprintf(det, sizeof(det), "BUYS %s \xc2\xb7 SELLS %s \xc2\xb7 IMB %+.0f%%", bc, sc, imb * 100.0);
         metric_row(Row{ .label = "TRADES / SEC", .value = val, .detail = det });
     }
-    // Orderbook imbalance — PLACEHOLDER: bid/ask-heavy + persistence. PRO.
+    // Orderbook imbalance - PLACEHOLDER: bid/ask-heavy + persistence. PRO.
     metric_row(Row{ .label = "ORDERBOOK IMBALANCE", .pro = true, .value = "--",
                     .detail = "-- persistence", .meter = 2 });
-    // Smart money — PLACEHOLDER cluster. PRO.
+    // Smart money - PLACEHOLDER cluster. PRO.
     section_subhead("SMART MONEY");
     // Accumulation bias - live proxy from Positioning.smart_money_bias (the true
     // iceberg-based bias is Tier 2 via SmartMoneyUpdate on the analytics stream).
@@ -549,7 +549,7 @@ void StatsWidget::render_order_flow() {
 // ── Positioning ─────────────────────────────────────────────────────────────
 void StatsWidget::render_positioning() {
     const PositioningState* pos = ctx_.analytics_mgr().get_positioning(pair_.symbol);
-    // Funding — LIVE rate + countdown to next funding. FREE, amber.
+    // Funding - LIVE rate + countdown to next funding. FREE, amber.
     {
         char val[24]; snprintf(val, sizeof(val), "%+.4f%%", current_stat_.funding * 100.0);
         char det[32] = "NEXT --:--:--";
@@ -564,7 +564,7 @@ void StatsWidget::render_positioning() {
         metric_row(Row{ .label = "FUNDING", .value = val, .value_col = Tokens::TX1,
                         .detail = det, .detail_col = Tokens::TX1 });
     }
-    // Open interest — LIVE. The stat's open_interest_usd field actually carries
+    // Open interest - LIVE. The stat's open_interest_usd field actually carries
     // CONTRACT QTY (backend note in stat.go), so notional USD = contracts * mark.
     // 1H/4H deltas are PLACEHOLDER (need OI history). FREE.
     {
@@ -611,7 +611,7 @@ void StatsWidget::render_positioning() {
 // ── Liquidations & risk (signature) ─────────────────────────────────────────
 void StatsWidget::render_liq_risk() {
     const PositioningState* pos = ctx_.analytics_mgr().get_positioning(pair_.symbol);
-    // Liquidations 24H — LIVE total + longs/shorts. FREE.
+    // Liquidations 24H - LIVE total + longs/shorts. FREE.
     {
         double ll = pos ? pos->long_liq_usd : 0.0, ls = pos ? pos->short_liq_usd : 0.0;
         if (ll <= 0.0 && ls <= 0.0) { ll = current_stat_.liq_long_usd; ls = current_stat_.liq_short_usd; }
@@ -622,7 +622,7 @@ void StatsWidget::render_liq_risk() {
         char det[64]; snprintf(det, sizeof(det), "LONGS %s \xc2\xb7 SHORTS %s", lc, sc);
         metric_row(Row{ .label = "LIQUIDATIONS 24H", .value = val, .detail = det });
     }
-    // Nearest wall — PLACEHOLDER: cluster price + distance/leverage. PRO.
+    // Nearest wall - PLACEHOLDER: cluster price + distance/leverage. PRO.
     metric_row(Row{ .label = "NEAREST WALL", .pro = true, .value = "--", .detail = "-- away \xc2\xb7 --x" });
     // Cascade risk - LIVE from Positioning.cascade_risk (0..1). Word + gauge. PRO.
     {

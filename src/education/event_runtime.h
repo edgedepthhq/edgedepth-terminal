@@ -1,11 +1,11 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// event_runtime.h — Archive-event replay runtime (C++ side).
+// event_runtime.h - Archive-event replay runtime (C++ side).
 //
 // The archived market-event replay (public /events → /terminal?event=<id>) is the
 // SAME embedded WASM terminal as the lesson/studio player, driven by a React chrome
 // (EventReplayShell) that OWNS the shell + transport. Unlike the lesson there is no
-// doc + no gate loop, and unlike studio no source picker — the event id + symbol +
+// doc + no gate loop, and unlike studio no source picker - the event id + symbol +
 // window arrive via window.__EDGEDEPTH_EVENT__ (read by EducationBoot), and the
 // archive replay is auto-started by main.cpp maybe_start_event_replay().
 //
@@ -14,7 +14,7 @@
 //       window/loading) to the React chrome via CustomEvent('edgedepth:event'), and
 //   (2) DRAINS the React transport commands (pause/play/speed/seek/skip) onto the
 //       shared ReplayManager.
-// No steps live here — the key_moments rail is built entirely on the web from the
+// No steps live here - the key_moments rail is built entirely on the web from the
 // EventRecord. Mirrors transport_emit.h mechanics (discrete dirty-check + clock
 // cadence + monotonic floor), exactly like lesson/studio.
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -40,7 +40,7 @@ public:
     // Per-frame, after update(). Pushes transport state to the React chrome via a
     // CustomEvent('edgedepth:event'). Dirty-checked on the DISCRETE fields (clock/
     // progress excluded) so it emits on transitions + a clock cadence, not every
-    // frame — React interpolates the clock between emits, like the lesson player.
+    // frame - React interpolates the clock between emits, like the lesson player.
     void emit_state(const AppContext& ctx);
 
     // JS → C++ transport commands. Enqueued from the bridge exports (which have no
@@ -54,7 +54,7 @@ public:
     void cmd_seek_progress(int milli_progress, bool deliberate);
     // Relative nudge from the current position, in seconds (signed: negative = back).
     void cmd_skip(int seconds);
-    // "Watch again": if the session ENDED (Stopped — the replay data context is
+    // "Watch again": if the session ENDED (Stopped - the replay data context is
     // torn down), pack mode re-requests the pack (fresh engine + context, the
     // same boot main.cpp did); a still-active session just seeks to the window
     // start. Box event mode falls back to the seek path either way.
@@ -63,13 +63,13 @@ public:
 private:
     EventRuntime() = default;
 
-    // FNV-1a signature of the last emitted discrete state — skip re-emitting when
+    // FNV-1a signature of the last emitted discrete state - skip re-emitting when
     // nothing discrete changed (clock/progress excluded; React interpolates).
     uint64_t emit_sig_ = 0;
     // Wall-clock (emscripten_get_now, ms) of the last clock-cadence emit, so a long
     // steady "playing" stretch still re-anchors React to interpolated_time_ms().
     double   last_clock_emit_ms_ = 0.0;
-    // Monotonic floor for the REPORTED clock during a continuous playing stretch —
+    // Monotonic floor for the REPORTED clock during a continuous playing stretch -
     // absorbs the small backward steps interpolated_time_ms() takes on catch-up.
     int64_t  clock_floor_ms_ = 0;
 
@@ -89,7 +89,7 @@ private:
 
     // One-shot deep-link seek (?event=…&t=…, EducationBoot::event_seek_to_ms):
     // applied in update() the first time the session is live (active && !loading),
-    // so the seek lands on a primed/seeded book — then never again (the user owns
+    // so the seek lands on a primed/seeded book - then never again (the user owns
     // the transport from that point). See CLIP_FACTORY_PLAN Appendix A #5.
     bool  deep_link_seek_done_ = false;
 };

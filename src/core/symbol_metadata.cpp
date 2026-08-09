@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// symbol_metadata.cpp — Fetch, cache, and parse symbol metadata
+// symbol_metadata.cpp - Fetch, cache, and parse symbol metadata
 //
-// Uses XMLHttpRequest via EM_ASM — no -sFETCH needed, no SDL conflicts.
+// Uses XMLHttpRequest via EM_ASM - no -sFETCH needed, no SDL conflicts.
 // XHR handles CORS correctly and works in all Emscripten environments.
 //
 // Flow:

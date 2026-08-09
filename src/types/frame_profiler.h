@@ -7,7 +7,7 @@
 #include <cstring>
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// FrameTimeTracker — Ring buffer of frame times with percentile computation
+// FrameTimeTracker - Ring buffer of frame times with percentile computation
 //
 // Records the last N frame times and computes P50/P95/P99/max on demand.
 // Used by the performance overlay to detect jitter and validate threading gains.
@@ -23,7 +23,7 @@ public:
         if (count_ < HISTORY_SIZE) count_++;
     }
 
-    // Compute percentiles — sorts a copy, so call sparingly (once/sec)
+    // Compute percentiles - sorts a copy, so call sparingly (once/sec)
     struct Stats {
         float avg;
         float p50;
@@ -65,20 +65,20 @@ private:
 inline FrameTimeTracker g_frame_tracker;
 
 /**
- * Frame profiler for identifying bottlenecks (v2 — 2026-07-05 FPS session).
+ * Frame profiler for identifying bottlenecks (v2 - 2026-07-05 FPS session).
  *
  * - Nesting-safe: each section tracks its own in-flight start, so
  *   begin("Chart") … begin("LiqField") … end("LiqField") … end("Chart") works.
  * - Per-frame section values fold into a 1s window; the completed window is
  *   snapshotted (sorted by avg ms) for the perf overlay's breakdown table.
  * - add_count(name, n) attaches item counts to a section (dispatches drained,
- *   drip messages fed) — shown as N/f in the overlay + console.
+ *   drip messages fed) - shown as N/f in the overlay + console.
  * - Spike log: any frame whose measured CPU time exceeds spike_threshold_ms
  *   prints ONE console line with that frame's top sections. Rate-limited.
  *   This is the tool for catching the replay 90-FPS dips in the act.
  *
  * All calls are main-thread only (widgets render on the main thread; the data
- * thread must NOT touch g_profiler — it has PerformanceTracker instead).
+ * thread must NOT touch g_profiler - it has PerformanceTracker instead).
  */
 class FrameProfiler {
 public:
@@ -196,7 +196,7 @@ public:
     void set_enabled(bool on) { enabled_ = on; }
     bool enabled() const { return enabled_; }
 
-    // Spike logging is ON by default — one console line per >threshold frame,
+    // Spike logging is ON by default - one console line per >threshold frame,
     // rate-limited to 5/s. The replay-dip diagnosis tool.
     void set_spike_log(bool on) { spike_log_ = on; }
     bool spike_log() const { return spike_log_; }
@@ -245,7 +245,7 @@ inline FrameProfiler g_profiler;
 #define PROFILE_END(name) g_profiler.end(name)
 #define PROFILE_FRAME_END() g_profiler.end_frame()
 
-// RAII section scope — safe with early returns. Usage:
+// RAII section scope - safe with early returns. Usage:
 //   { ProfileScope _ps("LiqField"); render_liq_dense_field(); }
 struct ProfileScope {
     const char* name;

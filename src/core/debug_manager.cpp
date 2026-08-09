@@ -96,7 +96,7 @@ void DebugManager::handle_batch(const void* data, size_t size) {
         new_entries_since_render_ = true;
         return;
     }
-    // Normal live path — existing logic unchanged
+    // Normal live path - existing logic unchanged
     if (batch.is_backfill()) {
         entry_count_ = 0;
         write_head_  = 0;
@@ -141,7 +141,7 @@ void DebugManager::load_range(int64_t start_ms, int64_t end_ms) {
 }
 
 void DebugManager::handle_range_start(int64_t start_ms, int64_t end_ms) {
-    // Server confirmed it's sending — clear any stale data
+    // Server confirmed it's sending - clear any stale data
     range_entries_.clear();
     range_loading_ = true;
 }
@@ -179,7 +179,7 @@ void DebugManager::copy_all_to_clipboard() const {
         buf += line;
     }
 
-    // Write directly to browser clipboard API — works in WASM
+    // Write directly to browser clipboard API - works in WASM
     EM_ASM({
         var text = UTF8ToString($0);
         if (navigator.clipboard && navigator.clipboard.writeText) {

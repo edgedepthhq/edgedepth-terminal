@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// data_thread.h — Offload ZSTD + protobuf processing to a dedicated pthread
+// data_thread.h - Offload ZSTD + protobuf processing to a dedicated pthread
 //
 // Architecture (Option B):
 //   Main thread (browser):
@@ -62,7 +62,7 @@ private:
 // Each one captures the StreamKey + data needed to call dispatch_* on StreamManager.
 
 struct PendingDispatch {
-    // Type-erased callable — captures everything needed for dispatch
+    // Type-erased callable - captures everything needed for dispatch
     std::function<void(StreamManager&)> execute;
 };
 
@@ -99,12 +99,12 @@ public:
     // Call from main thread during shutdown
     void stop();
 
-    // Called from WS callback on main thread — just enqueues raw bytes
+    // Called from WS callback on main thread - just enqueues raw bytes
     void enqueue(const uint8_t* data, size_t len) {
         inbound_.push(data, len);
     }
 
-    // Called from main thread at top of each frame — drains queued
+    // Called from main thread at top of each frame - drains queued
     // dispatches and executes them on the main thread where it's safe
     // to touch widget state.
     //

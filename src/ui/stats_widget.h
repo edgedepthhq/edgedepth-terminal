@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// stats_widget.h — Stats panel v2 (premium microstructure surface).
+// stats_widget.h - Stats panel v2 (premium microstructure surface).
 //
 // Dockable panel (~360 wide) that replaces the old floating Stats widget. Header +
 // price, then three collapsible sections (order flow / positioning / liquidations
@@ -8,7 +8,7 @@
 // thin Stat stream (mark, funding, buys/sells, open interest, liquidations); the
 // premium microstructure rows (VPIN, CVD, orderbook imbalance, smart money, OI
 // velocity, nearest wall, cascade, contagion, signal) render as PLACEHOLDERS
-// pending the backend analytics feed (roadmap O2 / analytics.proto) — no
+// pending the backend analytics feed (roadmap O2 / analytics.proto) - no
 // fabricated bindings. Pro-gated via Entitlements::is_pro(): the free tier redacts
 // Pro rows and funnels the UNLOCK affordance into ui::UpsellModal.
 //
@@ -36,7 +36,7 @@ public:
     void handle_stat(const Terminal::Stat& stat);
 
 private:
-    // Collapsible sections — order flow leads (premium value first).
+    // Collapsible sections - order flow leads (premium value first).
     enum Section : uint8_t { SEC_ORDER_FLOW = 0, SEC_POSITIONING, SEC_LIQ_RISK, SEC_COUNT };
 
     Terminal::Pair    pair_;
@@ -54,7 +54,7 @@ private:
     bool section_open_[SEC_COUNT] = { true, true, true };
     bool settings_open_ = false;
 
-    // Rendering (v2) — see stats_widget.cpp
+    // Rendering (v2) - see stats_widget.cpp
     void render_status_strip(bool live);   // dot . STATS.SYM . PRO/FREE
     void render_replay_banner();           // replay only: AS OF ...
     void render_header_price();            // mark (live) + 24h/H-L/VOL (placeholder)

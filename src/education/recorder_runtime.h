@@ -1,11 +1,11 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// recorder_runtime.h — CLIP_FACTORY P2: scripted clip-recorder driver.
+// recorder_runtime.h - CLIP_FACTORY P2: scripted clip-recorder driver.
 //
 // A clip is a headless lesson. The render harness (Xvfb + Chromium + ffmpeg
-// x11grab) boots the terminal in an EXISTING replay mode — archived event
+// x11grab) boots the terminal in an EXISTING replay mode - archived event
 // (window.__EDGEDEPTH_EVENT__) or CDN pack (window.__EDGEDEPTH_PACK__ with
-// embedded:true) — and ADDITIONALLY injects window.__EDGEDEPTH_RECORDER__ =
+// embedded:true) - and ADDITIONALLY injects window.__EDGEDEPTH_RECORDER__ =
 // <RecorderScript> before the glue loads. The recorder is NOT a fourth session
 // mode: it is an orthogonal DRIVER layered over whichever session booted. It
 //   (1) walks the script's shots[] against the shared ReplayManager
@@ -13,7 +13,7 @@
 //   (2) EMITS its progress to the harness via CustomEvent('edgedepth:recorder')
 //       (+ window.__EDGEDEPTH_RECORDER_STATE__), transport_emit.h mechanics, and
 //   (3) burns the EDGEDEPTH watermark badge into the canvas (export-badge
-//       style: line only, no REC dot — this is a produced video).
+//       style: line only, no REC dot - this is a produced video).
 //
 // Session boot, symbol routing, the focused widget set and chrome suppression
 // all reuse the event/pack paths; main.cpp folds active() into its rec_focus
@@ -22,7 +22,7 @@
 // EducationBoot::detect), state rides a CustomEvent, and the runtime never
 // needs a JS→C++ command (the script IS the transport).
 //
-// ── RecorderScript v1 (wire shape — script-gen emits this) ────────────────────
+// ── RecorderScript v1 (wire shape - script-gen emits this) ────────────────────
 // Times are epoch ms ints (never ISO strings), tf is chart timeframe SECONDS
 // (the __set_chart_timeframe unit). Each shot has an EXPLICIT end (untilMs).
 // {
@@ -30,7 +30,7 @@
 //   "symbol":  "taikousdt",       // badge text (session symbol comes from the
 //                                 // event/pack global, not from here)
 //   "eventId": "taikousdt-short-squeeze--20260701_183655",   // echoed in state
-//   "speedScale": 1.0,            // determinism trick: 0.25–0.5 captures slow
+//   "speedScale": 1.0,            // determinism trick: 0.25-0.5 captures slow
 //                                 // under SwiftShader, post retimes to 60fps.
 //                                 // Multiplies every shot speed; effective
 //                                 // speed clamps to ReplayManager's [0.1, 10].
@@ -40,7 +40,7 @@
 //       "speed":   10.0,          // scripted playback speed (pre-scale)
 //       "tf":      300,           // chart timeframe seconds (0 = keep current)
 //       "holdMs":  0,             // freeze-frame at shot end (wall ms, 0 = no)
-//       "focus":   "dom",         // ""|"dom"|"tape"|"chart" — lightbox the
+//       "focus":   "dom",         // ""|"dom"|"tape"|"chart" - lightbox the
 //                                 // panel for this shot (lesson-style dim +
 //                                 // accent ring, burned in-render); the panel
 //                                 // rect also rides state as focusRect so post
@@ -50,10 +50,10 @@
 // }
 //
 // Shot transitions: forward jumps use ReplayManager::skip_forward_to (clock-
-// only, instant, formed candles stay on the chart — visual continuity);
+// only, instant, formed candles stay on the chart - visual continuity);
 // backward jumps fall back to ONE deliberate seek (full re-prime; well-formed
 // scripts never need it). After the last shot the replay is PAUSED and phase
-// "done" is emitted — the harness stops capture; the end card is a post step.
+// "done" is emitted - the harness stops capture; the end card is a post step.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include <cstdint>
@@ -91,12 +91,12 @@ public:
     const ViewOverrides* view() const { return (valid_ && has_view_) ? &view_ : nullptr; }
 
     // Parse the RecorderScript JSON (stashed by EducationBoot::detect from the
-    // window global). Returns false on parse/validation error — the runtime
+    // window global). Returns false on parse/validation error - the runtime
     // then stays inert (active() == false) and the terminal behaves as a plain
     // event/pack replay.
     bool load(const std::string& json);
 
-    // True once a script has loaded — main.cpp gates the per-frame calls AND
+    // True once a script has loaded - main.cpp gates the per-frame calls AND
     // folds this into rec_focus (chrome suppression) on it.
     bool active() const { return valid_; }
 
@@ -114,7 +114,7 @@ public:
     void update(const AppContext& ctx);
 
     // Per-frame, after update(). Pushes recorder state to the harness via
-    // CustomEvent('edgedepth:recorder') — transport_emit.h mechanics (discrete
+    // CustomEvent('edgedepth:recorder') - transport_emit.h mechanics (discrete
     // dirty-check + clock cadence while a shot plays).
     void emit_state(const AppContext& ctx);
 
@@ -131,7 +131,7 @@ private:
         float   speed    = 1.0f;
         int     tf_sec   = 0;   // 0 = keep current timeframe
         int     hold_ms  = 0;   // freeze-frame after the shot (wall ms)
-        std::string focus;      // ""|"dom"|"tape"|"chart" — lightbox the panel
+        std::string focus;      // ""|"dom"|"tape"|"chart" - lightbox the panel
         std::string caption;    // echoed in state; post burns the .ass
     };
 

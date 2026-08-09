@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// education_boot.cpp — see education_boot.h
+// education_boot.cpp - see education_boot.h
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "core/education_boot.h"
@@ -188,7 +188,7 @@ void EducationBoot::detect() {
         }
     }
 
-    // Recorder script (CLIP_FACTORY P2) — read LAST and INDEPENDENTLY of the
+    // Recorder script (CLIP_FACTORY P2) - read LAST and INDEPENDENTLY of the
     // mode chain above: the render harness boots a normal event/pack replay
     // (those globals, exactly as today) and ADDITIONALLY injects
     // window.__EDGEDEPTH_RECORDER__ = <RecorderScript>. The script is
@@ -231,7 +231,7 @@ void EducationBoot::fetch_lesson(std::function<void()> on_ready) {
     }
     on_ready_ = std::move(on_ready);
 
-    // Credentialed XHR — withCredentials sends the Payload auth cookie, so the
+    // Credentialed XHR - withCredentials sends the Payload auth cookie, so the
     // /api/lesson-doc paywall gates the data exactly as it gates the page.
     // Mirrors SymbolRegistry::fetch_metadata (no -sFETCH, no Asyncify).
     EM_ASM({
@@ -248,7 +248,7 @@ void EducationBoot::fetch_lesson(std::function<void()> on_ready) {
                 __education_on_lesson_fetch(buf, len);
                 _free(buf);
             } else {
-                // 401 anon / 403 free / 404 missing — surface, don't crash.
+                // 401 anon / 403 free / 404 missing - surface, don't crash.
                 console.warn('EducationBoot: lesson fetch failed, status', xhr.status);
                 __education_on_lesson_fetch(0, 0);
             }

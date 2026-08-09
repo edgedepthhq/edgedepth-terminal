@@ -18,7 +18,7 @@ constexpr float kBtnSize        = 28.0f;
 constexpr float kBtnGap         = 2.0f;
 constexpr float kIconHalf       = 7.0f;
 
-// Rail order — grouped like the reference toolbar; nullptr-terminated groups
+// Rail order - grouped like the reference toolbar; nullptr-terminated groups
 // separated by hairlines.
 constexpr Tool kGroupPointer[] = {Tool::Cursor};
 constexpr Tool kGroupLines[]   = {Tool::Trendline, Tool::Arrow, Tool::Ray,
@@ -121,7 +121,7 @@ void render_chart_rail(DrawingManager& mgr, float height) {
                       ImGuiWindowFlags_NoScrollbar |
                           ImGuiWindowFlags_NoScrollWithMouse);
 
-    // Right-edge hairline — the only separation per the design discipline.
+    // Right-edge hairline - the only separation per the design discipline.
     const ImVec2 p0 = ImGui::GetWindowPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddLine(ImVec2(p0.x + w - 0.5f, p0.y), ImVec2(p0.x + w - 0.5f, p0.y + height),
@@ -170,7 +170,7 @@ void render_chart_rail(DrawingManager& mgr, float height) {
         mgr.set_rail_collapsed(true);
     ImGui::PopStyleVar();
 
-    // Remove-all confirm — floating chrome: R3 + PANEL + BD2 border.
+    // Remove-all confirm - floating chrome: R3 + PANEL + BD2 border.
     ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, Theme::Radius::R3);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));
     ImGui::PushStyleColor(ImGuiCol_PopupBg, Theme::Tokens::PANEL);

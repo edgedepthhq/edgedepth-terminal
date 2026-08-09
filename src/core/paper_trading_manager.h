@@ -1,11 +1,11 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// paper_trading_manager.h — Manages paper trading state from backend stream
+// paper_trading_manager.h - Manages paper trading state from backend stream
 //
 // Receives PaperTradingSnapshot (on connect) and PaperPositionUpdate (live)
 // via STREAM_PAPER_TRADING. Exposes const accessors for the PositionsPanel.
 //
-// Not per-symbol — global singleton. Max 10 concurrent positions.
+// Not per-symbol - global singleton. Max 10 concurrent positions.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "types/paper_trading_types.h"

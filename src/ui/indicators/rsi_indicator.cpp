@@ -135,7 +135,7 @@ void RSIIndicator::render_content(double x_min, double x_max) {
         if (it != times_.begin()) start_idx = static_cast<size_t>(it - times_.begin()) - 1;
     }
 
-    // RSI line — pixel-decimated, color by zone
+    // RSI line - pixel-decimated, color by zone
     int last_px_col = -1;
     size_t last_drawn = start_idx;
     for (size_t i = start_idx + 1; i < rsi_values_.size(); i++) {

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// pack_replay_engine.cpp — .edpack replay: fetch, clock, drip, seek, seeds.
+// pack_replay_engine.cpp - .edpack replay: fetch, clock, drip, seek, seeds.
 // See pack_replay_engine.h for the architecture note.
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -27,7 +27,7 @@ PackReplayEngine* PackReplayEngine::s_active_ = nullptr;
 
 // ─── JS→C++ fetch trampoline ────────────────────────────────────────────────
 // Exported as __edpack_on_fetch (CMake EXPORTED_FUNCTIONS, BOTH lists). The JS
-// side mallocs, calls, frees — we copy synchronously into a stashed response.
+// side mallocs, calls, frees - we copy synchronously into a stashed response.
 extern "C" {
 EMSCRIPTEN_KEEPALIVE
 void _edpack_on_fetch(int generation, int kind, int block_idx,
@@ -141,7 +141,7 @@ void PackReplayEngine::fetch_range(int kind, int block_idx, int64_t from, int64_
 void PackReplayEngine::on_fetch(int generation, int kind, int block_idx,
                                 const uint8_t* data, int len, int status) {
     if (generation != generation_) {
-        return;  // stale (post-seek / post-stop) — drop
+        return;  // stale (post-seek / post-stop) - drop
     }
     fetch_inflight_ = false;
     FetchResponse resp;
@@ -247,7 +247,7 @@ void PackReplayEngine::maybe_fetch_seeds() {
             }
             return;
         }
-        if (fetch_inflight_) return;  // one fetch at a time — retry next tick
+        if (fetch_inflight_) return;  // one fetch at a time - retry next tick
         st = SeedState::Fetching;
         const int64_t abs = data_start_ + ref.offset();
         fetch_range(kind, -1, abs, abs + ref.length() - 1);
@@ -260,7 +260,7 @@ void PackReplayEngine::handle_prefix_bytes(std::string&& bytes, int status) {
     if (status == 200) {
         // Server ignored the Range header and sent the WHOLE file (bare
         // python http.server). Keep ONE copy; header parsing + block reads
-        // slice it in place — no duplicate buffer (a real pack is ~400MB).
+        // slice it in place - no duplicate buffer (a real pack is ~400MB).
         full_file_ = std::move(bytes);
         have_full_file_ = true;
     } else {
@@ -288,7 +288,7 @@ void PackReplayEngine::handle_prefix_bytes(std::string&& bytes, int status) {
         if (parse_header_and_join()) phase_ = Phase::Ready;
         return;
     }
-    // Header extends past what we have — fetch the remainder in one range.
+    // Header extends past what we have - fetch the remainder in one range.
     phase_ = Phase::FetchHeader;
     fetch_range(kFetchHeaderRest, -1,
                 static_cast<int64_t>(src.size()), data_start_ - 1);
@@ -305,7 +305,7 @@ bool PackReplayEngine::parse_header_and_join() {
     prefix_buf_.shrink_to_fit();  // header is parsed; drop the staging buffer
     header_ready_ = true;
 
-    // Anchor the clock at the window start — the box's playback loop starts
+    // Anchor the clock at the window start - the box's playback loop starts
     // running on join; the client's Buffering gate holds only the DISPLAY.
     market_base_ms_ = header_.start_ts_ms();
     wall_base_ms_ = wall_ms();
@@ -320,11 +320,11 @@ bool PackReplayEngine::parse_header_and_join() {
     // NOT applied here. A silent engine-level reposition desyncs the chart's
     // request anchor (it asks for candles at the manager's start time and
     // never learns about the jump). Both surfaces go through ONE deliberate
-    // ReplayManager::seek once the session is primed — EventRuntime's
+    // ReplayManager::seek once the session is primed - EventRuntime's
     // deep-link path when embedded, main.cpp's pack-standalone latch
-    // otherwise — which drives the full re-request cascade.
+    // otherwise - which drives the full re-request cascade.
 
-    // Synthesize replay_joined — same envelope the box sends (plus symbols,
+    // Synthesize replay_joined - same envelope the box sends (plus symbols,
     // which the archive path passes via request_archive_replay's hint; the
     // header is authoritative here). ReplayManager transitions to Buffering
     // and creates the replay DataContext.
@@ -394,7 +394,7 @@ void PackReplayEngine::tick() {
     // Post-seek prime: hold the clock until the first post-seek block has
     // decoded through the target (see header). Without this the seek acks +
     // auto-resumes instantly (box semantics) and the clock runs over a stale
-    // book for the CDN round-trip — visible as "playing without depth".
+    // book for the CDN round-trip - visible as "playing without depth".
     if (seek_priming_) {
         if (queued_through_ms_ >= skip_before_ms_ ||
             next_block_ >= header_.blocks_size()) {
@@ -466,14 +466,14 @@ bool PackReplayEngine::decode_block_into_queue(const std::string& raw_block) {
             return false;
         }
         off += rec_len;
-        // Straddling-block trim after a seek — mirrors the box reader's
+        // Straddling-block trim after a seek - mirrors the box reader's
         // skipBeforeMs row skip.
         if (skip_before_ms_ > 0 && frame.ts_ms() < skip_before_ms_) continue;
         QFrame qf;
         qf.ts = frame.ts_ms();
         qf.stream = frame.stream();
         qf.tf = frame.timeframe();
-        qf.payload = std::move(*frame.mutable_payload());  // no copy — depth blobs are hot
+        qf.payload = std::move(*frame.mutable_payload());  // no copy - depth blobs are hot
         queued_through_ms_ = qf.ts;
         frame_queue_.push_back(std::move(qf));
         added++;
@@ -509,7 +509,7 @@ void PackReplayEngine::deliver_ob_seed(int64_t at_ts) {
 
 void PackReplayEngine::deliver_due_frames() {
     if (frame_queue_.empty()) return;
-    // Respect the manager's rewind gate — identical to the WS path dropping
+    // Respect the manager's rewind gate - identical to the WS path dropping
     // binary frames while a rewind is in flight.
     if (mgr_->is_rewind_pending() || mgr_->is_drip_feeding()) return;
 
@@ -622,7 +622,7 @@ void PackReplayEngine::local_seek(int64_t target_ts) {
     queued_through_ms_ = 0;
     skip_before_ms_ = target_ts;
     next_block_ = block_index_for_ts(target_ts);
-    // A seed fetch in flight was invalidated by the generation bump — re-arm
+    // A seed fetch in flight was invalidated by the generation bump - re-arm
     // so the pending indicator requests retry after the seek settles.
     if (tickvol_seed_state_ == SeedState::Fetching) tickvol_seed_state_ = SeedState::Needed;
     if (heatmap_seed_state_ == SeedState::Fetching) heatmap_seed_state_ = SeedState::Needed;
@@ -637,7 +637,7 @@ void PackReplayEngine::local_seek(int64_t target_ts) {
     finished_emitted_ = false;
     if (phase_ == Phase::Ended) phase_ = Phase::Ready;
 
-    // Re-seed the book at the target — the box's handleArchiveSeek re-delivers
+    // Re-seed the book at the target - the box's handleArchiveSeek re-delivers
     // the bundle's row-0 snapshot on every seek (client cleared its book).
     deliver_ob_seed(target_ts);
 }
@@ -659,16 +659,16 @@ void PackReplayEngine::control_skip_forward(int64_t ts_ms, bool book_cleared) {
             // candle timeline expecting the box's consumer-reconnect (fresh
             // OB seed at the target, no intermediate frames). Clock-advance
             // here would drip megabytes of intermediates into a cleared book
-            // whose deltas are all rejected (no snapshot base) — the DOM
+            // whose deltas are all rejected (no snapshot base) - the DOM
             // stays empty forever. Serve it as a block seek instead: jump
-            // the pipeline, re-deliver the OB seed, skip intermediates —
+            // the pipeline, re-deliver the OB seed, skip intermediates -
             // the box reconnect's externally-visible behavior. local_seek
             // auto-resumes, matching the manager (large skips transition
             // Seeking → Playing on replay_seeked) and the box (auto-resume
             // after seek).
             local_seek(target);
         } else {
-            // Small forward skip: clock-only advance — the intermediates
+            // Small forward skip: clock-only advance - the intermediates
             // already queued (or about to be fetched) batch-deliver as the
             // clock passes them, exactly like the box's SkipForwardTo (the
             // client kept its book; update-id continuity was reset).
@@ -679,7 +679,7 @@ void PackReplayEngine::control_skip_forward(int64_t ts_ms, bool book_cleared) {
     } else {
         // Backward: the client cleared its book and trimmed candles; the box's
         // clock-only rewind would leave a data gap until the clock re-reaches
-        // the old position, so serve it as a full local re-read instead —
+        // the old position, so serve it as a full local re-read instead -
         // byte-identical frames, same replay_seeked ack.
         local_seek(target);
     }
@@ -704,7 +704,7 @@ bool PackReplayEngine::handle_request_json(const std::string& msg) {
             return true;
         }
         // v2 seed-served requests (footprint / VPVR / book-depth heatmap
-        // backfill). Queued; served from the lazily-fetched seed section —
+        // backfill). Queued; served from the lazily-fetched seed section -
         // on a v1 pack (no refs) they drop, matching v1 behavior.
         if (method == "get_footprint_history") {
             const auto& data = j.at("data");
@@ -730,11 +730,11 @@ bool PackReplayEngine::handle_request_json(const std::string& msg) {
             return true;
         }
         // Everything else (OI / funding / VPIN historicals, subscribes) is
-        // swallowed — the box path returns nothing for these on events older
+        // swallowed - the box path returns nothing for these on events older
         // than DB retention either. The drip frames carry the replay surface.
         return true;
     } catch (const std::exception& e) {
-        return true;  // still swallow — no WS to fall back to
+        return true;  // still swallow - no WS to fall back to
     }
 }
 
@@ -766,12 +766,12 @@ void PackReplayEngine::serve_pending_requests() {
 
         // F3 parity: strictly-before semantics match the box's `time < end`
         // query bound. An EXPLICIT end_ms is trusted as-is (clamped to the
-        // pack window): it always comes from our own chart — replay-latest or
-        // a seek target — and on the box the session seek is processed before
+        // pack window): it always comes from our own chart - replay-latest or
+        // a seek target - and on the box the session seek is processed before
         // the fetch, so its position == the target. Clamping it to the LOCAL
         // playhead instead re-introduced the one-frame ordering hole where a
         // reset_for_seek batch (queued the frame before flush_pending_skip
-        // applies the seek) got served at the OLD position — a 13h candle
+        // applies the seek) got served at the OLD position - a 13h candle
         // hole behind the playhead after a long recorder jump. Open-ended
         // requests (end_ms=0) still clamp to the playhead: never reveal the
         // future on "latest" queries.
@@ -809,7 +809,7 @@ void PackReplayEngine::serve_pending_requests() {
 //   footprint  → TickVolumeUpdateBatch on STREAM_TICK_VOLUME + ts=0 sentinel
 //   VPVR       → VolumeProfileResponse on STREAM_VOLUME_PROFILE
 //   heatmap    → HeatmapSnapshotBatch on STREAM_HISTORICAL_HEATMAPS
-// Every response end-clamps to the playhead (F3 parity — never reveal the
+// Every response end-clamps to the playhead (F3 parity - never reveal the
 // future). Requests queue until the seed is fetched; on a v1 pack (no seed
 // refs) they drop, which is exactly v1's swallow behavior.
 
@@ -841,7 +841,7 @@ void PackReplayEngine::serve_footprint_requests() {
         // Sentinel ALWAYS (box parity): clears FootprintManager::loading_ so
         // the visible-range request loop keeps working.
         // A default TickVolumeUpdate{ts=0} serializes to zero bytes (proto3
-        // defaults) — the client parses that to the ts=0 sentinel, same as
+        // defaults) - the client parses that to the ts=0 sentinel, same as
         // the box's marshalled sentinel.
         route_frame(0, static_cast<uint32_t>(pb::STREAM_TICK_VOLUME), 0, std::string());
     }
@@ -865,7 +865,7 @@ void PackReplayEngine::serve_vpvr_requests() {
         // Port of the box's buildAndSendVolumeProfile aggregation
         // (volume_profile_handler.go): group each tick-volume level into
         // floor(price/tpr)*tpr rows, then POC + 70% value area from the POC
-        // outward. Same data source too — the tick_volume rows.
+        // outward. Same data source too - the tick_volume rows.
         struct Agg { double buy = 0, sell = 0, total = 0; int64_t trades = 0; };
         std::map<double, Agg> grouped;
         double total_vol = 0;

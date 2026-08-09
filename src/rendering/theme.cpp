@@ -9,7 +9,7 @@
 #endif
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// theme.cpp — edgedepth design system implementation
+// theme.cpp - edgedepth design system implementation
 // Style mapping per the design system's ImGui notes §1, tokens per tokens.json.
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -82,24 +82,24 @@ namespace Theme {
         void apply_implot_style() {
             using namespace Tokens;
             ImPlotStyle& s = ImPlot::GetStyle();
-            // chart sits directly on the app base — charcoal ground shows
+            // chart sits directly on the app base - charcoal ground shows
             // through the liq field's transparent low-intensity cells
             s.Colors[ImPlotCol_PlotBg]        = BASE;
             s.Colors[ImPlotCol_FrameBg]       = BASE;
             s.Colors[ImPlotCol_PlotBorder]    = ImVec4(0, 0, 0, 0);
             s.PlotBorderSize = 0.0f;
-            // gridlines — barely-there hairlines
+            // gridlines - barely-there hairlines
             s.Colors[ImPlotCol_AxisGrid]      = GRID;
             s.Colors[ImPlotCol_AxisBg]        = BASE;
             s.Colors[ImPlotCol_AxisBgHovered] = BASE;
             s.Colors[ImPlotCol_AxisBgActive]  = BASE;
             s.Colors[ImPlotCol_AxisText]      = TX3;
-            // crosshair — dashed look approximated by low-alpha solid
+            // crosshair - dashed look approximated by low-alpha solid
             s.Colors[ImPlotCol_Crosshairs]    = from_hex(0x96a8b8, 0.35f);
             s.Colors[ImPlotCol_Selection]     = BRAND;
             s.Colors[ImPlotCol_LegendBg]      = with_a(PANEL, 0.98f);
             s.Colors[ImPlotCol_LegendBorder]  = BD2;
-            // no tick marks — labels only, like the reference
+            // no tick marks - labels only, like the reference
             s.MajorTickLen  = ImVec2(0, 0);
             s.MinorTickLen  = ImVec2(0, 0);
             s.MajorTickSize = ImVec2(0, 0);
@@ -145,7 +145,7 @@ namespace Theme {
         c[ImGuiCol_TabUnfocused]      = PANEL;
         c[ImGuiCol_TabUnfocusedActive]= ELEV;
 
-        // ── selection / headers — brand-soft, used sparingly ─────────────────
+        // ── selection / headers - brand-soft, used sparingly ─────────────────
         c[ImGuiCol_Header]            = BRAND_SOFT;
         c[ImGuiCol_HeaderHovered]     = HOVER;
         c[ImGuiCol_HeaderActive]      = with_a(BRAND, 0.22f);
@@ -158,7 +158,7 @@ namespace Theme {
         c[ImGuiCol_SliderGrab]        = BRAND;
         c[ImGuiCol_SliderGrabActive]  = BRAND;
 
-        // ── scrollbars — thin, hairline thumbs ───────────────────────────────
+        // ── scrollbars - thin, hairline thumbs ───────────────────────────────
         c[ImGuiCol_ScrollbarBg]          = ImVec4(0, 0, 0, 0);
         c[ImGuiCol_ScrollbarGrab]        = BD2;
         c[ImGuiCol_ScrollbarGrabHovered] = BD3;
@@ -172,7 +172,7 @@ namespace Theme {
         c[ImGuiCol_ResizeGripHovered] = BD3;
         c[ImGuiCol_ResizeGripActive]  = BRAND_LINE;
 
-        // ── tables — hairlines, no zebra ─────────────────────────────────────
+        // ── tables - hairlines, no zebra ─────────────────────────────────────
         c[ImGuiCol_TableHeaderBg]     = ELEV;
         c[ImGuiCol_TableBorderStrong] = BD2;
         c[ImGuiCol_TableBorderLight]  = BD1;
@@ -211,7 +211,7 @@ namespace Theme {
     }
 
     void apply_trading_colors() {
-        // retained for call-site compatibility — table styling now lives in
+        // retained for call-site compatibility - table styling now lives in
         // apply_dark_theme(); nothing extra to override here.
     }
 
@@ -242,7 +242,7 @@ namespace Theme {
 #ifdef __EMSCRIPTEN__
         dpi_scale = EM_ASM_DOUBLE({ return window.devicePixelRatio || 1.0; });
 #endif
-        // Rasterize at a minimum of 2x regardless of devicePixelRatio —
+        // Rasterize at a minimum of 2x regardless of devicePixelRatio -
         // on 1x displays this supersamples the atlas for crisper glyphs.
         const float raster_scale = dpi_scale < 2.0f ? 2.0f : dpi_scale;
 
@@ -261,7 +261,7 @@ namespace Theme {
 
         io.Fonts->Clear();
 
-        // ui_scale — single proportional knob for the whole terminal's logical
+        // ui_scale - single proportional knob for the whole terminal's logical
         // type size. This is the dial to tune readability; it is ORTHOGONAL to
         // raster_scale (which only governs glyph crispness via supersampling).
         // 1.0 = the original base sizes; 1.15 = ~15% larger across every face,
@@ -275,13 +275,13 @@ namespace Theme {
             return f;
         };
 
-        // UI face — Hanken Grotesk (chrome, labels, headings)
+        // UI face - Hanken Grotesk (chrome, labels, headings)
         f_ui          = add("/fonts/HankenGrotesk-Regular.ttf",  16.0f);
         f_ui_semibold = add("/fonts/HankenGrotesk-SemiBold.ttf", 16.0f);
         f_heading     = add("/fonts/HankenGrotesk-SemiBold.ttf", 20.0f);
         f_label       = add("/fonts/HankenGrotesk-SemiBold.ttf", 11.5f);
 
-        // Numeric face — JetBrains Mono (every table/ladder/clock/price).
+        // Numeric face - JetBrains Mono (every table/ladder/clock/price).
         // Base logical sizes; ui_scale (above) applies the global multiplier so
         // the dense DOM ladder / tape / depth widgets scale with everything else.
         // ImGui tables auto-size rows to the font, so row heights track this.

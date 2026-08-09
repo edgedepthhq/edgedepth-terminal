@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// replay_manager.cpp — Client-side replay orchestration
+// replay_manager.cpp - Client-side replay orchestration
 //
 // Two-phase startup:
 //   1. POST /replay/session → session_id (via EM_ASM XHR, async)
@@ -164,7 +164,7 @@ void ReplayManager::request_replay(
 
     if (is_active()) {
         stop();
-        // Full reset — clears session state so the new replay starts clean.
+        // Full reset - clears session state so the new replay starts clean.
         // The backend stop is async (Poison + resumeAllLiveConsumers), but
         // the POST for the new session goes through REST (not the same WS
         // message path), so it won't race with the stop control message.
@@ -176,7 +176,7 @@ void ReplayManager::request_replay(
         end_time_ms = start_time_ms + (2LL * 3600LL * 1000LL);
     }
 
-    // Clamp speed — tier cap first (free ≤2×, silent, mirrors the server clamp),
+    // Clamp speed - tier cap first (free ≤2×, silent, mirrors the server clamp),
     // then the absolute preset range.
     speed = static_cast<float>(Entitlements::clamp_speed_for_tier(speed));
     speed = std::clamp(speed, MIN_SPEED, MAX_SPEED);
@@ -299,7 +299,7 @@ void ReplayManager::request_archive_replay(
 
     speed = std::clamp(speed, MIN_SPEED, MAX_SPEED);
 
-    // Pending request — archive path. The backend resolves event_id → archive_path
+    // Pending request - archive path. The backend resolves event_id → archive_path
     // and defines the replay window, so start/end stay 0 here (filled by the first
     // replay_status). is_archive flags the session type for any downstream logic.
     pending_.symbols       = symbol.empty() ? std::vector<std::string>{}
@@ -327,7 +327,7 @@ void ReplayManager::request_archive_replay(
         if (std::abs(SPEED_PRESETS[i] - speed) < 0.01f) { current_speed_preset_idx_ = i; break; }
     }
 
-    // POST /replay/session/archive — body matches CreateArchiveReplayRequest
+    // POST /replay/session/archive - body matches CreateArchiveReplayRequest
     // (event_id + speed; backend resolves the path). Streams default server-side.
     json payload;
     payload["event_id"] = event_id;
@@ -338,7 +338,7 @@ void ReplayManager::request_archive_replay(
     // Same async XHR + callback pair as request_replay, but the archive endpoint.
     // The session-created/-error callbacks are session-type-agnostic (they read
     // only session_id + status), so on_session_created → join_session() just works.
-    // NOTE: no withCredentials — mirrors request_replay (cross-origin api.edgedepth.com;
+    // NOTE: no withCredentials - mirrors request_replay (cross-origin api.edgedepth.com;
     // the SSR /terminal?event= gate already authorizes the user before this runs).
     EM_ASM({
         var body = UTF8ToString($0);
@@ -416,7 +416,7 @@ void ReplayManager::request_pack_replay(
         if (std::abs(SPEED_PRESETS[i] - speed) < 0.01f) { current_speed_preset_idx_ = i; break; }
     }
 
-    // No POST, no join — the engine fetches the pack header and synthesizes
+    // No POST, no join - the engine fetches the pack header and synthesizes
     // replay_joined through handle_ws_message. Window/symbols come from the
     // header (authoritative).
     transition(State::Creating);
@@ -474,7 +474,7 @@ void ReplayManager::on_session_error(int status_code, const char* error_msg) {
             if (j.contains("code")  && j["code"].is_string())  code  = j["code"].get<std::string>();
             if (j.contains("error") && j["error"].is_string()) human = j["error"].get<std::string>();
         }
-    } catch (const std::exception&) { /* non-JSON (network error etc.) — fall through */ }
+    } catch (const std::exception&) { /* non-JSON (network error etc.) - fall through */ }
 
     auto& modal = ui::UpsellModal::instance();
 
@@ -507,7 +507,7 @@ void ReplayManager::on_session_error(int status_code, const char* error_msg) {
     // Only a genuinely anonymous visitor should be told to "log in" (§8.4). A
     // logged-in user hitting GRANT_REQUIRED needs Pro (upsell); one hitting
     // AUTH_REQUIRED has a token/session/config problem (the entitlement token failed
-    // to mint or verify) — that's a neutral notice, NOT a "log in" they already did.
+    // to mint or verify) - that's a neutral notice, NOT a "log in" they already did.
     if (code == "AUTH_REQUIRED" || code == "GRANT_REQUIRED") {
         if (!Entitlements::is_authenticated()) {
             modal.open_login();
@@ -557,7 +557,7 @@ void ReplayManager::join_session() {
     }
 
     if (!ws_client_ || !ws_client_->is_connected()) {
-        // WS not up yet? Don't error — the studio path fires request_replay as
+        // WS not up yet? Don't error - the studio path fires request_replay as
         // soon as the wasm runtime is ready (calledRun), which is earlier than
         // the WS handshake to wss://api.edgedepth.com/ws. Latch and let
         // flush_pending_join() send it once is_connected() flips. (The session
@@ -699,7 +699,7 @@ void ReplayManager::seek(int64_t timestamp_ms, bool deliberate) {
     // during Creating/Joining (a mistimed deep-link latch, a stray transport
     // command) cannot be serviced: the window is unknown (archive info_ is 0/0
     // → the clamp below would target garbage), the control message would draw
-    // the backend's "No active replay" error, and — worst — transitioning to
+    // the backend's "No active replay" error, and - worst - transitioning to
     // Seeking here makes on_session_created's `state != Creating` guard discard
     // the created session, stranding the boot forever (the ?event=&t= and
     // ?replay=&t= stillborn-session bug). Callers that need a boot-time seek
@@ -738,7 +738,7 @@ void ReplayManager::seek(int64_t timestamp_ms, bool deliberate) {
     // will reconnect consumers and send a fresh OB seed + data from the new
     // position. We must clear here (not in replay_seeked handler) because
     // the OB seed binary frame and the replay_seeked JSON message arrive
-    // from different goroutines with no ordering guarantee — clearing in
+    // from different goroutines with no ordering guarantee - clearing in
     // replay_seeked risks wiping the newly-arrived OB seed.
     if (replay_ctx_) {
         if (replay_ctx_->candles) {
@@ -786,7 +786,7 @@ void ReplayManager::skip_backward(int64_t seconds) {
 // Cumulative forward-skip distance past which the client clears its book +
 // candle timeline and expects the backend's consumer-reconnect (fresh OB
 // seed, no intermediates). Used per-press in skip_forward_to and re-derived
-// at flush time for the pack engine — keep both in sync.
+// at flush time for the pack engine - keep both in sync.
 static constexpr int64_t kLargeSkipThresholdMs = 2 * 60 * 1000;  // 2 minutes
 
 void ReplayManager::skip_forward_to(int64_t timestamp_ms) {
@@ -807,7 +807,7 @@ void ReplayManager::skip_forward_to(int64_t timestamp_ms) {
         pending_skip_needs_flush_ = false;
     }
 
-    // Reset OB continuity — the batch-delivered data from >> has a
+    // Reset OB continuity - the batch-delivered data from >> has a
     // completely different last_update_id chain. Without zeroing, the first
     // delta triggers a desync → blank DOM.
     if (replay_ctx_ && replay_ctx_->orderbooks) {
@@ -822,10 +822,10 @@ void ReplayManager::skip_forward_to(int64_t timestamp_ms) {
     // reconnect + candle timeline reload that the client must match with
     // reset_for_seek. The origin is the clock position before the first
     // >> in the current debounce window.
-    // (Threshold lives at kLargeSkipThresholdMs — flush_pending_skip
+    // (Threshold lives at kLargeSkipThresholdMs - flush_pending_skip
     // recomputes the same verdict for the pack engine.)
 
-    // Track the origin: if no debounce is pending, this is the first press —
+    // Track the origin: if no debounce is pending, this is the first press -
     // capture current time. If debounce is already active, keep the origin.
     if (pending_skip_deadline_ms_ == 0 || !pending_skip_is_forward_) {
         skip_origin_ms_ = info_.current_time_ms;
@@ -891,14 +891,14 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
         const int64_t wall_now = now_ms();
 
         if (pending_skip_deadline_ms_ > 0 && wall_now < pending_skip_deadline_ms_ && !pending_skip_is_forward_) {
-            // Within debounce window — update target, extend deadline, suppress backend.
+            // Within debounce window - update target, extend deadline, suppress backend.
             // Trim candles immediately so the user sees the chart update even
             // though the backend message is deferred.
             pending_skip_target_ms_ = timestamp_ms;
             pending_skip_deadline_ms_ = wall_now + SKIP_DEBOUNCE_WINDOW_MS;
             pending_skip_needs_flush_ = true;
 
-            // Always trim future candles — even during debounce
+            // Always trim future candles - even during debounce
             if (replay_ctx_ && replay_ctx_->candles) {
                 replay_ctx_->candles->trim_candles_after(timestamp_ms);
             }
@@ -906,31 +906,31 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
             return;
         }
 
-        // First press (or direction changed) — defer the send, arm the window
+        // First press (or direction changed) - defer the send, arm the window
         pending_skip_target_ms_ = timestamp_ms;
         pending_skip_deadline_ms_ = wall_now + SKIP_DEBOUNCE_WINDOW_MS;
         pending_skip_is_forward_ = false;
         pending_skip_needs_flush_ = true;
     }
-    // If buffer_hit: pure client-side rewind — don't touch the backend
+    // If buffer_hit: pure client-side rewind - don't touch the backend
 
     if (replay_ctx_) {
-        // Trim candles after target (always — independent of buffer path)
+        // Trim candles after target (always - independent of buffer path)
         if (replay_ctx_->candles) {
             replay_ctx_->candles->trim_candles_after(timestamp_ms);
         }
 
-        // Clear OB, trades, DOM, debug — they'll be rebuilt from buffer or backend
+        // Clear OB, trades, DOM, debug - they'll be rebuilt from buffer or backend
         if (replay_ctx_->orderbooks) {
             replay_ctx_->orderbooks->clear_all();
         }
-        // Invalidate VPVR — forces re-request from server with correct time range.
+        // Invalidate VPVR - forces re-request from server with correct time range.
         // tick_volume data is stored per-minute in TimescaleDB, so the backend
         // will return the correct profile for the rewound visible range.
         if (replay_ctx_->vpvr) {
             replay_ctx_->vpvr->invalidate_all();
         }
-        // DON'T clear heatmaps or liq_heatmaps — they're rewind-exempt
+        // DON'T clear heatmaps or liq_heatmaps - they're rewind-exempt
         // (slow-moving visualizations that don't change meaningfully in 50s)
     }
 
@@ -942,7 +942,7 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
 
     // Try client-side replay from history buffer
     if (history_buffer_ && history_buffer_->contains(timestamp_ms) && replay_ctx_) {
-        // OB restore callback — applies snapshot directly to the OB manager
+        // OB restore callback - applies snapshot directly to the OB manager
         auto ob_restore = [this](const ReplayHistoryBuffer::OBSnapshot& snap) {
             if (!replay_ctx_ || !replay_ctx_->orderbooks) return;
             auto& ob_mgr = *replay_ctx_->orderbooks;
@@ -965,7 +965,7 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
                 ask->set_price(lev.price);
                 ask->set_size(lev.size);
             }
-            // Zero last_update_id in the snapshot — this bypasses the
+            // Zero last_update_id in the snapshot - this bypasses the
             // continuity check in apply_book_update_from_pb for the first
             // delta after restore. The OB snapshot from the history buffer
             // was captured from read_buf which lags write_buf, so the
@@ -976,7 +976,7 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
             ob_mgr.apply_orderbook_snapshot_from_pb(pair, snapshot_pb);
         };
 
-        // Message replay callback — dispatch through normal pipeline
+        // Message replay callback - dispatch through normal pipeline
         int replay_dispatch_count = 0;
         auto replay_msg = [this, &replay_dispatch_count](const uint8_t* data, size_t len) {
             if (!replay_ctx_) return;
@@ -988,7 +988,7 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
 
         // Suppress candle messages during buffer replay only (not ongoing).
         // Server candle messages carry accumulated OHLCV for their tick
-        // period — replaying them after a rewind would re-introduce price
+        // period - replaying them after a rewind would re-introduce price
         // data from after the rewind target. Trades rebuild candles correctly.
         if (replay_ctx_->candles) {
             replay_ctx_->candles->set_suppress_candle_messages(true);
@@ -1000,7 +1000,7 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
         bool ok = history_buffer_->replay_from(timestamp_ms, timestamp_ms + 1000, ob_restore, replay_msg);
         (void)ok;
 
-        // Re-enable candle messages — the backend will stream fresh data
+        // Re-enable candle messages - the backend will stream fresh data
         // from the rewind target once it processes our skip_forward.
         if (replay_ctx_->candles) {
             replay_ctx_->candles->set_suppress_candle_messages(false);
@@ -1014,7 +1014,7 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
         // count never reaches 0 and rewind_pending_ stays true forever.
         //
         // The buffer replay already gave instant visual feedback. The
-        // debounce adds 200ms before the backend starts seeking — invisible
+        // debounce adds 200ms before the backend starts seeking - invisible
         // since the chart already looks correct.
         rewind_pending_ = true;
 
@@ -1072,7 +1072,7 @@ bool ReplayManager::context_primed() const {
     // We previously required >=5 INCREMENTAL deltas here. But the playback clock
     // runs at 1x while in Buffering, so a window that starts in a depth-sparse
     // stretch made the gate wait that many seconds of *market* time before the
-    // first frame — measured ~8-10s on btcusdt even though the seed + candles were
+    // first frame - measured ~8-10s on btcusdt even though the seed + candles were
     // ready in ~1s. delta_updates is still tracked (diagnostics / smoothness), it's
     // just no longer the readiness bar.
     return ob->last_update_id != 0;
@@ -1083,7 +1083,7 @@ void ReplayManager::tick_buffering_gate() {
         buffering_since_ms_ = 0;
         return;
     }
-    // First frame in Buffering — stamp the entry time for the safety valve.
+    // First frame in Buffering - stamp the entry time for the safety valve.
     if (buffering_since_ms_ == 0) buffering_since_ms_ = now_ms();
 
     const bool primed   = context_primed();
@@ -1156,14 +1156,14 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
         }
 
         // During client-only rewind catch-up, the client owns the clock.
-        // Server status updates are from the old (ahead) position — ignore
+        // Server status updates are from the old (ahead) position - ignore
         // the time field but still accept buffer health and progress.
         bool ignore_server_time = using_local_clock_;
 
         if (data.contains("current_time") && !ignore_server_time) {
             int64_t server_time = data["current_time"].get<int64_t>();
 
-            // Clamp to session range — server should never report a time
+            // Clamp to session range - server should never report a time
             // outside the replay window. Can happen when the playback loop
             // re-anchors from a buffered message that predates the session.
             server_time = std::clamp(server_time, info_.start_time_ms, info_.end_time_ms);
@@ -1171,7 +1171,7 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
             // After a skip (forward or backward), reject status updates that
             // would jump the client time in the wrong direction. Stale status
             // updates from before the backend processed the skip carry the OLD
-            // time — accepting them would revert the clock to pre-skip position.
+            // time - accepting them would revert the clock to pre-skip position.
             //
             // Forward jump guard: prevents stale status from jumping ahead
             // (e.g., after backward skip, old status has higher time).
@@ -1223,7 +1223,7 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
         // Buffering→Playing transition now, holding the clock until candles +
         // OB seed are actually present. Promoting on first status (as before)
         // started playback against empty buffers. The gate re-checks every frame.
-        // (Left intentionally empty — see tick_buffering_gate.)
+        // (Left intentionally empty - see tick_buffering_gate.)
         return true;
     }
 
@@ -1257,16 +1257,16 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
 
         if (lightweight) {
             // For lightweight seeks (<<, >>, arrow keys): the time was already
-            // set in skip_forward_to/skip_backward_to. Don't reset it here —
+            // set in skip_forward_to/skip_backward_to. Don't reset it here -
             // by the time replay_seeked arrives (after OB re-seed DB query),
             // the client may have already accepted a post-skip replay_status
             // that advanced the time past the target. Snapping back would
             // cause a visible flicker loop.
             //
-            // We also don't clear candle data — it's already on screen and
+            // We also don't clear candle data - it's already on screen and
             // the backend will continue streaming from the new position.
 
-            // Clear the rewind gate — but only if this replay_seeked is for
+            // Clear the rewind gate - but only if this replay_seeked is for
             // the most recent rewind. If rapid << presses issued a tighter
             // cutoff after this one, don't clear prematurely.
             if (rewind_cutoff_ms_ > 0 && seek_ts <= rewind_cutoff_ms_) {
@@ -1277,13 +1277,13 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
             // so in the common case there's only one in-flight seek. But if
             // the backend coalesces rapid skip_forwards (sending fewer
             // replay_seekeds than received), the count model breaks. Clearing
-            // unconditionally is safe — the latest seeked means the backend
+            // unconditionally is safe - the latest seeked means the backend
             // is at SOME position, and subsequent seeks will re-arm the gate.
             rewind_pending_ = false;
         } else {
             // Full seek (scrubber drag, large jumps): update time.
             // Data clearing already happened in seek() before the WS message
-            // was sent — doing it here would risk wiping the fresh OB seed
+            // was sent - doing it here would risk wiping the fresh OB seed
             // that arrived between the seek request and this response.
             rewind_cutoff_ms_ = 0;
             rewind_pending_ = false;
@@ -1313,7 +1313,7 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
 
     if (type == "error") {
         if (is_active()) {
-            // Check both nesting levels — errors may not use data envelope
+            // Check both nesting levels - errors may not use data envelope
             std::string error = data.value("error", "");
             if (error.empty()) {
                 error = msg.value("error", "Unknown error");
@@ -1336,7 +1336,7 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void ReplayManager::send_control(const char* action) {
-    // Pack mode: the engine IS the session — route the action locally.
+    // Pack mode: the engine IS the session - route the action locally.
     if (pack_mode_ && pack_engine_) {
         if (std::strcmp(action, "pause") == 0)  pack_engine_->control_pause();
         else if (std::strcmp(action, "resume") == 0) pack_engine_->control_resume();
@@ -1416,7 +1416,7 @@ void ReplayManager::transition(State new_state) {
         usage_emit_replay_end(completed);
     }
 
-    // Reserve space at bottom of dockspace for the control bar — but NOT in
+    // Reserve space at bottom of dockspace for the control bar - but NOT in
     // embedded lesson mode, where the React chrome owns the transport (outside
     // the canvas) and the native bar isn't drawn. Reserving there leaves a dead
     // gap under the widgets.
@@ -1425,7 +1425,7 @@ void ReplayManager::transition(State new_state) {
         !EducationBoot::instance().is_embedded()) {
         // Reserve the control-bar height PLUS clearance so the chart's time axis and
         // its floating date label (drawn at the bottom of the plot) aren't clipped by
-        // the bar. (Was a hard-coded 36 — shorter than the restyled 54px bar, which
+        // the bar. (Was a hard-coded 36 - shorter than the restyled 54px bar, which
         // is what cut off the axis + tooltip.)
         LayoutManager::bottom_reserve = kBarH + 14.0f;
     }
@@ -1434,7 +1434,7 @@ void ReplayManager::transition(State new_state) {
     if (new_state == State::Buffering && !replay_ctx_) {
         create_replay_data_context();
         // Create history buffer for client-side rewind support. Pack mode
-        // skips it — rewinds are local block re-reads through the engine, so
+        // skips it - rewinds are local block re-reads through the engine, so
         // every << goes down the "backend" path, which the engine answers.
         if (!pack_mode_) {
             history_buffer_ = std::make_unique<ReplayHistoryBuffer>();
@@ -1455,7 +1455,7 @@ void ReplayManager::transition(State new_state) {
 
 void ReplayManager::reset() {
     // Flush any in-flight replay run before the state is wiped (a reset without a
-    // Stopped transition — e.g. starting a new replay over an active one).
+    // Stopped transition - e.g. starting a new replay over an active one).
     if (usage_run_active_) usage_emit_replay_end(false);
     destroy_replay_data_context();
     history_buffer_.reset();
@@ -1487,7 +1487,7 @@ void ReplayManager::reset() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Replay DataContext — DemoNetDriver pattern (parallel data pipeline)
+// Replay DataContext - DemoNetDriver pattern (parallel data pipeline)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void ReplayManager::create_replay_data_context() {
@@ -1496,7 +1496,7 @@ void ReplayManager::create_replay_data_context() {
     }
 
     // Get the live WS handle so the replay context can request historical data.
-    // Pack mode: NO handle — historical requests are served from the pack via
+    // Pack mode: NO handle - historical requests are served from the pack via
     // the StreamManager hook; nothing may reach the box from a pack session.
     int ws_handle = 0;
     if (!pack_mode_ && ws_client_ && ws_client_->is_connected()) {
@@ -1542,7 +1542,7 @@ void ReplayManager::drip_feed_pending_replay() {
     int dispatched = 0;
 
     // TIME-budget dispatches per frame to avoid frame drops. Each dispatch is
-    // a ZSTD decompress + protobuf parse + route — roughly 50-100μs. The old
+    // a ZSTD decompress + protobuf parse + route - roughly 50-100μs. The old
     // fixed cap of 2000 was tuned for a 16ms/60fps budget; at 160+ FPS the
     // frame budget is ~6ms, and a 2000-message frame is a 90-FPS dip. A 2.5ms
     // budget keeps the render loop fluid; the cursor simply resumes next frame
@@ -1565,7 +1565,7 @@ void ReplayManager::drip_feed_pending_replay() {
         // The cursor will resume from here next frame.
         if (entry.timestamp_ms > now) break;
 
-        // Stop if we've reached the drip-feed end point — entries beyond
+        // Stop if we've reached the drip-feed end point - entries beyond
         // the pre-rewind position belong to the normal streaming region.
         if (drip_feed_end_ms_ > 0 && entry.timestamp_ms > drip_feed_end_ms_) {
             break;
@@ -1582,7 +1582,7 @@ void ReplayManager::drip_feed_pending_replay() {
             continue;
         }
 
-        // Skip OB snapshots — they're for rewind restore, not playback
+        // Skip OB snapshots - they're for rewind restore, not playback
         if (!entry.is_ob_snapshot) {
             std::string msg_data(reinterpret_cast<const char*>(entry.data.data()), entry.data.size());
             MessageContext ctx = replay_message_context();
@@ -1621,7 +1621,7 @@ void ReplayManager::drip_feed_pending_replay() {
     bool cursor_exhausted = (drip_feed_cursor_ >= entries.size());
 
     if (reached_end || cursor_exhausted) {
-        // At high speeds (10x), the clock can outrun the cursor — it reaches
+        // At high speeds (10x), the clock can outrun the cursor - it reaches
         // drip_feed_end_ms_ while the cursor still has undispatched entries.
         // Synchronously drain remaining entries up to drip_feed_end_ms_ to
         // prevent candle gaps from undispatched data.
@@ -1649,7 +1649,7 @@ void ReplayManager::drip_feed_pending_replay() {
         if (replay_ctx_ && replay_ctx_->candles) {
             replay_ctx_->candles->set_suppress_candle_messages(false);
         }
-        // Reset OB update_ids — the backend stream has been running at the
+        // Reset OB update_ids - the backend stream has been running at the
         // original position during the entire drip-feed. Its update_id chain
         // doesn't match the buffer's OB chain. Without resetting, every
         // delta after drip-feed gets rejected as snapshot=false.
@@ -1658,7 +1658,7 @@ void ReplayManager::drip_feed_pending_replay() {
         }
         // Re-sync clock to the BACKEND's actual streaming position.
         // During a buffer-hit rewind, the backend was never told about the
-        // rewind — it kept streaming. While the drip-feed ran for N minutes
+        // rewind - it kept streaming. While the drip-feed ran for N minutes
         // of real time, the backend advanced N minutes too. Setting the clock
         // to `now` (the drip-feed end time) would leave it minutes behind the
         // backend. The replay_status jump guard would then reject every update
@@ -1727,7 +1727,7 @@ void ReplayManager::flush_pending_skip() {
     const int64_t wall_now = now_ms();
     if (wall_now < pending_skip_deadline_ms_) return;  // Window still open
 
-    // Window expired — send the coalesced final target to the backend.
+    // Window expired - send the coalesced final target to the backend.
     // Forward targets respect the seek ceiling (lesson scrub-forward lock);
     // the per-press handler clamped too, but the coalesced sum re-checks.
     int64_t target = pending_skip_target_ms_;
@@ -1770,7 +1770,7 @@ MessageContext ReplayManager::replay_message_context() const {
         replay_ctx_->footprint,
         nullptr  // No paper-trading manager in replay.
     };
-    mc.series = replay_ctx_->series;  // Indicators V1 SeriesCache (set by name — see message_context.h)
+    mc.series = replay_ctx_->series;  // Indicators V1 SeriesCache (set by name - see message_context.h)
     mc.analytics = replay_ctx_->analytics;  // Positioning/Contagion (set by name - same rule as series)
     mc.preview = replay_ctx_->preview;  // Scrub-preview store (set by name - same rule as series)
     return mc;
@@ -1796,7 +1796,7 @@ int64_t ReplayManager::now_ms() const {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Usage instrumentation (design §3) — watch-seconds clock + replay lifecycle
+// Usage instrumentation (design §3) - watch-seconds clock + replay lifecycle
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const char* ReplayManager::usage_source() const {
@@ -1942,7 +1942,7 @@ void ReplayManager::tick_usage(double dt_seconds, bool document_visible) {
 
 int64_t ReplayManager::interpolated_time_ms() const {
     // Frozen while not playing: paused, seeking, OR still buffering (the gate
-    // holds the clock at the window start until candles + OB seed are primed —
+    // holds the clock at the window start until candles + OB seed are primed -
     // without this, the clock interpolates forward off wall-time during the hold
     // and the "loading" period looks like it's already playing).
     if (!is_active() || is_paused() || info_.state == State::Seeking ||
@@ -1971,8 +1971,8 @@ int64_t ReplayManager::interpolated_time_ms() const {
     // status-intervals of market time past the last server-reported position. On a
     // healthy stream the next replay_status (~2s cadence) re-anchors current_time_ms
     // long before this bites, so steady playback stays perfectly smooth. But on a
-    // slow / sparse START — e.g. a quiet "now-12h" studio window where the depth +
-    // tape data only trickles in — status updates stall, and pure wall-clock
+    // slow / sparse START - e.g. a quiet "now-12h" studio window where the depth +
+    // tape data only trickles in - status updates stall, and pure wall-clock
     // dead-reckoning would race the displayed clock ~20-30s AHEAD of the data that's
     // actually on screen (then snap back when a status finally lands: the 00:00:00 →
     // 00:00:01 → 00:00:00 stutter). Capping the lead pins the clock near the real
@@ -2096,7 +2096,7 @@ bool ReplayManager::process_keyboard_shortcuts() {
             return true;
         }
 
-        // Escape: stop replay — unless the research panel owns this press
+        // Escape: stop replay - unless the research panel owns this press
         // (open now, or closed BY this Escape): closing a floating reader
         // must never also kill the replay under it.
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
@@ -2174,7 +2174,7 @@ void ReplayManager::open_focused_replay(const std::string& symbol, int64_t from_
                  static_cast<long long>(to_ms));
     EM_ASM({ window.location.href = UTF8ToString($0); }, url);
 #else
-    // Native dev build: no browser to navigate — keep an in-place replay so
+    // Native dev build: no browser to navigate - keep an in-place replay so
     // local replay testing still works.
     request_replay_from(symbol, seek_ms > 0 ? seek_ms : from_ms, 1.0f, 300);
 #endif
@@ -2219,7 +2219,7 @@ bool ReplayManager::render_chart_context_menu(
         // Plan gate: a non-Pro user can only replay the recent window + the major
         // symbols. Rather than hide the item (confusing), show WHY it's locked and
         // route to upgrade. The Go backend still enforces the real cap on the
-        // session request — this is the friendly front door, not the lock itself.
+        // session request - this is the friendly front door, not the lock itself.
         const bool sym_ok  = Entitlements::symbol_replay_allowed(symbol);
         const bool time_ok = Entitlements::time_replayable(hovered_time_ms, now_ms());
 
@@ -2433,7 +2433,7 @@ void ReplayManager::render_control_bar() {
         ImGuiWindowFlags_NoFocusOnAppearing |
         ImGuiWindowFlags_NoNav;
 
-    // GRB chrome: panel fill, square corners, no ImGui border — we draw only the
+    // GRB chrome: panel fill, square corners, no ImGui border - we draw only the
     // top hairline ourselves (border-top: 1px var(--bd-2)). Zero vertical padding;
     // every item vertically centers itself via center_item_y().
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16, 0));
@@ -2545,7 +2545,7 @@ void ReplayManager::render_status_badge() {
     // Soft pill fill + hairline outline, in the state color (cyan/amber/red/grey).
     dl->AddRectFilled(p, pmax, tok(color, 0.14f), pill_h * 0.5f);
     dl->AddRect(p, pmax, tok(color, 0.45f), pill_h * 0.5f, 0, 1.0f);
-    // Status dot — gentle pulse while connecting/buffering/seeking.
+    // Status dot - gentle pulse while connecting/buffering/seeking.
     float dot_a = 1.0f;
     if (info_.state == State::Creating || info_.state == State::Joining ||
         info_.state == State::Buffering || info_.state == State::Seeking) {
@@ -2582,7 +2582,7 @@ void ReplayManager::render_transport_controls() {
     const int64_t backward_current = info_.current_time_ms;
     const int64_t forward_current  = interpolated_time_ms();
 
-    // Ghost skip button — bar + triangle glyph (GRB SkipBack/SkipForward),
+    // Ghost skip button - bar + triangle glyph (GRB SkipBack/SkipForward),
     // tx-3 idle → tx-1 on hover with a soft rounded hover fill.
     auto skip_btn = [&](const char* id, bool forward, const char* tip) -> bool {
         const float sz = 30.0f;
@@ -2671,13 +2671,13 @@ void ReplayManager::render_transport_controls() {
     }
 }
 
-// ─── Record Clip (CLIP_FACTORY P1 — replay-only v1) ─────────────────────────
+// ─── Record Clip (CLIP_FACTORY P1 - replay-only v1) ─────────────────────────
 // ⏺ on the transport, ghost-styled like the skip buttons; ⏹ + red ring while
 // recording. The button renders ClipRecorder's REPORTED state (the JS callback),
 // so it can't claim a recording the browser isn't making. Disabled when the
 // boot probe failed (no MediaRecorder/captureStream/codec). The watermark badge
 // + elapsed timer are drawn by ClipRecorder::tick_and_render (main loop,
-// foreground draw list), NOT here — they must burn into the capture even when
+// foreground draw list), NOT here - they must burn into the capture even when
 // the pointer isn't on the bar.
 
 void ReplayManager::render_record_button() {
@@ -2692,7 +2692,7 @@ void ReplayManager::render_record_button() {
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
-    // ── FOCUS pill — clip layout toggle (default ON; locked while recording).
+    // ── FOCUS pill - clip layout toggle (default ON; locked while recording).
     //    ON  → recording hides topbar/statsbar/status bar + watchlist + perf
     //          overlay: the clip frames chart+DOM+tape only.
     //    OFF → full-UI clip. Session-static, no persistence.
@@ -2756,14 +2756,14 @@ void ReplayManager::render_record_button() {
         dl->AddRectFilled(p, ImVec2(p.x + sz, p.y + sz), tok(Theme::Tokens::HOVER), 6.0f);
 
     if (recording) {
-        // ⏹ — filled square + blinking ring (mirrors the burned badge's REC dot).
+        // ⏹ - filled square + blinking ring (mirrors the burned badge's REC dot).
         const float pulse = 0.55f + 0.45f *
             (0.5f + 0.5f * sinf(static_cast<float>(ImGui::GetTime()) * 4.0f));
         dl->AddCircle(c, 9.5f, tok(Theme::Tokens::DOWN, pulse), 0, 1.5f);
         dl->AddRectFilled(ImVec2(c.x - 4.5f, c.y - 4.5f), ImVec2(c.x + 4.5f, c.y + 4.5f),
                           tok(Theme::Tokens::DOWN), 1.5f);
     } else {
-        // ⏺ — ring + red core; grey when it can't start (unsupported/loading/saving).
+        // ⏺ - ring + red core; grey when it can't start (unsupported/loading/saving).
         const ImU32 ring = !enabled ? tok(Theme::Tokens::TX4)
                          : hovered  ? tok(Theme::Tokens::DOWN)
                                     : tok(Theme::Tokens::TX3);
@@ -2777,7 +2777,7 @@ void ReplayManager::render_record_button() {
         if (recording) {
             CR::stop();
         } else {
-            // UPPERCASE display symbol — stack buffer, no STL in the render loop.
+            // UPPERCASE display symbol - stack buffer, no STL in the render loop.
             char sym[24] = "REPLAY";
             if (!info_.symbols.empty()) {
                 const std::string& s = info_.symbols[0];
@@ -2900,7 +2900,7 @@ void ReplayManager::render_time_display() {
     }
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImGui::PushFont(Theme::Fonts::mono_md());          // JBM Medium 14 — replay clock
+    ImGui::PushFont(Theme::Fonts::mono_md());          // JBM Medium 14 - replay clock
     const ImVec2 tsz = ImGui::CalcTextSize(current_buf);
     ImGui::PopFont();
     ImGui::PushFont(Theme::Fonts::mono_sm());
@@ -2960,7 +2960,7 @@ void ReplayManager::render_timeline_scrubber() {
     bool active = ImGui::IsItemActive();
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
-    // Hover animation — expand track on hover (smooth lerp)
+    // Hover animation - expand track on hover (smooth lerp)
     float target_anim = (hovered || active || scrubber_dragging_) ? 1.0f : 0.0f;
     scrubber_hover_anim_ += (target_anim - scrubber_hover_anim_) * 0.15f;
     if (std::abs(scrubber_hover_anim_ - target_anim) < 0.01f)
@@ -3103,7 +3103,7 @@ void ReplayManager::render_timeline_scrubber() {
         }
     }
     if (scrubber_dragging_ && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-        // Mouse released — commit seek snapped to candle boundary
+        // Mouse released - commit seek snapped to candle boundary
         if (range > 0 && snap_target_ms_ > 0) {
             seek(snap_target_ms_);
         } else {
@@ -3111,12 +3111,12 @@ void ReplayManager::render_timeline_scrubber() {
         }
         scrubber_dragging_ = false;
         snap_target_ms_ = 0;
-        // Preview off on commit — the chart re-fits to the landing position.
+        // Preview off on commit - the chart re-fits to the landing position.
         set_scrub_preview_ms(0);
         scrub_hover_since_ = 0.0;
     }
 
-    // ─── Click to seek (non-drag) — snap to nearest candle ──────────
+    // ─── Click to seek (non-drag) - snap to nearest candle ──────────
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && !scrubber_dragging_) {
         float mouse_x = ImGui::GetIO().MousePos.x;
         float click_progress = std::clamp(
@@ -3198,7 +3198,7 @@ void ReplayManager::render_timeline_scrubber() {
             Theme::tooltip("%s (click: %s)%s", hover_buf, snap_buf, px_line);
         }
     }
-    // (no trailing end-time label — the right-aligned speed/buffer/close group
+    // (no trailing end-time label - the right-aligned speed/buffer/close group
     //  owns the space to the scrubber's right; the clock + tooltip cover timing.)
 }
 
@@ -3231,10 +3231,10 @@ void ReplayManager::render_buffer_indicator() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Replay Range Picker (free-window launcher) — design §8.1–8.2
+// Replay Range Picker (free-window launcher) - design §8.1-8.2
 //
 // The primary free-tier surface: frame free replay as "a new free window unlocks
-// every day", not a locked archive. The FREE band (48-72h ago — always archived
+// every day", not a locked archive. The FREE band (48-72h ago - always archived
 // parquet days, never the warm DB) is the hero; RECENT + ARCHIVE are visible,
 // labelled and locked; locked bands / presets / speeds all funnel into the ONE
 // upsell modal. Opened from the chart right-click "Replay range…".
@@ -3482,7 +3482,7 @@ void ReplayManager::render_replay_launcher() {
             case 2: sms = now - 24LL * 3600000LL; ems = now; break;             // Last 24h (Pro)
             case 3: ems = now - static_cast<int64_t>(launcher_days_ago_) * DAY; // Pick any day (Pro)
                     sms = ems - DAY; break;
-            default: {  // Free window — request EXACTLY the window Entitlements resolves:
+            default: {  // Free window - request EXACTLY the window Entitlements resolves:
                         // the backend's archived-day bounds when known (server-authoritative,
                         // so the modal requests precisely what the backend enforces), else the
                         // static [72h,48h] band inset for clock drift. One source of truth.

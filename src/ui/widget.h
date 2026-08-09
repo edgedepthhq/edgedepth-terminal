@@ -67,7 +67,7 @@ public:
     }
 
     bool is_open = true;
-    bool is_replay_widget = false;  // Created during replay — auto-closed on exit
+    bool is_replay_widget = false;  // Created during replay - auto-closed on exit
 
     // Append suffix to widget title (e.g. "##replay" for ImGui ID uniqueness)
     void set_title_suffix(const std::string& suffix) { title_suffix_ = suffix; }

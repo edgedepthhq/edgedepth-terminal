@@ -8,7 +8,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 static const char* kVertexShaderSrc = R"(#version 300 es
-// Fullscreen triangle — no vertex buffer needed.
+// Fullscreen triangle - no vertex buffer needed.
 // gl_VertexID 0,1,2 → covers entire clip space.
 void main() {
     vec2 pos = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);
@@ -59,7 +59,7 @@ out vec4 fragColor;
 
 void main() {
     // Map fragment position to [0,1] UV within the plot area.
-    // gl_FragCoord is in WINDOW coordinates — subtract the plot origin
+    // gl_FragCoord is in WINDOW coordinates - subtract the plot origin
     // to get position relative to the plot's bottom-left corner.
     vec2 uv = (gl_FragCoord.xy - u_plot_origin) / u_plot_size;
 
@@ -103,13 +103,13 @@ void main() {
     float value = 0.0;
 
     if (u_mode == 1) {
-        // ── LIQUIDATION: band mode — snap to the aggregated bucket ──
+        // ── LIQUIDATION: band mode - snap to the aggregated bucket ──
         // Band-based render: take the max |value| within the aggregated bucket
         // with NO cross-band interpolation, so each price band renders as a
         // distinct horizontal level (matches the band design). The soft glow
         // comes from the alpha smoothstep + power curve below, not from smearing
         // adjacent bands into a continuous cloud. (Previous V7 lerped between
-        // buckets with a cubic smoothstep — that produced the diffuse cloud.)
+        // buckets with a cubic smoothstep - that produced the diffuse cloud.)
         for (int d = 0; d < u_bucket_multiplier; d++) {
             int r = agg_base + d;
             if (r >= 0 && r < col_num_rows && r < u_max_rows) {
@@ -147,7 +147,7 @@ void main() {
     if (t < discard_threshold) discard;
 
     // ── POWER CURVE (liq only) ──────────────────────────────────────
-    // V7d: Gentle contrast — pow(t, 1.3) lets purple/magenta mid-range show
+    // V7d: Gentle contrast - pow(t, 1.3) lets purple/magenta mid-range show
     // as visible halos while still differentiating peaks from background.
     // t^1.3: 0.1→0.05, 0.2→0.13, 0.3→0.22, 0.5→0.41, 0.8→0.74
     if (u_mode == 1) {
@@ -155,10 +155,10 @@ void main() {
     }
 
     // ── COLORMAP LOOKUP ─────────────────────────────────────────────
-    // V7: Unified inferno colormap for both directions — always use cool LUT.
+    // V7: Unified inferno colormap for both directions - always use cool LUT.
     fragColor = texture(u_colormap, vec2(t, 0.5));
 
-    // V7: Smooth alpha fade for liquidation — creates glowing halo effect.
+    // V7: Smooth alpha fade for liquidation - creates glowing halo effect.
     // The LUT alpha handles the base curve; this smoothstep adds an extra
     // gradient at the lowest values for seamless fade into the background.
     if (u_mode == 1) {
@@ -169,7 +169,7 @@ void main() {
     // Phase 2a: Reach-probability opacity modulation.
     // Bands with low reach probability fade out, creating a "cone" of
     // visibility around the mark price. pow(reach, 2.5) sharpens the
-    // falloff — GBM analytical values bunch in 20-60% range for visible
+    // falloff - GBM analytical values bunch in 20-60% range for visible
     // bands, the power curve spreads them: 0.5→0.18, 0.3→0.05, 0.2→0.02.
     if (u_use_reach == 1 && u_mode == 1) {
         float reach = texelFetch(u_reach_data, ivec2(tex_col, base_row), 0).r;

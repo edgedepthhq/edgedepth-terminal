@@ -1,10 +1,10 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// footprint_manager.h — Per-candle tick volume data for footprint chart overlay
+// footprint_manager.h - Per-candle tick volume data for footprint chart overlay
 //
 // Stores raw 1-tick-per-row data fetched from the backend. The client regroups
 // levels into configurable tick_per_row buckets on the fly, so a re-request is
-// only needed when the visible time range changes — not when the user adjusts
+// only needed when the visible time range changes - not when the user adjusts
 // granularity.
 //
 // Data flow:
@@ -88,13 +88,13 @@ public:
     // Look up the footprint for a specific candle by its start_time.
     const CandleFootprint* get_footprint(const std::string& symbol, int64_t start_time) const;
 
-    // Client-side regrouping — no re-request needed when user changes granularity.
+    // Client-side regrouping - no re-request needed when user changes granularity.
     std::vector<GroupedLevel> group_levels(const CandleFootprint& fp, double tick_per_row) const;
 
     // Clear all data for a symbol (e.g., on symbol switch).
     void clear(const std::string& symbol);
 
-    // ── Cached group_levels — avoids per-frame rebuild ──────────────────
+    // ── Cached group_levels - avoids per-frame rebuild ──────────────────
     struct MergedCache {
         std::vector<GroupedLevel> levels;
         double tick_per_row       = 0.0;
@@ -108,7 +108,7 @@ public:
     };
 
     // Get merged+grouped levels for a candle (handles multi-minute merging + grouping + caching).
-    // Returns nullptr if no data. All heavy work is cached — safe to call every frame.
+    // Returns nullptr if no data. All heavy work is cached - safe to call every frame.
     const MergedCache* get_merged_grouped(
         const std::string& symbol, int64_t candle_ts,
         int64_t tf_sec, double tick_per_row);
@@ -120,7 +120,7 @@ public:
     // Current data version (increments on any data update).
     uint64_t data_version() const { return data_version_; }
 
-    // ── Config (public — read/written by ChartWidget UI) ─────────────────
+    // ── Config (public - read/written by ChartWidget UI) ─────────────────
     Mode  mode             = Mode::SellsBuys;
     int   ticks_per_row    = 0;       // 0 = auto
     bool  enabled          = false;
@@ -140,7 +140,7 @@ private:
 
     bool loading_ = false;
 
-    // Data version — incremented on every on_tick_volume_update
+    // Data version - incremented on every on_tick_volume_update
     uint64_t data_version_ = 0;
 
     // Cache for merged+grouped results: symbol → (candle_ts → MergedCache)

@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// recorder_runtime.cpp — see recorder_runtime.h
+// recorder_runtime.cpp - see recorder_runtime.h
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "education/recorder_runtime.h"
@@ -19,7 +19,7 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
-// Defined in main.cpp (Module.__set_chart_timeframe) — same change_timeframe
+// Defined in main.cpp (Module.__set_chart_timeframe) - same change_timeframe
 // path the live topbar and the lesson Explore pill use. Main thread only.
 extern "C" void _set_chart_timeframe(int sec);
 #endif
@@ -45,7 +45,7 @@ double now_wall_ms() {
 constexpr int64_t kJumpTolMs = 2000;
 
 // Max forward span for skip_forward_to. The clock-only skip keeps formed
-// candles but leaves the skipped range EMPTY on the chart — a visible candle
+// candles but leaves the skipped range EMPTY on the chart - a visible candle
 // gap in the produced clip (unacceptable beyond a candle or two). Bigger
 // forward jumps use a deliberate seek instead: full re-prime with backfilled
 // history, so the chart is continuous at the landing point. The harness logs
@@ -53,7 +53,7 @@ constexpr int64_t kJumpTolMs = 2000;
 constexpr int64_t kSkipMaxMs = 120000;
 
 // Focus keyword → docked-panel window-title substring (the lesson runtime's
-// el_window_hint mapping — DOMWidget "DOM …", TradesWidget "T …", ChartWidget
+// el_window_hint mapping - DOMWidget "DOM …", TradesWidget "T …", ChartWidget
 // "Chart …"). Empty = no focus.
 const char* focus_window_hint(const std::string& f) {
     if (f == "dom")   return "DOM ";
@@ -188,14 +188,14 @@ void RecorderRuntime::begin_shot(int i, const AppContext& ctx) {
                  tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday);
     }
 
-    // Timeframe first — cheap, and the chart re-request happens against the
+    // Timeframe first - cheap, and the chart re-request happens against the
     // shot's landing position rather than the previous one.
 #ifdef __EMSCRIPTEN__
     if (s.tf_sec > 0) _set_chart_timeframe(s.tf_sec);
 #endif
 
     // Position. Forward jump = clock-only skip (instant, keeps formed candles
-    // on the chart — visual continuity between shots). Backward jump = ONE
+    // on the chart - visual continuity between shots). Backward jump = ONE
     // deliberate seek (full re-prime; well-formed scripts never need it).
     const int64_t now = rm.interpolated_time_ms();
     const int64_t d   = s.from_ms - now;
@@ -232,7 +232,7 @@ void RecorderRuntime::begin_shot(int i, const AppContext& ctx) {
 
 void RecorderRuntime::advance(const AppContext& ctx) {
     if (cur_ + 1 >= static_cast<int>(shots_.size())) {
-        // Freeze the final frame so the capture tail is a clean hold — the
+        // Freeze the final frame so the capture tail is a clean hold - the
         // harness stops on "done"; the end card is a post step.
         ctx.replay_mgr().pause();
         phase_ = Phase::Done;
@@ -253,7 +253,7 @@ void RecorderRuntime::update(const AppContext& ctx) {
         printf("[Recorder] replay session errored\n");
         return;
     }
-    // Replay ran out (Stopped tears the data context down — a seek cannot
+    // Replay ran out (Stopped tears the data context down - a seek cannot
     // revive a pack). Whatever is on screen is the clip's final frame.
     if (rm.state() == ReplayManager::State::Stopped) {
         phase_ = Phase::Done;
@@ -263,7 +263,7 @@ void RecorderRuntime::update(const AppContext& ctx) {
 
     // Primed = the buffering gate has promoted to PLAYING against a known
     // window. is_active()/!is_loading() alone is NOT enough: Creating/Joining
-    // are "active", not Buffering, and not Seeking — so the loose check arms
+    // are "active", not Buffering, and not Seeking - so the loose check arms
     // shot 0 against an empty canvas before the pack/session even loads (the
     // EVAA smoke-test bug). A real window (end > start) only exists post-join.
     const bool primed = rm.is_playing() &&
@@ -293,7 +293,7 @@ void RecorderRuntime::update(const AppContext& ctx) {
         }
 
         case Phase::Hold:
-            // pause() is a no-op outside Playing — keep asking until it takes
+            // pause() is a no-op outside Playing - keep asking until it takes
             // (mirrors the lesson's want_pause_ latch), then run out the wall
             // clock for the freeze-frame beat.
             if (rm.is_playing()) rm.pause();
@@ -316,7 +316,7 @@ void RecorderRuntime::emit_state(const AppContext& ctx) {
     const bool paused  = rm.is_paused();
     const bool loading = rm.is_loading() || rm.state() == ReplayManager::State::Seeking;
 
-    // Discrete-field signature (clock EXCLUDED — it rides the cadence).
+    // Discrete-field signature (clock EXCLUDED - it rides the cadence).
     transport::SigHasher hasher;
     hasher.mix(static_cast<uint64_t>(phase_));
     hasher.mix(static_cast<uint64_t>(static_cast<int64_t>(cur_)));
@@ -352,7 +352,7 @@ void RecorderRuntime::emit_state(const AppContext& ctx) {
         st["caption"]   = s.caption;
         st["focus"]     = s.focus;
         if (last_focus_.valid) {
-            // CSS px (DisplaySize space) — post can crop-zoom to exactly what
+            // CSS px (DisplaySize space) - post can crop-zoom to exactly what
             // the spotlight framed, at whatever capture resolution.
             st["focusRect"] = { {"x", last_focus_.x}, {"y", last_focus_.y},
                                 {"w", last_focus_.w}, {"h", last_focus_.h} };
@@ -390,14 +390,14 @@ void RecorderRuntime::emit_state(const AppContext& ctx) {
 void RecorderRuntime::render_overlay(const AppContext& ctx) {
     (void)ctx;
     if (!valid_ || badge_[0] == '\0') return;
-    // Overlays burn from the first shot through the done freeze-frame — never
+    // Overlays burn from the first shot through the done freeze-frame - never
     // during Waiting (capture hasn't started) or Error.
     if (phase_ != Phase::Shot && phase_ != Phase::Hold && phase_ != Phase::Done) return;
 
     ImDrawList* dl = ImGui::GetForegroundDrawList();
     const ImGuiIO& io = ImGui::GetIO();
 
-    // ── Focus lightbox — lesson-spotlight style (dim + accent ring) around the
+    // ── Focus lightbox - lesson-spotlight style (dim + accent ring) around the
     //    shot's panel. Drawn BEFORE the badge so the badge stays above the dim.
     //    Rect resolves per frame (docked panels can only move between frames in
     //    recorder mode, but the scan is cheap and correctness is free).
@@ -422,7 +422,7 @@ void RecorderRuntime::render_overlay(const AppContext& ctx) {
                 dl->AddRectFilled(ImVec2(v0.x, by1), v1, dim);
                 dl->AddRectFilled(ImVec2(v0.x, by0), ImVec2(bx0, by1), dim);
                 dl->AddRectFilled(ImVec2(bx1, by0), ImVec2(v1.x, by1), dim);
-                // Brand-accent ring (#35c9c4 — the one accent, tokens.css).
+                // Brand-accent ring (#35c9c4 - the one accent, tokens.css).
                 dl->AddRect(ImVec2(bx0, by0), ImVec2(bx1, by1),
                             IM_COL32(53, 201, 196, 235), 3.0f, 0, 1.6f);
                 last_focus_ = FocusBox{ bx0, by0, bx1 - bx0, by1 - by0, true };
@@ -431,7 +431,7 @@ void RecorderRuntime::render_overlay(const AppContext& ctx) {
         }
     }
 
-    // ── Badge — export style (recorder_glue.cpp export_tick_and_render): the
+    // ── Badge - export style (recorder_glue.cpp export_tick_and_render): the
     //    EDGEDEPTH line only, no REC dot, no timer. This is a produced video.
 
     ImFont* f_line = Theme::Fonts::ui_semibold();
@@ -442,7 +442,7 @@ void RecorderRuntime::render_overlay(const AppContext& ctx) {
     const float pad_x = 10.0f, pad_y = 6.0f;
     const float w = pad_x + line_sz.x + pad_x;
     const float h = pad_y * 2.0f + line_sz.y;
-    // rec_focus suppresses the shell in recorder mode, so top_reserve is 0 —
+    // rec_focus suppresses the shell in recorder mode, so top_reserve is 0 -
     // but keep the same placement rule as P1/export for consistency.
     const float x = io.DisplaySize.x - w - 12.0f;
     const float y = LayoutManager::top_reserve + 10.0f;

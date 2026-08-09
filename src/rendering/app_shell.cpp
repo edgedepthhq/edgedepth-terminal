@@ -31,7 +31,7 @@
 #endif
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// app_shell.cpp — topbar + statsbar implementation
+// app_shell.cpp - topbar + statsbar implementation
 // ═══════════════════════════════════════════════════════════════════════════════
 
 namespace AppShell {
@@ -247,7 +247,7 @@ namespace {
 
     // Segmented pill group (TF, Live/Replay). Draws a subtle INPUT container;
     // the active item gets an ACTIVE fill. Renders left-to-right from the current
-    // cursor. Returns the clicked index, else -1. Widths use padx=11 each side —
+    // cursor. Returns the clicked index, else -1. Widths use padx=11 each side -
     // callers that pre-reserve space must match (CalcTextSize + 22).
     int seg_control(const char* id, const char* const items[], int count,
                     int active_idx, float h = 26.0f, ImFont* font = nullptr) {
@@ -293,7 +293,7 @@ namespace {
         return c;
     }
 
-    // The primary (first) chart widget — the topbar TF segment drives it.
+    // The primary (first) chart widget - the topbar TF segment drives it.
     ChartWidget* find_primary_chart(std::vector<std::unique_ptr<Widget>>& widgets) {
         for (auto& w : widgets)
             if (w && w->type() == WidgetType::Chart)
@@ -349,7 +349,7 @@ namespace {
         dl->PathStroke(col, 0, th);
     }
 
-    // Account dropdown — Free vs Pro, driven by Entitlements. Opened from the
+    // Account dropdown - Free vs Pro, driven by Entitlements. Opened from the
     // topbar user pill via OpenPopup("##account_menu"). Implements artboard 3a:
     // square avatar + email + plan badge, YOUR ACCESS rows (values right, accent
     // for Pro), subscription/upgrade block, then hairline-grouped actions.
@@ -392,9 +392,9 @@ namespace {
             dl->PopClipRect();
             ImGui::PopFont();
             {
-                // plan badge — Pro: solid accent block (ed-badge), Free: hairline pill
+                // plan badge - Pro: solid accent block (ed-badge), Free: hairline pill
                 ImGui::PushFont(Fonts::label());
-                // Research (and staff, who resolve to it) is a superset of Pro —
+                // Research (and staff, who resolve to it) is a superset of Pro -
                 // label it as such rather than flattening everyone to PRO.
                 const char* plan = !pro ? "FREE PLAN"
                                  : (Entitlements::current() == Entitlements::Tier::Research)
@@ -463,7 +463,7 @@ namespace {
 
             ImGui::Dummy(ImVec2(W, 6.0f));
 
-            // ── subscription status (Pro) / upgrade block (Free) — 3a ────────
+            // ── subscription status (Pro) / upgrade block (Free) - 3a ────────
             if (pro) {
                 const ImVec2 p = ImGui::GetCursorScreenPos();
                 const float bx0 = o.x + 12.0f, bx1 = o.x + W - 12.0f, bh = 36.0f, bcy = p.y + bh * 0.5f;
@@ -580,7 +580,7 @@ namespace {
         ImGui::PopStyleVar(2);
     }
 
-    // topbar text button — quiet until hovered. w=0 → auto-fit to label.
+    // topbar text button - quiet until hovered. w=0 → auto-fit to label.
     bool tb_button(const char* label, float w = 0.0f) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::HOVER);
@@ -593,7 +593,7 @@ namespace {
         return clicked;
     }
 
-    // symbol pill — coin dot + name + sub-label + caret; opens the picker
+    // symbol pill - coin dot + name + sub-label + caret; opens the picker
     void symbol_pill() {
         ImGui::PushStyleColor(ImGuiCol_Button, Tokens::INPUT);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::HOVER);
@@ -648,7 +648,7 @@ namespace {
     }
 }  // namespace
 
-    // Market header (stats strip) visibility — toggled by its close (X) button and
+    // Market header (stats strip) visibility - toggled by its close (X) button and
     // the top-bar layout menu; drives total_height() so the dockspace reclaims the
     // space when hidden. Session-scoped for v1.
     bool g_market_header_open = true;
@@ -672,7 +672,7 @@ namespace {
             g_base_asset   = g_pair.symbol;
         }
 
-        // per-symbol stats — shell keeps its own always-on subscription
+        // per-symbol stats - shell keeps its own always-on subscription
         StreamKey stats_key{g_pair, Terminal::Stream::Stats, 0};
         StreamHandler<Terminal::Stat> handler{
             .widget_ptr = &g_stats,
@@ -690,7 +690,7 @@ namespace {
         };
         ctx.stream_mgr().subscribe_stats(stats_key, handler);
 
-        // global ticker24h — 24h change/volume for the statsbar (and later,
+        // global ticker24h - 24h change/volume for the statsbar (and later,
         // the watchlist). Stays subscribed for the app lifetime.
         StreamKey ticker_key{Terminal::Pair{"binancef", "global"},
                              Terminal::Stream::Ticker24h, 0};
@@ -707,7 +707,7 @@ namespace {
 namespace {
     bool g_tweaks_open = false;   // Tweaks panel visibility (toggled by the theme icon)
 
-    // ── Timeframe model — favourites bar + grouped dropdown ─────────────────
+    // ── Timeframe model - favourites bar + grouped dropdown ─────────────────
     // Sub-minute timeframes (pro=true) are a Pro entitlement; free users see them
     // locked. Favourites (max 6) drive the inline bar; default mirrors the design.
     struct TFItem { const char* label; int sec; bool pro; };
@@ -794,7 +794,7 @@ namespace {
                                           : (fav ? "Right-click to unfavourite" : "Right-click to favourite"));
     }
 
-    // The dropdown — grouped catalogue, favourites counter, custom field.
+    // The dropdown - grouped catalogue, favourites counter, custom field.
     void render_tf_menu(ChartWidget* chart) {
         using namespace Theme;
         const int64_t cur = chart ? chart->timeframe_seconds() : 0;
@@ -904,7 +904,7 @@ namespace {
             ImGui::PopFont();
             ImGui::Dummy(ImVec2(0, 8));
 
-            // custom field + Add — bg-0 footer strip behind, top hairline (2c)
+            // custom field + Add - bg-0 footer strip behind, top hairline (2c)
             {
                 const float fy = ImGui::GetCursorScreenPos().y;
                 dl->AddRectFilled(ImVec2(win.x + 1.0f, fy), ImVec2(win.x + ww - 1.0f, fy + 45.0f),
@@ -966,7 +966,7 @@ namespace {
         float total = caretw + 1.0f;
         for (int sec : g_tf_favs) total += ImGui::CalcTextSize(tf_label(sec)).x + padx * 2.0f;
         const ImVec2 p0 = ImGui::GetCursorScreenPos();
-        // 2c favourites bar — square, bg-1 fill, line-2 hairline frame
+        // 2c favourites bar - square, bg-1 fill, line-2 hairline frame
         dl->AddRectFilled(p0, ImVec2(p0.x + total, p0.y + h), u32(Tokens::INPUT));
         dl->AddRect(p0, ImVec2(p0.x + total, p0.y + h), u32(Tokens::BD2), 0.0f, 0, 1.0f);
 
@@ -994,7 +994,7 @@ namespace {
                         u32(on ? Tokens::TX1 : (hov ? Tokens::TX1 : Tokens::TX2)), lbl);
             x += w;
         }
-        // caret cell — bg-2, line-2 left hairline, accent caret (2c)
+        // caret cell - bg-2, line-2 left hairline, accent caret (2c)
         const bool menu_open = ImGui::IsPopupOpen("##tf_menu");
         ImGui::SetCursorScreenPos(ImVec2(x, p0.y));
         if (ImGui::InvisibleButton("##tf_caret", ImVec2(caretw, h))) ImGui::OpenPopup("##tf_menu");
@@ -1043,7 +1043,7 @@ namespace {
 
         const float cy = (Layout::TOPBAR_H - 30.0f) * 0.5f;
 
-        // ── brand — D mark + edgedepth wordmark + EARLY ACCESS pill, links to
+        // ── brand - D mark + edgedepth wordmark + EARLY ACCESS pill, links to
         //    the homepage. Mirrors the web AppHeader / design-system Brand lockup:
         //    the mark reads at ~wordmark height, a 9px mark->word gap and a 12px
         //    word->pill gap, and a hairline accent pill. ──
@@ -1054,7 +1054,7 @@ namespace {
         const float word_w  = ImGui::CalcTextSize("edgedepth").x;
         const float word_fs = ImGui::GetFontSize();
         ImGui::PopFont();
-        // EARLY ACCESS pill — match the web .beta badge (small SemiBold mono +
+        // EARLY ACCESS pill - match the web .beta badge (small SemiBold mono +
         // 0.12em tracking) instead of the oversized mono_sm regular it used before.
         static const char* const kBeta = "EARLY ACCESS";
         ImGui::PushFont(Fonts::mono_xs());
@@ -1223,7 +1223,7 @@ namespace {
         }
         rx -= igap;
 
-        // drawing tools — pencil + dropdown (mirrors the left rail)
+        // drawing tools - pencil + dropdown (mirrors the left rail)
         rx -= ico; ImGui::SetCursorScreenPos(ImVec2(rx, icy));
         if (ctx.drawings) drawing::render_topbar_button(ctx.drawing_mgr());
         rx -= igap;
@@ -1263,7 +1263,7 @@ namespace {
             ctx.replayer->stop();                 // Live → exit replay, back to live
         } else if (view_clicked == 1 && !replaying) {
             // Replay always starts from a chosen PAST candle (right-click → "Replay
-            // from here") — the toggle is a status + exit control, not a way to
+            // from here") - the toggle is a status + exit control, not a way to
             // fabricate an arbitrary window. Nudge discovery of the right-click entry.
             ImGui::OpenPopup("##replay_hint");
         }
@@ -1286,7 +1286,7 @@ namespace {
 
         // (Top-bar Indicators popup removed in v2 3b; the chart toolbar owns it.
         //  The "##tb_widget" add-widget popup likewise moved to the chart toolbar
-        //  ("+ widget", beside the layers control) — see ChartWidget::render_controls.)
+        //  ("+ widget", beside the layers control) - see ChartWidget::render_controls.)
         {
             static bool show_demo = false, show_metrics = false;
             if (ImGui::BeginPopup("##tb_layout")) {
@@ -1315,7 +1315,7 @@ namespace {
 namespace {
     void render_statsbar(const AppContext& ctx) {
         using namespace Theme;
-        if (!g_market_header_open) return;   // hidden — dockspace reclaims the space
+        if (!g_market_header_open) return;   // hidden - dockspace reclaims the space
         const ImGuiViewport* vp = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(ImVec2(vp->Pos.x, vp->Pos.y + Layout::TOPBAR_H));
         ImGui::SetNextWindowSize(ImVec2(vp->Size.x, Layout::STATSBAR_H));
@@ -1480,7 +1480,7 @@ namespace {
         ImGui::PopStyleColor();
         ImGui::PopStyleVar(3);
     }
-    // ── Tweaks panel — opened by the topbar theme icon. Wires the runtime theme
+    // ── Tweaks panel - opened by the topbar theme icon. Wires the runtime theme
     // hooks: accent swatches, candle convention, density, the primary chart's
     // liq-heatmap opacity, and the liq colormap (Ember/Inferno/Magma/Viridis).
     void render_tweaks_panel(std::vector<std::unique_ptr<Widget>>& widgets) {
@@ -1580,7 +1580,7 @@ namespace {
             ImGui::SameLine(0.0f, 5.0f);
             lmap_btn("Viridis", HeatmapColormap::LiqMap::Viridis);
 
-            // WS2 A/B: Field render path — texture quad (GPU) vs per-rect (CPU).
+            // WS2 A/B: Field render path - texture quad (GPU) vs per-rect (CPU).
             // The rect path stays selectable until the texture pass is approved.
             if (ChartWidget* c = find_primary_chart(widgets)) {
                 section("LIQ FIELD RENDER");
@@ -1603,7 +1603,7 @@ namespace {
         ImGui::PopStyleColor(4);
     }
 
-    // ── Bottom status bar — owns telemetry (WS · FPS · CLOCK), off the tape ──
+    // ── Bottom status bar - owns telemetry (WS · FPS · CLOCK), off the tape ──
     // Chrome rules: 1px line-1 top border, bg-1 fill, mono micro-text. Height =
     // Layout::STATUSBAR_H (22); the dockspace + replay bar reserve it via
     // LayoutManager::status_reserve.
@@ -1630,7 +1630,7 @@ namespace {
         const float th = ImGui::GetFontSize();
         const float ty = bar_y + (Layout::STATUSBAR_H - th) * 0.5f;
 
-        // left — connection + market context
+        // left - connection + market context
         std::string sym = symbol_lc;
         for (char& c : sym) if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 32);
         char left[128];
@@ -1646,7 +1646,7 @@ namespace {
                             u32(ws_ok ? Tokens::UP : Tokens::TX4));
         dl->AddText(ImVec2(sb_x + 12.0f, ty), u32(Tokens::TX3), left);
 
-        // right — replay state + frame telemetry + interactive display zone/clock.
+        // right - replay state + frame telemetry + interactive display zone/clock.
         // The selected zone only formats the epoch; it never changes replay time.
         const bool replaying = ctx.replay_mgr().is_active();
         const float fr = ImGui::GetIO().Framerate;
@@ -1703,7 +1703,7 @@ namespace {
     // Used by the embedded event (archive) + demo (pack) chromes, which suppress
     // the native shell but still want the live terminal's status strip. Symbol +
     // connection flag are passed in because AppShell::init (which sets g_pair and
-    // subscribes stats) is intentionally skipped in those modes — its live
+    // subscribes stats) is intentionally skipped in those modes - its live
     // ticker24h subscription would leak into a historical replay.
     void render_statusbar(const AppContext& ctx, const std::string& symbol_lc, bool ws_ok) {
         draw_statusbar(ctx, symbol_lc, ws_ok);

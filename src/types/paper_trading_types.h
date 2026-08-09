@@ -1,9 +1,9 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// paper_trading_types.h — Data structures for paper trading positions & account
+// paper_trading_types.h - Data structures for paper trading positions & account
 //
 // Lean C++ structs mirroring protobuf PaperPositionUpdate / PaperAccountState.
-// No heap allocations in the hot path — strings are small (symbol, alert_type).
+// No heap allocations in the hot path - strings are small (symbol, alert_type).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include <string>
@@ -45,11 +45,11 @@ struct PaperPosition {
     // tp1_hit/tp2_hit: TP ladder rungs that have fired during the position
     // remaining_qty_pct: residual fraction (1.0 = full, 0.5 = TP1 fired @50%)
     // tp_strategy: disambiguates TP=0 cases. Values:
-    //   "trail_only"  — no fixed TP, trail handles exits (momentum strong-trend)
-    //   "tp1_only"    — single TP1 partial close
-    //   "tp1_tp2"     — TP1 + TP2 ladder
-    //   "fixed_tp"    — single TP closes 100%
-    //   "unknown"     — pre-fix historical trades
+    //   "trail_only"  - no fixed TP, trail handles exits (momentum strong-trend)
+    //   "tp1_only"    - single TP1 partial close
+    //   "tp1_tp2"     - TP1 + TP2 ladder
+    //   "fixed_tp"    - single TP closes 100%
+    //   "unknown"     - pre-fix historical trades
     bool tp1_hit              = false;
     bool tp2_hit              = false;
     double remaining_qty_pct  = 1.0;

@@ -1,13 +1,13 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// transport_emit.h — shared C++→React transport-emit mechanics.
+// transport_emit.h - shared C++→React transport-emit mechanics.
 //
 // LessonRuntime::emit_state and StudioRuntime::emit_state both push a transport
 // snapshot to the React chrome the same way: hash the DISCRETE fields (clock/progress
 // excluded) to dirty-check, re-emit the clock on a fixed cadence while playing, hold a
 // monotonic clock floor against catch-up jitter, and dispatch a CustomEvent carrying
 // the JSON. Those mechanics live here ONCE; each runtime supplies only WHICH fields it
-// hashes and WHAT JSON it builds (those genuinely differ — lesson carries steps/cards/
+// hashes and WHAT JSON it builds (those genuinely differ - lesson carries steps/cards/
 // spotlight; studio carries symbol/tf/window).
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -31,7 +31,7 @@ struct SigHasher {
 };
 
 // Clock re-anchor cadence (ms). The discrete dirty-check excludes the clock, so a long
-// steady "playing" stretch would emit once and never re-anchor React — leaving it to
+// steady "playing" stretch would emit once and never re-anchor React - leaving it to
 // dead-reckon clockMs + wall×speed open-loop and drift. Re-emit on this cadence while
 // playing so React re-anchors to the self-correcting interpolated_time_ms().
 inline constexpr double kClockEmitIntervalMs = 250.0;
@@ -39,7 +39,7 @@ inline constexpr double kClockEmitIntervalMs = 250.0;
 // Monotonic clock floor. During a steady playing stretch, hold the REPORTED clock at
 // its running max to absorb the small backward steps interpolated_time_ms() takes when
 // the backend status anchor lags the wall-time extrapolation (notably the initial
-// catch-up) — which otherwise snap the React clock 00:01→00:00 on the 250ms cadence. A
+// catch-up) - which otherwise snap the React clock 00:01→00:00 on the 250ms cadence. A
 // LARGE backward jump (a real seek/rewind) passes through and re-baselines; the floor
 // also re-baselines whenever not steadily playing (loading/seeking/paused/idle), so a
 // backward scrub that routes through Seeking is honored. Returns the clamped clock and
@@ -56,7 +56,7 @@ inline int64_t apply_clock_floor(int64_t now_ms, int64_t& floor,
     return now_ms;
 }
 
-// Emit gate: returns true if a snapshot should be sent this frame — on a discrete
+// Emit gate: returns true if a snapshot should be sent this frame - on a discrete
 // change (sig != last_sig) OR on the clock cadence while actively playing. On a true
 // return it commits last_sig + last_clock_emit_wall so the caller just builds + sends.
 inline bool should_emit(uint64_t sig, uint64_t& last_sig,

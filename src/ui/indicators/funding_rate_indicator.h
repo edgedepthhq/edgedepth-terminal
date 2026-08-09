@@ -12,7 +12,7 @@ namespace Indicators {
         return snprintf(buf, size, "%7.4f", value);
     }
 
-    // Funding Rate indicator — rendered as histogram bars (MMT-style).
+    // Funding Rate indicator - rendered as histogram bars (MMT-style).
     // Blue bars above zero = longs pay shorts (positive funding).
     // Red bars below zero = shorts pay longs (negative funding).
     // Data from Stat stream (funding field), plotted per-candle.

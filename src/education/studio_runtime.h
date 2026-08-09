@@ -1,11 +1,11 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// studio_runtime.h — Course Authoring Studio runtime (C++ side)
+// studio_runtime.h - Course Authoring Studio runtime (C++ side)
 //
 // The studio is the SAME embedded WASM terminal as the Guided Replay player, in
 // an AUTHOR mode: free scrub (no gate loop), no dim/card, and (next sub-step) a
 // draw overlay that captures chart-space target geometry back to the React
-// inspector. Unlike LessonRuntime there is NO lesson doc — the replay window is
+// inspector. Unlike LessonRuntime there is NO lesson doc - the replay window is
 // chosen in the React source picker and pushed in here as a JSON command.
 //
 // This file is the studio's analogue of LessonRuntime: a singleton driven once
@@ -13,7 +13,7 @@
 //
 // THIS SLICE: the source→replay path only. The author picks a symbol/window in
 // React; React calls __studio_cmd_set_source(jsonPtr); we enqueue it; drain()
-// (with a live AppContext) parses it and starts the replay via request_replay —
+// (with a live AppContext) parses it and starts the replay via request_replay -
 // the exact call LessonRuntime's maybe_start_lesson_replay uses, just sourced
 // from the picker instead of a doc. The draw/capture overlay lands next.
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -40,7 +40,7 @@ public:
     // Per-frame, after update(). Pushes transport state (clock/progress/paused/
     // speed/window/loading) to the React chrome via a CustomEvent('edgedepth:studio').
     // Dirty-checked on the DISCRETE fields (clock/progress excluded) so it emits on
-    // transitions, not every frame — React interpolates the clock between emits,
+    // transitions, not every frame - React interpolates the clock between emits,
     // exactly like the lesson player. Mirrors LessonRuntime::emit_state but far
     // simpler: no steps/cards/spotlight, just transport.
     void emit_state(const AppContext& ctx);
@@ -48,7 +48,7 @@ public:
     // JS → C++: the picker chose a source. The source JSON
     //   {"symbol":"btcusdt","startMs":<ms>,"endMs":<ms>,"tf":"5m"}
     // crosses via the window global __STUDIO_SOURCE__ (read inside the export's
-    // EM_ASM, same seam as EducationBoot's __EDGEDEPTH_LESSON__) — so no malloc/
+    // EM_ASM, same seam as EducationBoot's __EDGEDEPTH_LESSON__) - so no malloc/
     // stringToUTF8 needs exporting to external JS. This setter is called from that
     // export with the parsed string. Enqueued (not applied here): update(ctx)
     // drains it with a live context, the same enqueue/drain split LessonRuntime
@@ -63,7 +63,7 @@ public:
     void cmd_set_paused(bool paused);
     void cmd_set_speed(int centi_speed);
     // Seek to a fraction of the window. Progress crosses as milli-progress (int,
-    // 0..1000 = 0.0..1.0) — same int-not-float reasoning as speed. `deliberate`
+    // 0..1000 = 0.0..1.0) - same int-not-float reasoning as speed. `deliberate`
     // bypasses ReplayManager's scrubber-drag debounce: pass false for a live drag
     // (let the debounce throttle the stream), true for a discrete drop/click.
     void cmd_seek_progress(int milli_progress, bool deliberate);
@@ -84,17 +84,17 @@ public:
     // Esc cancels (emits {cancelled:true} so the inspector's arm state resets).
     void cmd_arm_capture(int mode);
     // Per-frame, from main.cpp's studio branch (after update, skipped while an
-    // export take runs — a capture overlay mid-take would burn into the video).
+    // export take runs - a capture overlay mid-take would burn into the video).
     void render_capture_overlay(const AppContext& ctx);
     bool capture_armed() const { return capture_mode_ != 0; }
 
-    // ─── Export session (CLIP_FACTORY P3-v1 — Studio "Export video") ───────
+    // ─── Export session (CLIP_FACTORY P3-v1 - Studio "Export video") ───────
     // A live-take export: the selected lesson's doc is loaded into LessonRuntime
     // (export-render mode: gates + spotlight + BURNED-IN cards, no button), the
     // replay is scrubbed to the lesson start, and once the window is primed and
     // rolling the recorder starts (canvas 30fps + the narration mic through the
     // WebAudio graph + the cam bubble composited in-render). The author narrates
-    // live and advances beats from the React footer (__edu_cmd_continue — outside
+    // live and advances beats from the React footer (__edu_cmd_continue - outside
     // the capture). Ends on: lesson end (no card up) · footer Stop · 15:00 cap ·
     // session death. StudioRuntime owns WHEN; ClipRecorder owns HOW.
     enum class ExportPhase : uint8_t { Idle, Arming, Recording, Saving, Error };
@@ -129,17 +129,17 @@ private:
     int64_t     src_start_ms_ = 0;
     int64_t     src_end_ms_   = 0;
 
-    // FNV-1a signature of the last emitted discrete state — skip re-emitting when
+    // FNV-1a signature of the last emitted discrete state - skip re-emitting when
     // nothing discrete changed (clock/progress excluded; React interpolates).
     uint64_t    emit_sig_ = 0;
 
     // Wall-clock (emscripten_get_now, ms) of the last clock-cadence emit. The
     // discrete-field gate above would emit ONCE when playback starts and then never
-    // again during a steady "playing" stretch — leaving the React transport to
+    // again during a steady "playing" stretch - leaving the React transport to
     // dead-reckon the clock open-loop (clockMs + wall×speed) with no correction,
     // which let the studio UTC readout drift ahead of the trade tape. emit_state
     // re-emits the clock on a fixed cadence while playing so React re-anchors to
-    // interpolated_time_ms() — the self-correcting value the live control bar shows.
+    // interpolated_time_ms() - the self-correcting value the live control bar shows.
     double      last_clock_emit_ms_ = 0.0;
 
     // Monotonic floor for the REPORTED replay clock during a continuous playing
@@ -147,7 +147,7 @@ private:
     // anchor momentarily lags the wall-time extrapolation (notably the initial
     // catch-up), and the 250ms re-emit turns that into a visible 00:01→00:00
     // snap-back loop on the React clock. We hold the max across emits, but allow a
-    // LARGE backward jump (a real seek/rewind) through — see emit_state.
+    // LARGE backward jump (a real seek/rewind) through - see emit_state.
     int64_t     clock_floor_ms_ = 0;
 
     // ── Draw/capture state ──────────────────────────────────────────────────
@@ -184,7 +184,7 @@ private:
     std::string  export_sym_upper_;
     int64_t      export_start_ms_ = 0;
     int64_t      export_end_ms_   = 0;
-    // Wall clock (emscripten_get_now) when Arming began — buffer-stall bailout.
+    // Wall clock (emscripten_get_now) when Arming began - buffer-stall bailout.
     double       arming_since_ms_ = 0.0;
     // Wall clock when Error was entered (decay back to Idle so the UI recovers).
     double       export_error_ms_ = 0.0;

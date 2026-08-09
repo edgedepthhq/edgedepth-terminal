@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// data_thread.cpp — Dedicated pthread for ZSTD + protobuf processing
+// data_thread.cpp - Dedicated pthread for ZSTD + protobuf processing
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "core/data_thread.h"
@@ -58,7 +58,7 @@ void DataThread::run() {
         inbound_.drain(batch);
 
         if (batch.empty()) {
-            // No work — yield briefly to avoid busy-spinning.
+            // No work - yield briefly to avoid busy-spinning.
             // 500μs is a good balance: fast enough to not add perceptible
             // latency, slow enough to not waste CPU.
             std::this_thread::sleep_for(std::chrono::microseconds(500));
@@ -81,7 +81,7 @@ void DataThread::run() {
 // ─── Main-thread drain ───────────────────────────────────────────────────────
 
 size_t DataThread::drain_dispatches(StreamManager& stream_mgr, double budget_ms) {
-    // Refill the carry buffer only when the previous batch is fully executed —
+    // Refill the carry buffer only when the previous batch is fully executed -
     // dispatch order must be preserved across budget boundaries.
     if (carry_pos_ >= carry_.size()) {
         carry_.clear();
@@ -96,7 +96,7 @@ size_t DataThread::drain_dispatches(StreamManager& stream_mgr, double budget_ms)
     while (carry_pos_ < carry_.size()) {
         carry_[carry_pos_++].execute(stream_mgr);
         ++executed;
-        // Amortize the clock read — check the budget every 16 dispatches.
+        // Amortize the clock read - check the budget every 16 dispatches.
         if (budget_ms > 0.0 && (executed & 15u) == 0) {
             const double spent = std::chrono::duration<double, std::milli>(
                 std::chrono::steady_clock::now() - t0).count();

@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// positions_panel.h — Paper trading positions, equity curve, and trade journal
+// positions_panel.h - Paper trading positions, equity curve, and trade journal
 //
 // Global panel (not per-symbol). Reads from PaperTradingManager.
 // Three tabs: Positions (active + account summary), Equity curve, Journal.

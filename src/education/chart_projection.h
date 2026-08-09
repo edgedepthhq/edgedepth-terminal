@@ -1,12 +1,12 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// chart_projection.h — per-frame snapshot of the main chart's coordinate system
+// chart_projection.h - per-frame snapshot of the main chart's coordinate system
 //
 // The lesson spotlight must project (candle index, price) → screen pixels to draw
 // its dim/cut-out/ring over the chart. ImPlot's PlotToPixels only works between
 // BeginPlot/EndPlot, so the ChartWidget publishes its plot rect + axis ranges
-// here once per frame (inside its plot scope), and the lesson overlay — which runs
-// later in the frame on the foreground draw list — reads it and does the linear
+// here once per frame (inside its plot scope), and the lesson overlay - which runs
+// later in the frame on the foreground draw list - reads it and does the linear
 // projection itself (same math as the HTML reference's xOfProgress / yOfPrice).
 //
 // Single global: there is one main price chart per page (single-symbol client).
@@ -43,7 +43,7 @@ struct ChartProjection {
     // The studio CAPTURE path needs the reverse of the two functions above: an
     // author drags a pixel box on the chart and we recover the chart-space
     // {time, price} bounds to store on the annotation. These are the exact
-    // algebraic inverses of x_of_time / y_of_price — no new state, just the same
+    // algebraic inverses of x_of_time / y_of_price - no new state, just the same
     // ranges read the other way. Pixels OUTSIDE the plot rect extrapolate
     // linearly (no clamp); the caller clamps to [x_min_ms,x_max_ms] /
     // [y_min,y_max] if it wants on-chart-only capture.

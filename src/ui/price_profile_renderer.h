@@ -7,7 +7,7 @@
 #include "implot.h"
 
 /**
- * PriceProfileRenderer — shared sidebar histogram renderer.
+ * PriceProfileRenderer - shared sidebar histogram renderer.
  *
  * Used by both the Liquidation Heatmap profile and the Volume Profile.
  * Each feature builds a vector of ProfileBand from its own data model,
@@ -72,7 +72,7 @@ struct ProfileConfig {
     float  label_min_band_height = 12.0f; // min pixels to show labels
 };
 
-// Main render function — call inside ImPlot::BeginPlot/EndPlot
+// Main render function - call inside ImPlot::BeginPlot/EndPlot
 void render_profile(
     ImDrawList* draw_list,
     const ImPlotRect& limits,
@@ -83,7 +83,7 @@ void render_profile(
     const ProfileConfig& config = {}
 );
 
-// Tooltip callback type — called when a band is hovered
+// Tooltip callback type - called when a band is hovered
 using TooltipCallback = void(*)(const ProfileBand& band, int band_index, void* user_data);
 
 void render_profile_with_tooltip(

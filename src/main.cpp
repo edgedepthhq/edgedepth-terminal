@@ -109,7 +109,7 @@ struct AppState {
     std::unique_ptr<DataThread> data_thread;
     // Message context (rebuilt on connect)
     MessageContext msg_ctx{};
-    // App context — single dependency injection point for widgets/menus
+    // App context - single dependency injection point for widgets/menus
     AppContext app_ctx{};
     std::vector<std::unique_ptr<Widget>> widgets;
     std::vector<std::string> debug_log;
@@ -190,11 +190,11 @@ static void on_ws_message(const uint8_t* data, size_t len) {
                 return;
             }
         } catch (...) {
-            // Malformed JSON — fall through to binary path
+            // Malformed JSON - fall through to binary path
         }
     }
 
-    // Binary protobuf path — route to replay or live context
+    // Binary protobuf path - route to replay or live context
     bool replay_active = g_app.replay_mgr && g_app.replay_mgr->is_active();
     bool has_replay_ctx = replay_active && g_app.replay_mgr->replay_context();
     
@@ -211,7 +211,7 @@ static void on_ws_message(const uint8_t* data, size_t len) {
         // During a client-only rewind, the drip-feed dispatches buffered data
         // at the correct pace. Incoming frames from the backend (still streaming
         // from the old position) should be captured into the history buffer
-        // but NOT routed to managers — that would mix future data with the
+        // but NOT routed to managers - that would mix future data with the
         // drip-feed's past data.
         if (g_app.replay_mgr->is_drip_feeding()) {
             // Decompress + parse to get event_ts for buffer capture
@@ -226,18 +226,18 @@ static void on_ws_message(const uint8_t* data, size_t len) {
                 int64_t ts = (event_ts > 0) ? event_ts : MessageHandler::last_timestamp_ms;
                 if (ts > 0) hist->push(ts, Terminal::Stream::Unknown, 0, data, len);
             }
-            return;  // Don't route — drip-feed handles dispatch
+            return;  // Don't route - drip-feed handles dispatch
         }
 
         // ── Backend rewind gate (out-of-buffer rewind via backend) ────────
         // When the rewind was too far back for the buffer, the backend is
         // reconnecting consumers. Drop stale frames until replay_seeked.
         if (g_app.replay_mgr->is_rewind_pending()) {
-            return;  // Stale pre-rewind data — drop
+            return;  // Stale pre-rewind data - drop
         }
 
         // During active replay, binary frames are replay data from the Replayer actor.
-        // Parse the WSPayload ONCE — used for routing and history capture.
+        // Parse the WSPayload ONCE - used for routing and history capture.
         std::string msg_data(reinterpret_cast<const char*>(data), len);
         auto decomp = MessageParser::decompress_zstd(msg_data);
         if (!decomp.success) return;
@@ -304,13 +304,13 @@ static void on_ws_status(const std::string& status) {
 
         // Embedded lesson/studio mode: the socket is still needed (replay frames
         // ride this same WS via the Replayer actor), but the LIVE auto-subscribes
-        // below are pure waste in a lesson — and ticker24h alone is ~150KB/s. Skip
+        // below are pure waste in a lesson - and ticker24h alone is ~150KB/s. Skip
         // them; a replay session is driven separately from EducationBoot's source.
         if (EducationBoot::instance().is_embedded()) {
             return;
         }
 
-        // [2026-04-24] Explicit paper trading subscribe — server no longer auto-subscribes.
+        // [2026-04-24] Explicit paper trading subscribe - server no longer auto-subscribes.
         StreamKey paper_key{
             Terminal::Pair{"binancef", "global"},
             Terminal::Stream::PaperTrading,
@@ -318,7 +318,7 @@ static void on_ws_status(const std::string& status) {
         };
         g_app.stream_mgr->send_subscribe(paper_key);
 
-        // Subscribe to global 24h ticker — always on, data is ~150KB/sec
+        // Subscribe to global 24h ticker - always on, data is ~150KB/sec
         // TODO: make on-demand once confirmed working
         StreamKey ticker24h_key{
             Terminal::Pair{"binancef", "global"},
@@ -327,7 +327,7 @@ static void on_ws_status(const std::string& status) {
         };
         g_app.stream_mgr->send_subscribe(ticker24h_key);
 
-        // HL 24h ticker — the venue-parameterized global feed (ticker24h.hl.global,
+        // HL 24h ticker - the venue-parameterized global feed (ticker24h.hl.global,
         // ~0.7KB/sec). Always-on so the statsbar + picker LAST/24H%/VOLUME stay live
         // whichever venue is active. Keyed by exchange in TickerManager.
         StreamKey ticker24h_hl_key{
@@ -437,7 +437,7 @@ void check_initialization() {
     const Terminal::Pair pair{g_initial_route.exchange, g_initial_route.symbol};
 
     // Pack mode boots with NO WebSocket (the .edpack + metadata fetch are the
-    // only network I/O — the box stays out of the per-viewer loop), so init
+    // only network I/O - the box stays out of the per-viewer loop), so init
     // proceeds on the pack path without a socket.
     const bool comms_ready =
         (g_app.ws_client && g_app.ws_client->is_connected()) ||
@@ -446,7 +446,7 @@ void check_initialization() {
         // Wait for metadata to load, but don't wait forever.
         // localStorage cache makes this instant on repeat visits.
         // On first-ever visit, the fetch() takes ~100-300ms.
-        // 120 frames ≈ 2 seconds at 60fps — generous timeout.
+        // 120 frames ≈ 2 seconds at 60fps - generous timeout.
         bool metadata_ready = SymbolRegistry::instance().is_loaded();
         if (!metadata_ready && metadata_wait_frames < 120) {
             metadata_wait_frames++;
@@ -454,7 +454,7 @@ void check_initialization() {
         }
         const auto* meta = SymbolRegistry::instance().get(pair.exchange, pair.symbol);
         double tick_size = meta ? meta->tick_size : 0.01;
-        // In embedded lesson mode the replay is the ONLY data source — skip the
+        // In embedded lesson mode the replay is the ONLY data source - skip the
         // live initial candle load (otherwise the chart floods with current
         // market data before the replay swaps in). The replay session populates
         // candles for the lesson window via the normal pipeline.
@@ -468,7 +468,7 @@ void check_initialization() {
             tick_size
         ));
         // The native shell (topbar + stats strip) is suppressed in embedded
-        // lesson mode (React owns it), so skip its init too — it subscribes the
+        // lesson mode (React owns it), so skip its init too - it subscribes the
         // global ticker24h feed, which would be a live leak in a replay lesson.
         // Pack mode also skips it: no WS means the strip would render empty.
         if (!EducationBoot::instance().is_embedded() &&
@@ -489,7 +489,7 @@ void check_initialization() {
                 EducationBoot::instance().is_pack()) {
                 // Lesson layout: the chart (already created above) carries the
                 // heatmap; the right side is the Order Flow read (DOM ladder +
-                // tape). NO Watchlist, NO separate Depth/Orderbook widget — a
+                // tape). NO Watchlist, NO separate Depth/Orderbook widget - a
                 // lesson is a focused single-symbol study, not a scanning desk.
                 // Pack (/demo) mode uses the same focused set: the watchlist is
                 // a live-data widget and there is no WS in a pack session.
@@ -500,7 +500,7 @@ void check_initialization() {
                     pair, g_app.app_ctx, fmt
                 ));
             } else {
-                // Phase E: Depth (OrderbookWidget) is no longer docked by default —
+                // Phase E: Depth (OrderbookWidget) is no longer docked by default -
                 // the right column is the Order Flow read (DOM ladder + tape). Depth
                 // stays available on demand via the +Widget menu.
                 g_app.widgets.push_back(std::make_unique<DOMWidget>(
@@ -522,8 +522,8 @@ void check_initialization() {
 
 // Embedded lesson mode: start the replay for the lesson's window exactly once,
 // as soon as BOTH the terminal is initialized AND the lesson doc has parsed.
-// These race — the lesson arrives via async XHR that can land before or after
-// check_initialization — so this is a standalone per-frame latch rather than
+// These race - the lesson arrives via async XHR that can land before or after
+// check_initialization - so this is a standalone per-frame latch rather than
 // inlined in check_initialization (where it would miss if the doc came later).
 void pause_live_for_historical_replay() {
     if (g_app.stream_mgr) {
@@ -562,7 +562,7 @@ void maybe_start_lesson_replay() {
 // uses the archive session path (request_archive_replay → POST
 // /replay/session/archive → join). The backend resolves event_id → archive_path
 // and streams the event window. Transport is owned by the React EventReplayBar
-// (event mode is now is_embedded(), so the native control bar is suppressed) —
+// (event mode is now is_embedded(), so the native control bar is suppressed) -
 // EventRuntime mirrors this session's state to it. seekToStart is implicit: the
 // archive plays from the start of the event window.
 void maybe_start_event_replay() {
@@ -585,7 +585,7 @@ void maybe_start_event_replay() {
 
 // Pack (CDN .edpack) replay: start exactly once, as soon as the terminal is
 // initialized. Mirrors maybe_start_event_replay but there is no session POST
-// and no WebSocket — ReplayManager::request_pack_replay boots the
+// and no WebSocket - ReplayManager::request_pack_replay boots the
 // PackReplayEngine, which fetches the pack header and drives the same replay
 // state machine (Hot Replay Path B, slice 2).
 void maybe_start_pack_replay() {
@@ -707,8 +707,8 @@ void tick_session_usage(double dt_seconds, bool document_visible) {
 // __EDGEDEPTH_PACK__.seekToMs via EventRuntime's one-shot deep-link seek, but
 // EventRuntime never runs standalone. Mirror the exact same contract here:
 // ONE deliberate ReplayManager::seek once the session is live and primed
-// (Playing or Paused — joined AND past the buffering gate) so the chart's
-// re-request cascade and the seeded book behave identically to a user seek —
+// (Playing or Paused - joined AND past the buffering gate) so the chart's
+// re-request cascade and the seeded book behave identically to a user seek -
 // then the latch closes.
 void maybe_apply_pack_start_at() {
     static bool done = false;
@@ -724,7 +724,7 @@ void maybe_apply_pack_start_at() {
     // Buffering-only), firing the seek before the engine had a session to serve.
     if (rm.state() != ReplayManager::State::Playing &&
         rm.state() != ReplayManager::State::Paused) {
-        return;  // not primed yet — retry next frame
+        return;  // not primed yet - retry next frame
     }
     const int64_t start = rm.info().start_time_ms;
     const int64_t end   = rm.info().end_time_ms;
@@ -735,10 +735,10 @@ void maybe_apply_pack_start_at() {
 
 // ── Lesson loading gate ──────────────────────────────────────────────────────
 // The actual clock-hold now lives in ReplayManager::tick_buffering_gate() so it
-// applies to EVERY replay (lessons AND the live terminal's "replay from here") —
+// applies to EVERY replay (lessons AND the live terminal's "replay from here") -
 // no replay starts ticking against empty buffers. Here we only mirror that into
 // g_lesson_loading so the lesson canvas spinner + the React 'loading' emit track
-// it. (Trades aren't a separate manager; candles+OB is the readiness bar — see
+// it. (Trades aren't a separate manager; candles+OB is the readiness bar - see
 // ReplayManager::context_primed.)
 bool g_lesson_loading = false;
 
@@ -757,7 +757,7 @@ void tick_lesson_loading_gate() {
         state == ReplayManager::State::Seeking;
 }
 
-// Canvas loading overlay — masks the empty-chart window while the lesson holds
+// Canvas loading overlay - masks the empty-chart window while the lesson holds
 // the clock. Drawn on the foreground draw list so it sits above all widgets.
 // A later React chrome can show its own polished overlay (driven by the emitted
 // 'loading' flag); this is the zero-gap, no-dependency canvas fallback.
@@ -831,7 +831,7 @@ void render_historical_replay_error_overlay() {
 void update_and_render_widgets() {
     // Drain queued dispatches from data thread → fire widget callbacks on main
     // thread. TIME-BUDGETED: ingest storms (replay catch-up, reconnect bursts)
-    // used to execute unbounded in one frame — the classic 90-FPS dip. The
+    // used to execute unbounded in one frame - the classic 90-FPS dip. The
     // remainder stays queued in order and resumes next frame.
     static constexpr double DISPATCH_BUDGET_MS = 3.0;
     if (g_app.data_thread && g_app.data_thread->is_running()) {
@@ -858,15 +858,15 @@ void update_and_render_widgets() {
         widget->update();
     }
     g_profiler.end("WidgetsUpd");
-    // REC focus layout: don't SUBMIT the watchlist while a focused clip records —
+    // REC focus layout: don't SUBMIT the watchlist while a focused clip records -
     // its dock node collapses and the chart takes the width; on stop the window
     // re-docks into its remembered node. (Render-skip only: the widget object,
-    // subscriptions and is_open are untouched — is_open=false would ERASE it.)
+    // subscriptions and is_open are untouched - is_open=false would ERASE it.)
     const bool rec_focus_widgets = ClipRecorder::focus_active() ||
                                    edu::RecorderRuntime::instance().active();
     for (const auto& widget: g_app.widgets) {
         if (rec_focus_widgets && widget->type() == WidgetType::Watchlist) continue;
-        // Per-widget render timing — labels by widget type so the once/sec
+        // Per-widget render timing - labels by widget type so the once/sec
         // console profile shows exactly where frame time goes.
         const char* sec = "Widget";
         switch (widget->type()) {
@@ -888,11 +888,11 @@ void update_and_render_widgets() {
 }
 
 
-// (render_replay_overlay removed — the amber full-viewport border + top-left
+// (render_replay_overlay removed - the amber full-viewport border + top-left
 //  REPLAY badge were redundant with the restyled control bar + topbar indicator.)
 
 // ── Embedded-mode canvas sizing ───────────────────────────────────────────────
-// In the Next host (/studio, /lesson) the canvas is NOT the full window — it lives
+// In the Next host (/studio, /lesson) the canvas is NOT the full window - it lives
 // in a flex box (symbol tree + inspector around it). Polling window.innerWidth
 // there is wrong on two counts: (1) ImGui lays the dock out over a virtual
 // full-window space, so the right column (DOM/Depth) lands off-screen right; and
@@ -937,7 +937,7 @@ static void apply_embedded_viewport(int css_w, int css_h, double dpr) {
     SDL_SetWindowSize(g_app.window, css_w, css_h);
 
     // SDL_SetWindowSize reset the canvas backing buffer to the logical size (no
-    // dpr), so re-apply the dpr scale for a crisp hi-dpi render — exactly what the
+    // dpr), so re-apply the dpr scale for a crisp hi-dpi render - exactly what the
     // standalone path does. This is the SAME value TerminalEmbed's ResizeObserver
     // sets (CSS box × dpr), so the two don't fight: writing the width/height attrs
     // can't re-trigger the RO (it observes the CSS box, not the attrs). The old bug
@@ -973,7 +973,7 @@ void main_loop() {
     static auto last_frame = std::chrono::steady_clock::now();
     auto now = std::chrono::steady_clock::now();
 
-    // Record frame time for percentile tracking (interval between loop entries —
+    // Record frame time for percentile tracking (interval between loop entries -
     // includes browser idle between rAF ticks; what the FPS counter reflects)
     float frame_ms = std::chrono::duration<float, std::milli>(now - last_frame).count();
     g_frame_tracker.record(frame_ms);
@@ -1008,7 +1008,7 @@ void main_loop() {
         }
     } else {
         // Standalone terminal: the canvas IS the full window and there's no React
-        // ResizeObserver — poll innerWidth at ~10Hz and own the backing buffer.
+        // ResizeObserver - poll innerWidth at ~10Hz and own the backing buffer.
         static double last_viewport_poll = 0.0;
         const double t_now = ImGui::GetTime();
         if (t_now - last_viewport_poll >= 0.1) {
@@ -1068,7 +1068,7 @@ void main_loop() {
     // perf overlay + app shell (below) + watchlist (update_and_render_widgets) so
     // the capture frames chart+DOM+tape only. Everything returns on stop.
     // Recorder mode (CLIP_FACTORY P2) takes the same chrome-free path for the
-    // whole session — the harness captures the X display, so the shell/status
+    // whole session - the harness captures the X display, so the shell/status
     // bar must never enter a frame.
     const bool rec_focus = ClipRecorder::focus_active() ||
                            edu::RecorderRuntime::instance().active();
@@ -1095,7 +1095,7 @@ void main_loop() {
     // Native fixed chrome (topbar + stats strip). In embedded lesson mode the
     // React host owns the top nav + chart-header strip, so skip the ImGui shell
     // and give the dockspace the full height (no top reserve). Same branch while
-    // a focused clip records — the shell must not be in the capture.
+    // a focused clip records - the shell must not be in the capture.
     g_profiler.begin("Shell+Dock");
     // Pack mode never ran AppShell::init (no WS → empty strip), so it takes
     // the no-shell branch even though it renders the native transport bar.
@@ -1109,7 +1109,7 @@ void main_loop() {
     if (full_shell) {
         LayoutManager::top_reserve    = AppShell::total_height();
         LayoutManager::status_reserve = Theme::Layout::STATUSBAR_H;  // bottom telemetry bar
-        // Drawing rail moved INTO ChartWidget (2026-08-06) — no left reserve.
+        // Drawing rail moved INTO ChartWidget (2026-08-06) - no left reserve.
         LayoutManager::left_reserve   = 0.0f;
         AppShell::render(g_app.widgets, g_app.app_ctx);
         drawing::render_style_editor(g_app.app_ctx);
@@ -1142,7 +1142,7 @@ void main_loop() {
     }
     if (g_app.replay_mgr) {
         // Pack engine first: it processes fetch responses, serves queued
-        // candle requests, and drips due frames — the gate + skip logic below
+        // candle requests, and drips due frames - the gate + skip logic below
         // then observe the freshest state (no-op outside pack mode).
         g_app.replay_mgr->tick_pack_engine();
         g_app.replay_mgr->tick_buffering_gate();
@@ -1155,11 +1155,11 @@ void main_loop() {
         g_profiler.end("Drip");
         // A drawing-tool Esc (cancel placement/deselect, consumed by the chart's
         // DrawingLayer during the widget pass above) must not ALSO stop a
-        // running replay — the replay Esc handler reads the raw key.
+        // running replay - the replay Esc handler reads the raw key.
         if (!g_app.drawing_mgr ||
             !g_app.drawing_mgr->escape_consumed(ImGui::GetFrameCount()))
             g_app.replay_mgr->process_keyboard_shortcuts();
-        // In embedded lesson mode the React chrome owns the transport — don't
+        // In embedded lesson mode the React chrome owns the transport - don't
         // render the native ImGui control bar (it would stack under the React one).
         if (!EducationBoot::instance().is_embedded()) {
             g_app.replay_mgr->render_control_bar();
@@ -1167,12 +1167,12 @@ void main_loop() {
         }
         // Clip recorder (CLIP_FACTORY P1): authoritative 3:00 cap, auto-stop when
         // the replay session dies, and the burned-in watermark badge (foreground
-        // draw list). No-op unless recording — and v1 recordings can only start
+        // draw list). No-op unless recording - and v1 recordings can only start
         // from the native transport bar, so embedded lesson/studio never record.
         ClipRecorder::tick_and_render(g_app.replay_mgr->is_active());
     }
     // The upsell modal is the ONE funnel every free-tier gate routes into (locked
-    // range/preset/speed/symbol/layer pill, TIER_* server errors, login prompts) —
+    // range/preset/speed/symbol/layer pill, TIER_* server errors, login prompts) -
     // render it in ALL host modes so a gate hit anywhere reaches the same surface.
     ui::UpsellModal::instance().render();
     // The floating "Investigate this minute" reader (right-click on a chart).
@@ -1181,13 +1181,13 @@ void main_loop() {
     ui::ResearchMomentPanel::instance().render();
     // (Replay is signaled by the restyled bottom control bar + the topbar REPLAY
     //  indicator. The old full-viewport amber border + top-left REPLAY badge were
-    //  redundant with those, so they've been removed — see render_replay_overlay's
+    //  redundant with those, so they've been removed - see render_replay_overlay's
     //  deletion.)
 
     // Education runtimes. Lesson mode: gate the playhead + draw the spotlight +
     // emit state. Studio mode: free scrub (no gate) + drain the picker's source
     // into a replay (+ draw/capture overlay, next slice). They are mutually
-    // exclusive — one host chrome per mount.
+    // exclusive - one host chrome per mount.
     if (EducationBoot::instance().is_lesson()) {
         edu::LessonRuntime::instance().update(g_app.app_ctx);
         edu::LessonRuntime::instance().render_overlay(g_app.app_ctx);
@@ -1200,7 +1200,7 @@ void main_loop() {
         edu::StudioRuntime::instance().update(g_app.app_ctx);
         // Export session (CLIP_FACTORY P3-v1): while the studio exports a lesson,
         // the LessonRuntime drives the gate loop and burns the spotlight + cards
-        // into the canvas (export-render mode — native card, no button). Outside
+        // into the canvas (export-render mode - native card, no button). Outside
         // an export the studio stays a free scrub with no lesson gates.
         if (edu::StudioRuntime::instance().export_session_active()) {
             edu::LessonRuntime::instance().update(g_app.app_ctx);
@@ -1225,9 +1225,9 @@ void main_loop() {
         // Event = embedded archive replay; embedded Pack (/demo) reuses the SAME
         // chrome against the pack engine. The React EventReplayShell owns the chrome
         // + transport; EventRuntime mirrors the replay transport state to it
-        // (edgedepth:event) and drains its seek/pause/speed commands — all through
+        // (edgedepth:event) and drains its seek/pause/speed commands - all through
         // ReplayManager, which routes to the box session (event) or the pack engine
-        // (pack) identically. No gate loop, no spotlight — the key_moments rail is
+        // (pack) identically. No gate loop, no spotlight - the key_moments rail is
         // built on the web (EventRecord / showcase catalog).
         edu::EventRuntime::instance().update(g_app.app_ctx);
         edu::EventRuntime::instance().emit_state(g_app.app_ctx);
@@ -1236,7 +1236,7 @@ void main_loop() {
         render_lesson_loading_overlay();
         render_historical_replay_error_overlay();
     }
-    // Recorder driver (CLIP_FACTORY P2) — ORTHOGONAL to the session mode: layered
+    // Recorder driver (CLIP_FACTORY P2) - ORTHOGONAL to the session mode: layered
     // over whichever event/pack replay booted above, it walks the injected
     // RecorderScript's shots[] against ReplayManager (skip/seek/speed/tf/hold),
     // emits progress to the render harness (CustomEvent 'edgedepth:recorder'),
@@ -1269,7 +1269,7 @@ void main_loop() {
     g_profiler.begin("SwapWindow");
     SDL_GL_SwapWindow(g_app.window);
     g_profiler.end("SwapWindow");
-    // CPU time of THIS frame (loop entry → here) — drives spike attribution.
+    // CPU time of THIS frame (loop entry → here) - drives spike attribution.
     const double frame_cpu_ms = std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now() - now).count();
     g_profiler.end_frame(frame_cpu_ms);
@@ -1279,7 +1279,7 @@ void main_loop() {
 extern "C" {
     // Set the primary chart's timeframe (seconds). Called by the embedded host
     // (lesson Explore / studio) via Module.__set_chart_timeframe. Runs on the main
-    // thread between frames — same change_timeframe path the live topbar uses.
+    // thread between frames - same change_timeframe path the live topbar uses.
     EMSCRIPTEN_KEEPALIVE
     void _set_chart_timeframe(int sec) {
         if (sec <= 0) return;
@@ -1292,7 +1292,7 @@ extern "C" {
 
     EMSCRIPTEN_KEEPALIVE
     void on_popstate() {
-        // Embedded in the Next host: Next owns navigation. Do nothing — a
+        // Embedded in the Next host: Next owns navigation. Do nothing - a
         // reload here would tear down the React route and the canvas with it.
         if (EducationBoot::instance().is_embedded()) return;
 
@@ -1308,7 +1308,7 @@ extern "C" {
     // Pushed by TerminalEmbed's ResizeObserver with the canvas CSS box (logical px)
     // + milli-dpr (1000 = 1.0×). dpr crosses as an INT to dodge the f64→f32
     // mis-marshal that bit the lesson speed command (see _edu_cmd_set_speed). This
-    // only RECORDS the size — main_loop applies it (never touch ImGui/SDL from a JS
+    // only RECORDS the size - main_loop applies it (never touch ImGui/SDL from a JS
     // callback that lands mid-frame). Mirrors the _edu_cmd_* deferral.
     EMSCRIPTEN_KEEPALIVE
     void _edu_set_viewport(int css_w, int css_h, int milli_dpr) {
@@ -1368,7 +1368,7 @@ int main(int, char**) {
     g_app.heatmap_mgr = std::make_unique<HeatmapManager>();
     g_app.liq_heatmap_mgr = std::make_unique<LiquidationHeatmapManager>();
     // Detect embedded education mode (window.__EDGEDEPTH_LESSON__) BEFORE any
-    // URL writes — when hosted inside the Next app, Next owns the URL and the
+    // URL writes - when hosted inside the Next app, Next owns the URL and the
     // client must not pushState over it (see EducationBoot).
     EducationBoot::instance().detect();
     // Read the signed-in user's plan (window.__EDGEDEPTH_TIER__) once, for replay
@@ -1378,7 +1378,7 @@ int main(int, char**) {
     // named zones and historical DST; no epoch or replay state changes here.
     DisplayTimeZone::instance().initialize();
     // Recorder script (CLIP_FACTORY P2): inline in the window global, so it
-    // parses synchronously right here — no fetch, no ready-latch. On a parse
+    // parses synchronously right here - no fetch, no ready-latch. On a parse
     // failure the runtime stays inert and the boot is a plain event/pack replay.
     if (EducationBoot::instance().has_recorder_script()) {
         edu::RecorderRuntime::instance().load(EducationBoot::instance().recorder_json());
@@ -1391,7 +1391,7 @@ int main(int, char**) {
     }
     // Studio mode: the picker already chose the symbol (carried in the studio
     // global, read by EducationBoot::detect). Use it as the initial route so the
-    // widgets + dock layout build for the RIGHT symbol at boot — the client has no
+    // widgets + dock layout build for the RIGHT symbol at boot - the client has no
     // in-place symbol switch, so the symbol must be correct from frame one (a
     // different symbol = a fresh canvas mount, driven by the studio shell).
     if (EducationBoot::instance().is_studio() &&
@@ -1406,7 +1406,7 @@ int main(int, char**) {
         !EducationBoot::instance().event_symbol().empty()) {
         g_initial_route.symbol = EducationBoot::instance().event_symbol();
     }
-    // Pack (CDN replay) mode: same rule as event mode — widgets + dock layout
+    // Pack (CDN replay) mode: same rule as event mode - widgets + dock layout
     // must build for the pack's symbol from frame one. The replay itself is
     // started from maybe_start_pack_replay().
     if (EducationBoot::instance().is_pack() &&
@@ -1423,7 +1423,7 @@ int main(int, char**) {
     }
 
     // Lesson mode: fetch the LessonDoc (credentialed → paywalled) so the replay
-    // runtime can consume it. Lesson-only — studio has no doc (picker-driven) and
+    // runtime can consume it. Lesson-only - studio has no doc (picker-driven) and
     // event has no doc (the archive id + window ride __EDGEDEPTH_EVENT__), and
     // is_embedded() now covers both, so gate on is_lesson() specifically.
     if (EducationBoot::instance().is_lesson()) {
@@ -1442,7 +1442,7 @@ int main(int, char**) {
     {
         Menu::g_symbol_picker.active_symbol = g_initial_route.symbol;
         Menu::g_symbol_picker.active_exchange = g_initial_route.exchange;
-        // Build display label — uppercase base, try registry first
+        // Build display label - uppercase base, try registry first
         std::string sym = g_initial_route.symbol;
         std::transform(sym.begin(), sym.end(), sym.begin(),
             [](unsigned char c) { return std::toupper(c); });
@@ -1477,7 +1477,7 @@ int main(int, char**) {
     // Start data thread with the fully-built context
     g_app.data_thread->start(g_app.msg_ctx);
 
-    // Pack mode: NO WebSocket at all — the pack + symbol metadata are the only
+    // Pack mode: NO WebSocket at all - the pack + symbol metadata are the only
     // network I/O, so N viewers cost the box zero streaming sessions.
     if (!EducationBoot::instance().is_pack()) {
         connect_websocket();
@@ -1544,12 +1544,12 @@ int main(int, char**) {
 
                 auto trades_w = std::make_unique<TradesWidget>(replay_pair, g_app.app_ctx, fmt);
                 trades_w->is_replay_widget = true;
-                // No title suffix — inherit live widget's dock position via same ImGui window name
+                // No title suffix - inherit live widget's dock position via same ImGui window name
                 g_app.widgets.push_back(std::move(trades_w));
 
                 auto dom_w = std::make_unique<DOMWidget>(replay_pair, g_app.app_ctx, dom_tick, 20);
                 dom_w->is_replay_widget = true;
-                // No title suffix — inherit live widget's dock position via same ImGui window name
+                // No title suffix - inherit live widget's dock position via same ImGui window name
                 g_app.widgets.push_back(std::move(dom_w));
             }
         } else {
@@ -1596,12 +1596,12 @@ int main(int, char**) {
         if (replay_ctx && replay_ctx->debug) {
             replay_ctx->debug->clear_entries();
         }
-        // WS4 Observed markers: drop @forceOrder events past the rewind target —
+        // WS4 Observed markers: drop @forceOrder events past the rewind target -
         // they're the replay's future now (would paint ahead of the playback head).
         if (replay_ctx && replay_ctx->liq_heatmaps) {
             replay_ctx->liq_heatmaps->trim_observed_after(cutoff_ms);
         }
-        // Indicator SeriesCache (VPIN et al): same rule — points past the
+        // Indicator SeriesCache (VPIN et al): same rule - points past the
         // rewind target are the replay's future; idempotent re-delivery
         // from the buffer refills up to the head.
         if (replay_ctx && replay_ctx->series) {
@@ -1673,7 +1673,7 @@ SDL_GL_MakeCurrent(g_app.window, g_app.gl_context);
             canvas.focus();
         });
     });
-    // Clip recorder support probe — once at boot. Negotiates the MediaRecorder
+    // Clip recorder support probe - once at boot. Negotiates the MediaRecorder
     // container (vp9 → vp8 → webm → mp4); a failed probe renders the transport's
     // record button disabled instead of letting a click fail silently.
     ClipRecorder::probe_support();
@@ -1684,7 +1684,7 @@ SDL_GL_MakeCurrent(g_app.window, g_app.gl_context);
         main_loop();
     }
 #endif
-    // Cleanup — unique_ptrs auto-destroy, just clear widgets first
+    // Cleanup - unique_ptrs auto-destroy, just clear widgets first
     g_app.widgets.clear();
     if (g_app.ws_client) {
         g_app.ws_client->disconnect();

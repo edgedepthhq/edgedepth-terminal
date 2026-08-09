@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// data_context.cpp — Factory for replay DataContext instances
+// data_context.cpp - Factory for replay DataContext instances
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "data_context.h"
@@ -37,7 +37,7 @@ DataContext DataContext::create_replay_context(
     ctx.owned_streams = std::make_unique<StreamManager>(ws_handle);
     ctx.streams = ctx.owned_streams.get();
     ctx.streams->set_replay_mode(true);  // Don't send subscribe/unsubscribe to server
-    // Stateless managers — default constructors
+    // Stateless managers - default constructors
     ctx.owned_orderbooks = std::make_unique<OrderbookManager>();
     ctx.owned_orderbooks->set_replay_mode(true);  // post-event crossing resolution on archived depth
     ctx.orderbooks = ctx.owned_orderbooks.get();
@@ -57,7 +57,7 @@ DataContext DataContext::create_replay_context(
     ctx.owned_footprint = std::make_unique<FootprintManager>();
     ctx.footprint = ctx.owned_footprint.get();
 
-    // Fresh SeriesCache per replay — the fetchVPINTimeline seed fills it at
+    // Fresh SeriesCache per replay - the fetchVPINTimeline seed fills it at
     // original timestamps; the live cache stays intact for replay exit.
     ctx.owned_series = std::make_unique<IndicatorSeriesManager>();
     ctx.series = ctx.owned_series.get();
@@ -78,13 +78,13 @@ DataContext DataContext::create_replay_context(
         ctx.candles->mark_ready_for_replay();
         ctx.candles->set_replay_time(start_time_ms);
         // Request historical candles UP TO the replay start time.
-        // This gives the chart visual context — the candles BEFORE the replay point.
+        // This gives the chart visual context - the candles BEFORE the replay point.
         // Uses the live WS handle to send the request to the server.
         ctx.streams->request_candles_before(
             primary_pair, default_timeframe_sec, start_time_ms,
             CandleManager::INITIAL_PRELOAD_CANDLES);
         // Scrub-preview store (ghost candles): fetch the FULL replay window in
-        // one async batch on its dedicated stream. Non-gating — context_primed
+        // one async batch on its dedicated stream. Non-gating - context_primed
         // never waits on it; the ghost pass simply stays empty until it lands.
         // The server resolves the window from its own session state, so the
         // request carries only pair + timeframe. Re-fetched on TF change by

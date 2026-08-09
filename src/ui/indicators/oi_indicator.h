@@ -16,7 +16,7 @@ namespace Indicators {
         else                      return snprintf(buf, size, "%.1f",  value);
     }
 
-    // Open Interest indicator — rendered as OHLC candlesticks.
+    // Open Interest indicator - rendered as OHLC candlesticks.
     // Green candle = OI increased (open < close), Red = OI decreased.
     // Body = open/close of OI per candle period.
     // Wicks = intra-candle OI high/low (tracked via stat stream updates).

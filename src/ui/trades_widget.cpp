@@ -31,14 +31,14 @@ TradesWidget::~TradesWidget() {
 void TradesWidget::handle_trade(const Terminal::Trade& trade) {
     const size_t slot = trade_count_ % MAX_TRADES;
     trades_[slot] = trade;
-    // Format ONCE at insert — trades are immutable (see RowText).
+    // Format ONCE at insert - trades are immutable (see RowText).
     RowText& txt = row_text_[slot];
     snprintf(txt.price, sizeof(txt.price), fmt_.price_fmt, trade.price);
     snprintf(txt.qty, sizeof(txt.qty), fmt_.qty_fmt, trade.qty);
     format_trade_time(slot);
     formatted_time_zone_generation_ = DisplayTimeZone::instance().generation();
     trade_count_++;
-    // Rolling qty EMA for "big print" detection (slow alpha — stable baseline)
+    // Rolling qty EMA for "big print" detection (slow alpha - stable baseline)
     qty_ema_ = (qty_ema_ <= 0.0) ? trade.qty : qty_ema_ * 0.98 + trade.qty * 0.02;
 }
 
@@ -100,12 +100,12 @@ void TradesWidget::calculate_statistics() {
 }
 
 void TradesWidget::render_header() {
-    // Minimal header — just trade count
+    // Minimal header - just trade count
     ImGui::Text("%zu trades", std::min(trade_count_, MAX_TRADES));
 }
 
 void TradesWidget::render_table() {
-    // .tape-* — mono numerics, hairline-free dense rows, micro-label header
+    // .tape-* - mono numerics, hairline-free dense rows, micro-label header
     ImGui::PushFont(Theme::Fonts::mono_sm());
     const float row_h = 18.0f;
     const float pad_y = std::max(0.0f, (row_h - ImGui::GetFontSize()) * 0.5f);
@@ -123,7 +123,7 @@ void TradesWidget::render_table() {
     ImGui::TableSetupColumn("TIME",  ImGuiTableColumnFlags_WidthFixed, 72.0f);
     ImGui::TableSetupScrollFreeze(0, 1);
 
-    // Custom header — uppercase micro-labels, TX4 (PRICE left, QTY/TIME right)
+    // Custom header - uppercase micro-labels, TX4 (PRICE left, QTY/TIME right)
     {
         ImGui::TableNextRow(ImGuiTableRowFlags_Headers, 20.0f);
         ImGui::PushFont(Theme::Fonts::label());
@@ -159,7 +159,7 @@ void TradesWidget::render_table() {
 void TradesWidget::render_trade_row(const Terminal::Trade& trade, const RowText& txt) {
     ImGui::TableNextRow(ImGuiTableRowFlags_None, 18.0f);
 
-    // Outsized print — brand-soft wash (design: .tape-row.big)
+    // Outsized print - brand-soft wash (design: .tape-row.big)
     if (qty_ema_ > 0.0 && trade.qty > qty_ema_ * 8.0) {
         ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0,
                                Theme::u32(Theme::Tokens::BRAND_SOFT));
@@ -167,11 +167,11 @@ void TradesWidget::render_trade_row(const Terminal::Trade& trade, const RowText&
 
     const ImVec4& side = trade.is_buy ? Theme::Tokens::UP : Theme::Tokens::DOWN;
 
-    // PRICE — sign-colored, left
+    // PRICE - sign-colored, left
     ImGui::TableSetColumnIndex(0);
     ImGui::TextColored(side, "%s", txt.price);
 
-    // QTY — sign-colored, right
+    // QTY - sign-colored, right
     ImGui::TableSetColumnIndex(1);
     {
         const float w = ImGui::GetContentRegionAvail().x;
@@ -180,7 +180,7 @@ void TradesWidget::render_trade_row(const Terminal::Trade& trade, const RowText&
         ImGui::TextColored(side, "%s", txt.qty);
     }
 
-    // TIME — TX4, right
+    // TIME - TX4, right
     ImGui::TableSetColumnIndex(2);
     {
         const float w = ImGui::GetContentRegionAvail().x;

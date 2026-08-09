@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// ticker_manager.h — Live 24h ticker data for all symbols
+// ticker_manager.h - Live 24h ticker data for all symbols
 //
 // Receives protobuf Ticker24hUpdate from the DataThread.
 // Used by the symbol picker for live price + 24h% display and sorting.
@@ -34,7 +34,7 @@ public:
 
     // Read a single ticker keyed by (exchange, symbol). Case-insensitive on the
     // symbol: HL symbols are UPPERCASE ("ACE"), binancef lowercase ("btcusdt"), and
-    // the map is keyed by lowercased symbol (make_key) — so callers can pass either.
+    // the map is keyed by lowercased symbol (make_key) - so callers can pass either.
     const TickerEntry* get(const std::string& exchange, const std::string& symbol) const {
         auto it = tickers_.find(make_key(exchange, symbol));
         return it != tickers_.end() ? &it->second : nullptr;

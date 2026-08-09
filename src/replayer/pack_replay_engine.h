@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// pack_replay_engine.h — Client-side .edpack replay (Hot Replay Path B, slice 2)
+// pack_replay_engine.h - Client-side .edpack replay (Hot Replay Path B, slice 2)
 //
 // Plays a self-contained replay pack served static from R2/CDN with the box
 // fully out of the per-viewer loop: no session POST, no WebSocket, no token
@@ -10,21 +10,21 @@
 //   - frames: the pack's [ts, stream, timeframe, payload] records ARE the
 //     WSPayload frames the box streams for archive replay. The engine wraps
 //     each in pb::WSPayload (pair from the header, event_time_ms = ts) and
-//     feeds MessageHandler::route_parsed — the exact entry the WS binary
+//     feeds MessageHandler::route_parsed - the exact entry the WS binary
 //     path uses during replay (see main.cpp on_ws_message).
 //   - lifecycle JSON: replay_joined / replay_status (2s cadence, matching
 //     the box's statusUpdateInterval) / replay_control acks / replay_seeked /
 //     replay_finished are synthesized and pushed through
-//     ReplayManager::handle_ws_message — the state machine is untouched.
+//     ReplayManager::handle_ws_message - the state machine is untouched.
 //   - clock: the box's 50ms smooth-clock drip (market = anchor + wall×speed,
 //     batch-deliver everything ≤ clock) runs in tick(), budgeted per frame.
 //   - seeks: binary-search the header's block index, range-GET the blocks,
-//     re-deliver the header's OB seed (BookUpdate{snapshot:true}) — the same
+//     re-deliver the header's OB seed (BookUpdate{snapshot:true}) - the same
 //     re-seed the box does on every archive seek.
 //   - get_historical_candles: served locally from the header's baked
 //     per-timeframe candle seeds, end-clamped to the playhead (F3 parity).
 //     Installed as StreamManager's pack request hook; other historical
-//     requests are swallowed (documented v1 scope — matches the box for
+//     requests are swallowed (documented v1 scope - matches the box for
 //     events older than DB retention).
 //
 // Fetch strategy mirrors the codebase's XHR pattern (EM_ASM + XMLHttpRequest,
@@ -75,7 +75,7 @@ public:
     bool active() const { return phase_ != Phase::Idle && phase_ != Phase::Error; }
 
     // StreamManager pack request hook target. Returns true when the request
-    // was handled (or deliberately swallowed) — the caller skips the WS.
+    // was handled (or deliberately swallowed) - the caller skips the WS.
     bool handle_request_json(const std::string& msg);
 
     // JS XHR callback (via the extern "C" trampoline). Stashes only.
@@ -146,7 +146,7 @@ private:
     void route_frame(int64_t ts, uint32_t stream, int64_t tf, const std::string& payload);
     // Queues the message; drained at the top of the next tick(). The box's
     // acks arrive asynchronously over the WS, AFTER the caller's own state
-    // transition — a synchronous emit inverts that order (e.g. seek() sends
+    // transition - a synchronous emit inverts that order (e.g. seek() sends
     // the control THEN transitions to Seeking; a synchronous replay_seeked
     // is consumed while the state is still Playing and the Seeking state is
     // never cleared). Deferring one frame restores box ordering.
@@ -198,7 +198,7 @@ private:
 
     // Post-seek prime: local_seek() acks + auto-resumes instantly (box
     // semantics), but the blocks covering the target still have to arrive
-    // from the CDN — without a hold the clock runs over a stale book/chart
+    // from the CDN - without a hold the clock runs over a stale book/chart
     // for the fetch round-trip. Pin the wall base (same trick as the
     // buffering-gate hold) until the first post-seek block has decoded
     // through the target.

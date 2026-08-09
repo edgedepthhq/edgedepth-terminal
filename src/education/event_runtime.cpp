@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// event_runtime.cpp — see event_runtime.h
+// event_runtime.cpp - see event_runtime.h
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "education/event_runtime.h"
@@ -49,27 +49,27 @@ void EventRuntime::update(const AppContext& ctx) {
 
     // One-shot deep-link seek (?event=…&t=…): a key-moment link on the public
     // event page lands the replay AT its timestamp. Deferred until the session
-    // is genuinely live — Playing or Paused, i.e. joined AND past the buffering
-    // gate — so the ONE deliberate seek hits a primed, seeded book — then the
+    // is genuinely live - Playing or Paused, i.e. joined AND past the buffering
+    // gate - so the ONE deliberate seek hits a primed, seeded book - then the
     // latch closes and the user owns the transport.
     if (!deep_link_seek_done_) {
         // Event deep link (?event=…&t=…) or the pack's start-at / ?t= target
-        // (__EDGEDEPTH_PACK__.seekToMs — /demo bakes the catalog startAtMs or a
+        // (__EDGEDEPTH_PACK__.seekToMs - /demo bakes the catalog startAtMs or a
         // key-moment deep link into it). Same one-shot deliberate-seek contract.
         int64_t want = EducationBoot::instance().event_seek_to_ms();
         if (want <= 0) want = EducationBoot::instance().pack_seek_to_ms();
         if (want <= 0) {
-            deep_link_seek_done_ = true;  // no deep link — never check again
+            deep_link_seek_done_ = true;  // no deep link - never check again
         } else if (rm.state() == ReplayManager::State::Playing ||
                    rm.state() == ReplayManager::State::Paused) {
             // Playing/Paused ONLY. The old gate (is_active && !is_loading &&
-            // !Seeking) admitted Creating/Joining — is_active() counts them and
-            // is_loading() covers only Buffering — so the seek fired while the
+            // !Seeking) admitted Creating/Joining - is_active() counts them and
+            // is_loading() covers only Buffering - so the seek fired while the
             // session POST was still in flight. That premature seek (a) went out
             // against no session, drawing the backend's "No active replay" error
             // (→ the fatal historical-error overlay), and (b) transitioned the
             // state machine to Seeking, which made on_session_created's
-            // `state != Creating` guard silently DISCARD the created session —
+            // `state != Creating` guard silently DISCARD the created session -
             // the join was never sent and the event page died on
             // "Historical replay unavailable" (every ?event=…&t= deep link).
             int64_t start = rm.info().start_time_ms;
@@ -89,8 +89,8 @@ void EventRuntime::update(const AppContext& ctx) {
     // "Watch again" (one latch, drained before transport so a queued restart
     // wins). Ended pack (Stopped tears down the replay data context, so a seek
     // cannot revive it) → re-request the pack: the same boot main.cpp did,
-    // fresh engine + context, buffering gate and all. A still-active session —
-    // or the box event path, whose session survives finish — restarts as a
+    // fresh engine + context, buffering gate and all. A still-active session -
+    // or the box event path, whose session survives finish - restarts as a
     // deliberate seek to the window start (auto-resumes, box semantics).
     if (pending_restart_) {
         pending_restart_ = false;
@@ -108,7 +108,7 @@ void EventRuntime::update(const AppContext& ctx) {
         }
     }
 
-    // Transport (pause/play/speed) — applies to the live archive replay.
+    // Transport (pause/play/speed) - applies to the live archive replay.
     if (pending_transport_ != TransportCmd::None) {
         const TransportCmd cmd = pending_transport_;
         pending_transport_ = TransportCmd::None;
@@ -120,7 +120,7 @@ void EventRuntime::update(const AppContext& ctx) {
         }
     }
 
-    // Seek (own latch — don't clobber a queued pause/speed). Convert the window
+    // Seek (own latch - don't clobber a queued pause/speed). Convert the window
     // fraction → target ms; seek() clamps. Prefer the backend's archive window once
     // it has arrived; before that, fall back to the web-provided window.
     if (pending_seek_) {
@@ -139,7 +139,7 @@ void EventRuntime::update(const AppContext& ctx) {
         }
     }
 
-    // Skip (own latch) — clock-only nudge from the LIVE interpolated clock (not the
+    // Skip (own latch) - clock-only nudge from the LIVE interpolated clock (not the
     // lagging info_.current_time_ms), same path the studio bar uses.
     if (pending_skip_) {
         pending_skip_ = false;
@@ -164,7 +164,7 @@ void EventRuntime::emit_state(const AppContext& ctx) {
         start_ms = EducationBoot::instance().event_start_ms();
         end_ms   = EducationBoot::instance().event_end_ms();
     }
-    if (end_ms <= start_ms) return;  // no window yet — nothing to report
+    if (end_ms <= start_ms) return;  // no window yet - nothing to report
 
     const bool active  = rm.is_active();
     const bool playing = rm.is_playing();
@@ -177,7 +177,7 @@ void EventRuntime::emit_state(const AppContext& ctx) {
     const bool ended   = rm.state() == ReplayManager::State::Stopped;
     const float speed  = rm.info().speed;
 
-    // Discrete-field signature (clock/progress EXCLUDED — React interpolates).
+    // Discrete-field signature (clock/progress EXCLUDED - React interpolates).
     transport::SigHasher hasher;
     hasher.mix(active  ? 1u : 0u);
     hasher.mix(playing ? 1u : 0u);
@@ -233,7 +233,7 @@ void EventRuntime::emit_state(const AppContext& ctx) {
 } // namespace edu
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// KEEPALIVE command callbacks — React calls these via Module.__event_cmd_*().
+// KEEPALIVE command callbacks - React calls these via Module.__event_cmd_*().
 // They only ENQUEUE; EventRuntime::update(ctx) applies them with a live ctx.
 // Mirrors the _studio_cmd_* family: int args (centi-speed / milli-progress) marshal
 // cleanly across the raw export, unlike a float (f64→f32 mis-marshal).

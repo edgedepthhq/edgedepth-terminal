@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// app_context.h — Single dependency injection point for the application
+// app_context.h - Single dependency injection point for the application
 //
 // All managers accessible through one struct. Passed to widgets, menus,
 // and handlers instead of 3-8 individual pointer/reference parameters.

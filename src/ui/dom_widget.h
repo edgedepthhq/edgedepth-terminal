@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// dom_widget.h — Order ladder (DOM), edgedepth design-system rework
+// dom_widget.h - Order ladder (DOM), edgedepth design-system rework
 //
 // 6-column grid: buys · bids · PRICE · asks · sells · Δ
 //   - bid/ask depth cells colored on the OCEAN ramp (small=deep blue →
@@ -75,14 +75,14 @@ private:
 
     // ── Row-model cache (FPS item, 2026-07-05) ──────────────────────────────
     // The ladder used to re-run the full format cascade every frame: per row,
-    // grouped FlatMap binary searches + up to 6 snprintf — at 160fps that's
+    // grouped FlatMap binary searches + up to 6 snprintf - at 160fps that's
     // thousands of redundant formats/sec, because the book/tape only change at
     // server cadence. build_row_models() re-formats ONLY when an input changed
     // (book timestamp, accumulator revision, center/scroll/group/display);
     // render_ladder() just draws the cached strings/fractions each frame.
     struct RowModel {
         double price = 0.0;
-        float  depth_frac = 0.0f;          // size / max(bid,ask max) — bar width
+        float  depth_frac = 0.0f;          // size / max(bid,ask max) - bar width
         bool   has_size = false;
         bool   has_buy = false, has_sell = false, has_delta = false;
         bool   delta_pos = true;
@@ -102,7 +102,7 @@ private:
         char  sell_txt[16]  = {};
         char  delta_txt[16] = {};
     } row_current_;
-    // Cache key — rebuild when any of these move. ob timestamp alone is not
+    // Cache key - rebuild when any of these move. ob timestamp alone is not
     // enough (multiple deltas can land within one ms) → pair it with
     // last_update_id, which is strictly increasing on every delta/snapshot.
     int64_t  cache_ob_ts_ = -1;

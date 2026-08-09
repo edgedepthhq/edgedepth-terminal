@@ -27,7 +27,7 @@ constexpr int   kInvalidPart  = -999;   // never matches a handle index
 constexpr float kBrushMinStepPx = 2.0f; // stroke point thinning
 
 // The impossible 4-modifier chord: makes Pan/Select unreachable while keeping
-// every button field in [0,5) (they index size-5 IO arrays — never use an
+// every button field in [0,5) (they index size-5 IO arrays - never use an
 // out-of-range button for this).
 constexpr int kImpossibleMod =
     ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiMod_Alt | ImGuiMod_Super;
@@ -428,7 +428,7 @@ void render_one(ImDrawList* dl, const Drawing& d, const PriceFormatter& fmt,
             case Tool::LongPosition:
             case Tool::ShortPosition: {
                 // Profit box (entry<->target) in UP, risk box (entry<->stop)
-                // in DOWN — same tint both directions, TV convention.
+                // in DOWN - same tint both directions, TV convention.
                 const float xl = p0.x, xr = p1.x;
                 const float ye = p0.y;
                 const float yt = to_px(Anchor{d.anchors[0].t_ms, d.target}).y;
@@ -609,7 +609,7 @@ void DrawingLayer::render_in_plot(const AppContext& ctx, const PriceFormatter& f
     captures_ = false;
 
     if (!overlays_allowed) {
-        // TPO/Renko: no time axis for overlays — park everything.
+        // TPO/Renko: no time axis for overlays - park everything.
         cancel_placement();
         if (mgr.armed() != Tool::Cursor) mgr.arm(Tool::Cursor);
         hover_id_ = 0;
@@ -742,7 +742,7 @@ DrawingLayer::Hit DrawingLayer::hit_test(const AppContext& ctx) {
         if (d.hidden) continue;
         build_geometry(d, rmin, rmax, wires, handles);
         if (wires.empty()) continue;
-        // Handles first (they sit on top of the wires) — grabbable when the
+        // Handles first (they sit on top of the wires) - grabbable when the
         // drawing is selected (TV behavior; body-hover shows them).
         if (d.id == mgr.selected()) {
             for (size_t i = 0; i < handles.size(); ++i) {
@@ -1035,7 +1035,7 @@ void DrawingLayer::update_placement(const AppContext& ctx, int64_t tf_ms) {
     if (tool == Tool::Polyline) {
         if (!hovered || io.KeyShift) return;
         if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-            // The double-click's own clicks appended 1-2 duplicate vertices —
+            // The double-click's own clicks appended 1-2 duplicate vertices -
             // drop the trailing duplicate(s) within 3px of their predecessor.
             while (pending_.size() >= 2) {
                 const ImVec2 a = to_px(pending_[pending_.size() - 2]);

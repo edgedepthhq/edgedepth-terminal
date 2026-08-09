@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// settings_panel.h — Reusable tabbed settings panel (MMT-style)
+// settings_panel.h - Reusable tabbed settings panel (MMT-style)
 //
 // Usage:
 //   SettingsPanel panel("My Settings", {"General", "Style", "Advanced"});

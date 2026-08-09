@@ -1,13 +1,13 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// trade_at_price.h — Real-time trade accumulator per price level
+// trade_at_price.h - Real-time trade accumulator per price level
 //
 // Client-side accumulator that subscribes to the trade stream and builds
 // a rolling map of buy/sell/delta volume per rounded price level.
 // Used by the DOM widget to display BUYS, SELLS, DELTA columns.
 //
 // This mirrors the industry-standard approach used by Market Monkey Terminal,
-// Sierra Chart, Quantower, ATAS, etc. — all accumulate locally from the tape.
+// Sierra Chart, Quantower, ATAS, etc. - all accumulate locally from the tape.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "types/types.h"
@@ -145,7 +145,7 @@ public:
                 reset();
             }
         } else if (reset_mode_ == AccumulatorResetMode::Session) {
-            // Reset at midnight UTC — check if we've crossed a day boundary
+            // Reset at midnight UTC - check if we've crossed a day boundary
             int64_t last_day = last_reset_ms_ / 86400000LL;
             int64_t curr_day = now / 86400000LL;
             if (curr_day > last_day) {
@@ -166,7 +166,7 @@ public:
     double total_delta()       const { return total_buy_ - total_sell_; }
     int64_t total_trades()     const { return total_trades_; }
 
-    // Monotonic change counter — bumps on every trade AND on reset. Consumers
+    // Monotonic change counter - bumps on every trade AND on reset. Consumers
     // (DOM row cache) use it to skip reformatting when nothing changed.
     uint64_t revision() const { return revision_; }
 

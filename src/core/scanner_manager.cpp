@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// scanner_manager.cpp — Apply protobuf MarketScannerUpdate to scanner map
+// scanner_manager.cpp - Apply protobuf MarketScannerUpdate to scanner map
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "core/scanner_manager.h"

@@ -128,9 +128,9 @@ void render_symbol_picker_popup(
     static bool ticker_subscribed = false;
     static bool scanner_subscribed = false;
     if (g_symbol_picker.open && !was_open) {
-        // Picker just opened — subscribe to scanner for BOTH venues (the feeds are
+        // Picker just opened - subscribe to scanner for BOTH venues (the feeds are
         // venue-parameterized: scanner.{binancef,hl}.global; ScannerManager keys by
-        // exchange). ticker24h is always-on, owned by AppShell — don't manage it here.
+        // exchange). ticker24h is always-on, owned by AppShell - don't manage it here.
         if (!scanner_subscribed) {
             for (const char* ex : {"binancef", "hl"}) {
                 StreamKey scanner_key{
@@ -166,7 +166,7 @@ void render_symbol_picker_popup(
         g_symbol_picker.keyboard_sel = -1;
     }
     if (!g_symbol_picker.open && was_open) {
-        // Picker just closed — unsubscribe from scanner only
+        // Picker just closed - unsubscribe from scanner only
         if (scanner_subscribed) {
             StreamKey scanner_key{
                 Terminal::Pair{"binancef", "global"},
@@ -221,7 +221,7 @@ void render_symbol_picker_popup(
         g_symbol_picker.record_recent(m.symbol);
         persist_recents();
         if (g_symbol_picker.replace_mode) {
-            // Mirror url_router::build_terminal_path (not #included here — its EM_JS
+            // Mirror url_router::build_terminal_path (not #included here - its EM_JS
             // defs must stay single-TU): ?exchange= only for non-binancef venues.
             std::string new_path = "/terminal/" + m.symbol;
             if (!m.exchange.empty() && m.exchange != "binancef") new_path += "?exchange=" + m.exchange;
@@ -266,7 +266,7 @@ void render_symbol_picker_popup(
                     u32(Tokens::TX3), lc);
         ImGui::PopFont();
 
-        // ── venue toggle: BINANCE | HYPERLIQUID — filters the list by exchange ──
+        // ── venue toggle: BINANCE | HYPERLIQUID - filters the list by exchange ──
         {
             ImGui::PushFont(Fonts::label());
             const float chip_h = 20.0f;
@@ -423,7 +423,7 @@ void render_symbol_picker_popup(
         }
     }
 
-    // ── BROWSE: category chips (square, accent on-state) — wraps + counts ─
+    // ── BROWSE: category chips (square, accent on-state) - wraps + counts ─
     const float cat_y = rec_y + rec_h;
     const float cat_top = 10.0f, cat_bot = 12.0f, chh = 22.0f, chip_gap = 8.0f, row_gap = 8.0f;
     float cat_h = 0.0f;
@@ -547,7 +547,7 @@ void render_symbol_picker_popup(
     }
     ImGui::SetCursorScreenPos(ImVec2(w0.x, hdr_y + hdr_h));
 
-    // ── Build filtered + sorted list (cached — only rebuild when inputs change) ──
+    // ── Build filtered + sorted list (cached - only rebuild when inputs change) ──
     auto& ticker_mgr = TickerManager::instance();
     auto& scanner_mgr = ScannerManager::instance();
     const auto& cats = g_symbol_picker.cached_categories;
@@ -560,7 +560,7 @@ void render_symbol_picker_popup(
     bool sort_changed = (g_symbol_picker.sort_mode != g_symbol_picker.prev_sort_mode ||
                          g_symbol_picker.sort_ascending != g_symbol_picker.prev_sort_asc);
 
-    // Live ticker/scanner drift only forces a rebuild every 2s — re-sorting
+    // Live ticker/scanner drift only forces a rebuild every 2s - re-sorting
     // ~660 symbols with per-element manager lookups several times a second was
     // the picker's real cost (immediate-mode redraw is already clipped/cheap).
     const int64_t now_ms_pick = static_cast<int64_t>(ImGui::GetTime() * 1000.0);
@@ -672,7 +672,7 @@ void render_symbol_picker_popup(
         }
     }
 
-    // ── Symbol list (clipped — only renders visible rows) — 1i rows ──
+    // ── Symbol list (clipped - only renders visible rows) - 1i rows ──
     const float row_h = 34.0f, foot_h = 36.0f;
     ImGui::BeginChild("SymbolList", ImVec2(0, -foot_h), false);
     ImDrawList* rdl = ImGui::GetWindowDrawList();
@@ -741,7 +741,7 @@ void render_symbol_picker_popup(
         LogoManager::instance().draw_coin(rdl, meta->base_asset,
                                           ImVec2(col_logo_x, cy - 9.0f), 18.0f);
 
-        // Symbol — base bright, /QUOTE dimmed. Non-ASCII base assets (CJK etc.)
+        // Symbol - base bright, /QUOTE dimmed. Non-ASCII base assets (CJK etc.)
         // fall back to the uppercased raw symbol.
         {
             std::string display = meta->display_name();
@@ -783,7 +783,7 @@ void render_symbol_picker_popup(
             num_cell(col_last_r, pbuf, Tokens::TX1);
         } else num_cell(col_last_r, "-", Tokens::TX4);
 
-        // 24H % — signed up/down
+        // 24H % - signed up/down
         if (ticker) {
             char cbuf[24];
             snprintf(cbuf, sizeof(cbuf), "%+.2f%%", ticker->change_pct_24h);
@@ -797,7 +797,7 @@ void render_symbol_picker_popup(
             num_cell(col_vol_r, vbuf, Tokens::TX2);
         } else num_cell(col_vol_r, "-", Tokens::TX4);
 
-        // SCORE — accent for hot, text ramp below (no traffic lights)
+        // SCORE - accent for hot, text ramp below (no traffic lights)
         {
             const auto* scan = scanner_mgr.get(meta->exchange, meta->symbol);
             if (scan && scan->edgedepth_score > 0.0) {
@@ -811,7 +811,7 @@ void render_symbol_picker_popup(
         }
         ImGui::PopFont();
 
-        // TYPE — first category or PERP, mono-sm text-2 (legible, not tiny)
+        // TYPE - first category or PERP, mono-sm text-2 (legible, not tiny)
         {
             ImGui::PushFont(Fonts::mono_sm());
             const char* tp = meta->categories.empty() ? "PERP" : meta->categories[0].c_str();

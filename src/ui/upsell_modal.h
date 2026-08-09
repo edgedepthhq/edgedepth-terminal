@@ -1,11 +1,11 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// upsell_modal.h — the ONE upsell modal every free-tier gate funnels into (§8.3).
+// upsell_modal.h - the ONE upsell modal every free-tier gate funnels into (§8.3).
 //
 // Locked range / preset / speed / symbol / layer pill, a TIER_* server error, the
-// /events padlock, and a lesson lock ALL call UpsellModal::open(...) — a single,
+// /events padlock, and a lesson lock ALL call UpsellModal::open(...) - a single,
 // consistent conversion surface instead of scattered ad-hoc nudges. Primary CTA is
-// "Go Pro — pay with Bitcoin" → /pricing (Entitlements::open_upgrade). AUTH_REQUIRED
+// "Go Pro - pay with Bitcoin" → /pricing (Entitlements::open_upgrade). AUTH_REQUIRED
 // / GRANT_REQUIRED route to a login variant instead (Entitlements::open_login).
 //
 // Shown at most once per surface per session; a repeat gate shows a slim toast so
@@ -20,7 +20,7 @@ namespace ui {
 
 class UpsellModal {
 public:
-    // Which gate opened it — drives the contextual subline + the once-per-surface
+    // Which gate opened it - drives the contextual subline + the once-per-surface
     // de-dupe. Auth is the login variant (not logged in / no grant).
     enum class Trigger : uint8_t {
         Generic = 0, Range, Preset, Speed, Symbol, Layer,
@@ -31,20 +31,20 @@ public:
 
     // Open the upsell for a gate. `detail` overrides the default subline if non-null.
     void open(Trigger t, const char* detail = nullptr);
-    // Login variant (AUTH_REQUIRED / GRANT_REQUIRED) — CTA goes to /login.
+    // Login variant (AUTH_REQUIRED / GRANT_REQUIRED) - CTA goes to /login.
     void open_login(const char* detail = nullptr);
 
     // Embedded event/lesson boot escape hatch: when the denied replay IS the whole
     // page (?event= / ?lesson= chrome), a plain dismiss strands the user in event
     // chrome over plain live data. Call AFTER open()/open_login() to make BOTH
     // dismiss paths ("Maybe later"/"Not now" and Escape) do a full navigation to
-    // the live terminal — window.location.assign("/terminal/<symbol>") — instead
+    // the live terminal - window.location.assign("/terminal/<symbol>") - instead
     // of just closing. The primary CTA (Go Pro / Log in) is unaffected.
     // open()/open_login() CLEAR any armed redirect, so the live-terminal gates
     // (speed/symbol/layer/range pills, launcher) can never inherit a stale one.
     void set_dismiss_redirect(const char* symbol);
 
-    // Show a slim, non-blocking notice toast (neutral — e.g. an authenticated user
+    // Show a slim, non-blocking notice toast (neutral - e.g. an authenticated user
     // hit a token/session error, which is NOT a login or an upsell situation).
     void toast(const char* msg);
 

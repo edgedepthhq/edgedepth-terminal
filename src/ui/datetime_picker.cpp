@@ -168,7 +168,7 @@ bool DateTimePicker::render(const char* id, DateTimePicker& picker) {
         ImGui::Separator();
 
         // ── Hour : Minute (persistent buffers) ─────────────────────
-        // Static buffers per picker instance — keyed by ImGui ID
+        // Static buffers per picker instance - keyed by ImGui ID
         static ImGuiID last_id = 0;
         static char hr_buf[4] = {};
         static char mn_buf[4] = {};
@@ -177,7 +177,7 @@ bool DateTimePicker::render(const char* id, DateTimePicker& picker) {
 
         ImGuiID cur_id = ImGui::GetID("##hr");
         if (cur_id != last_id) {
-            // Different picker opened — reset buffers
+            // Different picker opened - reset buffers
             last_id = cur_id;
             std::snprintf(hr_buf, sizeof(hr_buf), "%02d", picker.hour);
             std::snprintf(mn_buf, sizeof(mn_buf), "%02d", picker.minute);

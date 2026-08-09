@@ -1,13 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// vpin_indicator.cpp — Toxicity pane render (SPEC.md §2, tokens.json)
+// vpin_indicator.cpp - Toxicity pane render (SPEC.md §2, tokens.json)
 //
-// Two render paths (2026-07-04 FPS fix — the pane must cost O(plot width),
+// Two render paths (2026-07-04 FPS fix - the pane must cost O(plot width),
 // not O(points); per-print draws were ~10-15k prims zoomed out):
-//   · EXACT: ≤ ~1.25 points/px — true step-hold shelves per volume-clock
+//   · EXACT: ≤ ~1.25 points/px - true step-hold shelves per volume-clock
 //     print (H then V), per-segment regime color + tentative alpha.
-//   · DECIMATED: one vertical min–max line per pixel column, colored by the
+//   · DECIMATED: one vertical min-max line per pixel column, colored by the
 //     column's last print. Sub-pixel shelves are unreadable anyway; the
-//     min–max column preserves spike honesty (no averaging — grain rule).
+//     min-max column preserves spike honesty (no averaging - grain rule).
 // The regime strip is merged into runs (one rect per regime run, both paths).
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -63,7 +63,7 @@ bool VPINIndicator::get_latest_tag_color(ImU32& out_color) const {
 }
 
 void VPINIndicator::render_settings() {
-    // §4.5 settings — F2 popover pilot. Persisted blob is S4 (F2 full).
+    // §4.5 settings - F2 popover pilot. Persisted blob is S4 (F2 full).
     ImGui::Checkbox("Regime coloring", &regime_coloring_);
     if (ImGui::IsItemHovered())
         Theme::tooltip("Color the VPIN line + strip by toxicity regime\n(HMM when available, threshold fallback otherwise)");
@@ -73,7 +73,7 @@ void VPINIndicator::render_settings() {
 }
 
 void VPINIndicator::render_content(double x_min, double x_max) {
-    // SPEC §2 axis: gridlines at 0.25/0.50/0.75 (limits fixed 0–1 via
+    // SPEC §2 axis: gridlines at 0.25/0.50/0.75 (limits fixed 0-1 via
     // get_y_limits). Setup calls are legal until the first draw.
     static const double kTicks[] = {0.0, 0.25, 0.50, 0.75, 1.00};
     ImPlot::SetupAxisTicks(ImAxis_Y1, kTicks, 5);
@@ -87,7 +87,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
     const float px_right = plot_pos.x + plot_size.x;
     const float px_bot   = plot_pos.y + plot_size.y;
 
-    // ── Dotted threshold landmarks (.30/.45/.60) — drawn always ──
+    // ── Dotted threshold landmarks (.30/.45/.60) - drawn always ──
     {
         const float ys[3] = {
             ImPlot::PlotToPixels(0.0, IndiTokens::TOX_THRESHOLD_1).y,
@@ -121,7 +121,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
 
     // ── Regime strip as merged RUNS (one rect per regime/era run) ──
     // NORMAL draws nothing but still breaks runs; seams land exactly on
-    // state-change prints (SPEC §2 — the seams ARE the transitions).
+    // state-change prints (SPEC §2 - the seams ARE the transitions).
     if (regime_coloring_) {
         int8_t run_regime = -1;
         bool   run_era    = false;
@@ -159,7 +159,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
                 dl->AddLine(ImVec2(sx, px_bot - 14.0f), ImVec2(sx, px_bot),
                             IndiTokens::mul_alpha(IndiTokens::INK_DIM, 0.5f), 1.0f);
                 ImGui::PushFont(Theme::Fonts::label());
-                // ASCII only — the U+2192 arrow is not in the label atlas
+                // ASCII only - the U+2192 arrow is not in the label atlas
                 // (rendered "?" in the 2026-07-04 screenshot round).
                 const char* lhs = "THRESH";
                 const ImVec2 lw = ImGui::CalcTextSize(lhs);
@@ -173,7 +173,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
         }
     }
 
-    // ── VPIN line — exact step-hold vs pixel-column decimation ──
+    // ── VPIN line - exact step-hold vs pixel-column decimation ──
     const bool decimate = n_vis > static_cast<size_t>(plot_size.x * 1.25f) &&
                           plot_size.x > 0.0f;
 
@@ -196,9 +196,9 @@ void VPINIndicator::render_content(double x_min, double x_max) {
         // Shelf entering from the left when the next visible print is far
         // right of i_end-1 handled implicitly; final shelf handled above.
     } else {
-        // One min–max vertical per pixel column; column color = the LAST
+        // One min-max vertical per pixel column; column color = the LAST
         // print's segment color (regime at sub-pixel is the latest brain
-        // state — no blending). Connect columns with the running level so
+        // state - no blending). Connect columns with the running level so
         // flat stretches still read as a line.
         float  col_x   = 0.0f;
         float  col_min = 0.0f, col_max = 0.0f;
@@ -244,7 +244,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
         }
     }
 
-    // ── Order-imbalance companion (setting, default off) — step-hold in
+    // ── Order-imbalance companion (setting, default off) - step-hold in
     //    the pane's secondary slate; decimated the same way. ──
     if (show_imbalance_) {
         if (!decimate) {
@@ -289,7 +289,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
         }
     }
 
-    // ── Hover: name the brain (SPEC §2 — "HIGH · HMM 0.82" vs "HIGH · THRESH") ──
+    // ── Hover: name the brain (SPEC §2 - "HIGH · HMM 0.82" vs "HIGH · THRESH") ──
     if (ImPlot::IsPlotHovered()) {
         const ImPlotPoint mp = ImPlot::GetPlotMousePos();
         auto it = std::upper_bound(pts_.begin(), pts_.end(), mp.x,

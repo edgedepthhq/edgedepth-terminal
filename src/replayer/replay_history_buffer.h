@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// ReplayHistoryBuffer — Client-side message history for instant backward skip
+// ReplayHistoryBuffer - Client-side message history for instant backward skip
 //
 // Stores the last N minutes of delivered replay messages so that backward
 // skip (<<) can replay them locally instead of waiting for the backend.
@@ -34,7 +34,7 @@ public:
         int64_t timeframe;
         bool is_ob_snapshot;            // If true, data is serialized OB state
     };
-    // Serialized OB snapshot — stored as HistoryEntry with is_ob_snapshot=true.
+    // Serialized OB snapshot - stored as HistoryEntry with is_ob_snapshot=true.
     // Uses plain C++ structs (not protobuf) since this is client-internal.
     struct OBLevel {
         double price;
@@ -56,7 +56,7 @@ public:
     explicit ReplayHistoryBuffer(int64_t window_ms = DEFAULT_WINDOW_MS);
 
     // ─── Capture ─────────────────────────────────────────────────────────
-    // Called from main.cpp binary frame routing — stores a copy of raw bytes.
+    // Called from main.cpp binary frame routing - stores a copy of raw bytes.
     // timestamp_ms: message timestamp (from protobuf or current replay clock)
     // stream/timeframe: routing metadata for replay dispatch
     void push(int64_t timestamp_ms,

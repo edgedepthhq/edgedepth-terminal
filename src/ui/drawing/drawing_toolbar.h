@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// drawing_toolbar — the in-chart drawing-tools rail + the tool dropdown.
+// drawing_toolbar - the in-chart drawing-tools rail + the tool dropdown.
 //
 // The rail renders INSIDE the chart widget as a child region at the chart
 // window's left edge (2026-08-06: moved off the viewport edge so it sits

@@ -4,7 +4,7 @@
 #include <algorithm>
 
 // ═══════════════════════════════════════════════════════════════════
-// GBM Analytical Reach Probability — shared between
+// GBM Analytical Reach Probability - shared between
 // LiquidationHeatmapManager and ShaderHeatmapRenderer (Phase 2a)
 // ═══════════════════════════════════════════════════════════════════
 

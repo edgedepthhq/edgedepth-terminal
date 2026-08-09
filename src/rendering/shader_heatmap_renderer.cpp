@@ -78,7 +78,7 @@ void ShaderHeatmapRenderer::destroy_textures() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Data Input — process_snapshot
+// Data Input - process_snapshot
 // ═══════════════════════════════════════════════════════════════════════════════
 
 bool ShaderHeatmapRenderer::process_snapshot(const pb::HeatmapSnapshot& snapshot_pb) {
@@ -122,7 +122,7 @@ bool ShaderHeatmapRenderer::process_snapshot(const pb::HeatmapSnapshot& snapshot
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Data Input — upload_reach_data (Phase 2a)
+// Data Input - upload_reach_data (Phase 2a)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void ShaderHeatmapRenderer::upload_reach_data(
@@ -178,7 +178,7 @@ void ShaderHeatmapRenderer::upload_reach_data(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Phase 2a — Recompute all reach values from current mark price
+// Phase 2a - Recompute all reach values from current mark price
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void ShaderHeatmapRenderer::recompute_reach_from_mark(
@@ -196,7 +196,7 @@ void ShaderHeatmapRenderer::recompute_reach_from_mark(
         }
 
         // Re-upload this column's reach data directly to GPU.
-        // No gpu_dirty_ — we only touch the reach texture, not data.
+        // No gpu_dirty_ - we only touch the reach texture, not data.
         const int col = find_column_for_time(ts);
         if (col < 0 || col >= RING_SIZE) continue;
         const auto& meta = column_meta_[col];
@@ -241,7 +241,7 @@ void ShaderHeatmapRenderer::recompute_reach_from_mark(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Data Input — update_live_column / finalize_column
+// Data Input - update_live_column / finalize_column
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void ShaderHeatmapRenderer::update_live_column(
@@ -280,7 +280,7 @@ void ShaderHeatmapRenderer::update_live_column(
     }
     if (col_max > global_max_qty_) global_max_qty_ = col_max;
 
-    // Upload — flags=2.0 for live column
+    // Upload - flags=2.0 for live column
     upload_column(target_col, num_rows, pmin, native_bucket_size_, col_max, 2.0f);
 
     auto& meta = column_meta_[target_col];
@@ -341,11 +341,11 @@ void ShaderHeatmapRenderer::finalize_column(
 
                 if (col >= ring_count_) ring_count_ = col + 1;
             }
-            return;  // Successfully uploaded — no need for full rebuild
+            return;  // Successfully uploaded - no need for full rebuild
         }
     }
 
-    // Fallback: column doesn't fit in current ring — need full rebuild
+    // Fallback: column doesn't fit in current ring - need full rebuild
     gpu_dirty_ = true;
     live_ring_col_ = -1;
     live_timestamp_ms_ = 0;
@@ -385,7 +385,7 @@ int ShaderHeatmapRenderer::build_column(
 void ShaderHeatmapRenderer::apply_liq_spread(int num_rows) {
     // V7: Spread values ±2 rows with Gaussian kernel (σ=1.0) to fill sub-band gaps.
     // Combined with shader-side bilinear interpolation, this creates smooth
-    // continuous gradients. Wider spread (±4) was too aggressive — it created
+    // continuous gradients. Wider spread (±4) was too aggressive - it created
     // uniform amber fog. ±2 keeps clusters focused with soft edges.
     // Weights: exp(-d²/(2*1.0²)) for d=1..2
     static constexpr int kSpreadRadius = 2;
@@ -421,17 +421,17 @@ void ShaderHeatmapRenderer::apply_liq_spread(int num_rows) {
 void ShaderHeatmapRenderer::apply_extend_levels(int num_rows) {
     // Forward-fill from previous column: if current row is empty,
     // carry from prev_column_carry_ with decay.
-    // V2: Fast decay (0.90) — bands persist visibly for ~20 columns
+    // V2: Fast decay (0.90) - bands persist visibly for ~20 columns
     // (~20 minutes at 1-min publish), creating horizontal persistence
     // like MMT without permanent stripes. 0.90^20 = 0.12, 0.90^30 = 0.04.
     static constexpr float kDecay = 0.90f;
     const int limit = std::min(num_rows, MAX_ROWS);
     for (int r = 0; r < limit; ++r) {
         if (column_build_buf_[r] > 0.001f) {
-            // Real data — update carry
+            // Real data - update carry
             prev_column_carry_[r] = column_build_buf_[r];
         } else if (prev_column_carry_[r] > 0.001f) {
-            // Empty — forward-fill with decayed carry
+            // Empty - forward-fill with decayed carry
             prev_column_carry_[r] *= kDecay;
             column_build_buf_[r] = prev_column_carry_[r];
         }
@@ -484,10 +484,10 @@ void ShaderHeatmapRenderer::upload_reach_column(int ring_col) {
 // Ring Buffer Management
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// advance_ring_head removed — columns are time-indexed, not sequential
+// advance_ring_head removed - columns are time-indexed, not sequential
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// sync_gpu_from_timeline — Rebuild entire ring buffer from sorted timeline_
+// sync_gpu_from_timeline - Rebuild entire ring buffer from sorted timeline_
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
@@ -535,7 +535,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
 
     // ── Build all columns into CPU staging buffers ──
     // Only zero meta staging (64KB). Data staging doesn't need clearing because
-    // the shader checks meta flags before reading data — gap columns have
+    // the shader checks meta flags before reading data - gap columns have
     // flags=0 and get discarded regardless of stale data values.
     std::memset(meta_staging_.data(), 0,
                 static_cast<size_t>(RING_SIZE) * 4 * sizeof(float));
@@ -552,7 +552,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
         // Per-column centering: each column centers around its own data midpoint.
         // This handles large price movements over time (e.g., BTC $87k→$75k).
         // Adjacent columns have nearly identical midpoints so the per-column
-        // price_min metadata stays consistent — no visible waviness.
+        // price_min metadata stays consistent - no visible waviness.
         double snap_pmin = std::numeric_limits<double>::max();
         double snap_pmax = std::numeric_limits<double>::lowest();
         for (const auto& [p, q] : price_qty_map) {
@@ -607,7 +607,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
 
         // Direct per-column GL upload from column_build_buf_ (contiguous, cache-friendly).
         // The old staging buffer approach required strided writes (data_staging_[r * RING_SIZE + col])
-        // which were cache-hostile — 4M iterations for 4000 columns.
+        // which were cache-hostile - 4M iterations for 4000 columns.
         upload_column(col, num_rows, col_price_min, native_bucket_size_, col_max, 1.0f);
 
         // Phase 2a: Build + upload reach_prob column at the same ring position.
@@ -646,7 +646,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
                 }
                 upload_reach_column(col);
             } else {
-                // No reach data for this timestamp — fill with 1.0 (fully visible).
+                // No reach data for this timestamp - fill with 1.0 (fully visible).
                 // This ensures bands without ML data aren't hidden when reach modulation is on.
                 std::fill(reach_build_buf_.begin(), reach_build_buf_.begin() + MAX_ROWS, 1.0f);
                 upload_reach_column(col);
@@ -727,7 +727,7 @@ void ShaderHeatmapRenderer::clear() {
     column_meta_.fill(ColumnMeta{});
     std::fill(prev_column_carry_.begin(), prev_column_carry_.end(), 0.0f);
 
-    // Clear GPU textures — zero out metadata to mark all columns empty
+    // Clear GPU textures - zero out metadata to mark all columns empty
     std::vector<float> zero_meta(RING_SIZE * 4, 0.0f);
     glBindTexture(GL_TEXTURE_2D, meta_texture_);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, RING_SIZE, 1,
@@ -741,12 +741,12 @@ void ShaderHeatmapRenderer::clear() {
 
 void ShaderHeatmapRenderer::mark_dirty() {
     // For the shader renderer, mark_dirty means we need to re-process data.
-    // In practice this is called when leverage mask changes — the manager
+    // In practice this is called when leverage mask changes - the manager
     // clears us and re-processes cached protos via process_snapshot.
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Rendering — Phase 3: The GL Callback
+// Rendering - Phase 3: The GL Callback
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void ShaderHeatmapRenderer::render_cells(
@@ -805,7 +805,7 @@ void ShaderHeatmapRenderer::render_cells(
     const float fb_scale_x = dd ? dd->FramebufferScale.x : 1.0f;
     const float fb_scale_y = dd ? dd->FramebufferScale.y : 1.0f;
 
-    // Populate render uniforms — these persist until RenderDrawData()
+    // Populate render uniforms - these persist until RenderDrawData()
     auto& u = render_uniforms_;
     u.data_tex = data_texture_;
     u.meta_tex = meta_texture_;
@@ -821,7 +821,7 @@ void ShaderHeatmapRenderer::render_cells(
     u.plot_size_screen[0] = plot_size.x;
     u.plot_size_screen[1] = plot_size.y;
 
-    // Time as seconds — use oldest timestamp as reference epoch.
+    // Time as seconds - use oldest timestamp as reference epoch.
     // Use timeline_ directly (more robust than column_meta_[0] with time-indexed ring)
     const int64_t oldest_ts = timeline_.begin()->first;
     u.viewport_time_min = static_cast<float>(
@@ -831,13 +831,13 @@ void ShaderHeatmapRenderer::render_cells(
     u.viewport_price_min = static_cast<float>(limits.Y.Min);
     u.viewport_price_max = static_cast<float>(limits.Y.Max);
 
-    // Sequential ring buffer — column 0 = oldest, column ring_count-1 = newest.
+    // Sequential ring buffer - column 0 = oldest, column ring_count-1 = newest.
     u.time_step = static_cast<float>(time_step_ms_) / 1000.0f;
     // Center each column on its bucket timestamp. Candles are center-anchored on T
     // (plot_candles draws timestamps[i] ± half_width); a left-anchored column spanning
     // [T, T+step] sat half a candle to the RIGHT of its candle. Shifting the column
     // origin back half a step makes column i cover [T-step/2, T+step/2], centered on
-    // T = oldest_ts + i*step — aligned with the candle.
+    // T = oldest_ts + i*step - aligned with the candle.
     u.data_time_start = -0.5f * u.time_step;
     u.ring_start = 0;
     u.ring_count = ring_count_;
@@ -901,7 +901,7 @@ void ShaderHeatmapRenderer::render_cells(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// GL Render Callback — called by ImGui during RenderDrawData()
+// GL Render Callback - called by ImGui during RenderDrawData()
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void ShaderHeatmapRenderer::gl_render_callback(
@@ -941,7 +941,7 @@ void ShaderHeatmapRenderer::gl_render_callback(
     const float ix1 = std::min(clip_x1, data_x1);
     const float iy1 = std::min(clip_y1, data_y1);
 
-    if (ix0 >= ix1 || iy0 >= iy1) return;  // No intersection — skip draw entirely
+    if (ix0 >= ix1 || iy0 >= iy1) return;  // No intersection - skip draw entirely
 
     // Convert to GL scissor (Y-flipped)
     const float sx = ix0;
@@ -961,7 +961,7 @@ void ShaderHeatmapRenderer::gl_render_callback(
     const float plot_gl_x = px;
     const float plot_gl_y = fb_h - (py + ph);
 
-    // Do NOT change glViewport — keep ImGui's full-framebuffer viewport.
+    // Do NOT change glViewport - keep ImGui's full-framebuffer viewport.
     // The scissor clips to the plot area. The shader uses u_plot_origin
     // to map gl_FragCoord (window coords) to plot-local [0,1] UV.
 
@@ -994,7 +994,7 @@ void ShaderHeatmapRenderer::gl_render_callback(
     glUniform1i(loc.u_reach_data, 4);
     glUniform1i(loc.u_use_reach, u->use_reach);
 
-    // Set uniforms — plot_origin is the bottom-left corner in GL window pixels
+    // Set uniforms - plot_origin is the bottom-left corner in GL window pixels
     glUniform2f(loc.u_plot_origin, plot_gl_x, plot_gl_y);
     glUniform2f(loc.u_plot_size, pw, ph);
     glUniform1f(loc.u_viewport_time_min, u->viewport_time_min);
@@ -1039,7 +1039,7 @@ void ShaderHeatmapRenderer::render_labels(
     const ImPlotRect limits = ImPlot::GetPlotLimits();
     const double display_bucket = native_bucket_size_ * bucket_multiplier_;
 
-    // Check cell size in pixels — only render if cells are large enough
+    // Check cell size in pixels - only render if cells are large enough
     const ImVec2 p1 = ImPlot::PlotToPixels(0, 0);
     const ImVec2 p2 = ImPlot::PlotToPixels(
         static_cast<double>(candle_timeframe_ms), display_bucket);
@@ -1167,7 +1167,7 @@ ShaderHeatmapRenderer::get_viewport_stats(double price_min, double price_max) co
     if (timeline_.empty()) return ViewportStats{};
 
     // Cache: only recompute when viewport changes >10% or data changes.
-    // This avoids iterating all 4000+ timeline entries every frame —
+    // This avoids iterating all 4000+ timeline entries every frame -
     // the #1 FPS bottleneck for the liq heatmap.
     const double range = price_max - price_min;
     const double shift = std::abs(price_min - cached_vp_price_min_) +

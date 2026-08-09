@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// drawing_icons — ImDrawList vector glyphs for the drawing tools UI.
+// drawing_icons - ImDrawList vector glyphs for the drawing tools UI.
 //
 // No icon font exists in the app (theme.cpp loads Latin + a few extras only);
 // chrome icons are drawn as vector primitives (precedent: the replay close-X,
@@ -8,7 +8,7 @@
 // shared by the left rail, the topbar dropdown, and the style editor.
 //
 // All glyphs draw centered on `c` within a half-extent `s` (a 16px icon is
-// s = 8) using the caller's color/thickness — logical pixels, DPI-agnostic.
+// s = 8) using the caller's color/thickness - logical pixels, DPI-agnostic.
 // ═══════════════════════════════════════════════════════════════════════════════
 #include "imgui.h"
 #include "ui/drawing/drawing_types.h"

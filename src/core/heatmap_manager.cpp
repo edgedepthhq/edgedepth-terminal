@@ -22,7 +22,7 @@ void HeatmapManager::apply_snapshot(const Terminal::Pair& pair, const pb::Heatma
 void HeatmapManager::finalize_snapshot(const Terminal::Pair& pair, const pb::HeatmapSnapshot& snapshot_pb) {
     const std::string mode = snapshot_pb.mode();
     auto* reconstructor = get_reconstructor(pair, mode);
-    // No grid yet (live column arrived before any historical batch — e.g. a
+    // No grid yet (live column arrived before any historical batch - e.g. a
     // pack replay whose backfill hasn't been requested/served, or a v1 pack
     // with no heatmap seed at all): BOOTSTRAP the grid from this column via
     // process_snapshot instead of dropping it. Before this, the book-depth

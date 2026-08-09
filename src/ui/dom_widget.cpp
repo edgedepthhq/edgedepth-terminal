@@ -13,7 +13,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 namespace {
 
-// Ocean ramp lerp — t∈[0,1] across Theme::Tokens::OCEAN stops
+// Ocean ramp lerp - t∈[0,1] across Theme::Tokens::OCEAN stops
 ImVec4 ocean_vec4(float t) {
     t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
     const float f = t * 5.0f;
@@ -34,7 +34,7 @@ ImU32 ocean_u32(float t) {
                     static_cast<int>(c.z * 255.0f), 255);
 }
 
-// Relative luminance — decides light vs dark ink over a depth bar
+// Relative luminance - decides light vs dark ink over a depth bar
 float luminance(const ImVec4& c) {
     return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z;
 }
@@ -54,7 +54,7 @@ void cell_text_center(const char* txt) {
     ImGui::TextUnformatted(txt);
 }
 
-// Text over a depth bar — dark ink when the bar is bright AND covers the text,
+// Text over a depth bar - dark ink when the bar is bright AND covers the text,
 // otherwise TX1 with a 1px drop shadow so it reads over partial/dark bars.
 void depth_cell_text(ImDrawList* dl, const char* txt, bool right_align,
                      float bar_w, float bar_t) {
@@ -66,7 +66,7 @@ void depth_cell_text(ImDrawList* dl, const char* txt, bool right_align,
     const bool bright = luminance(ocean_vec4(bar_t)) > 0.45f;
 
     if (!(covered && bright)) {
-        // shadow pass (skipped on bright bars — dark ink needs no shadow)
+        // shadow pass (skipped on bright bars - dark ink needs no shadow)
         dl->AddText(ImVec2(cur.x + x_off + 1.0f, cur.y + 1.0f),
                     IM_COL32(0, 0, 0, 170), txt);
     }
@@ -77,7 +77,7 @@ void depth_cell_text(ImDrawList* dl, const char* txt, bool right_align,
     ImGui::PopStyleColor();
 }
 
-// Segmented pill button — active = brand-soft fill, brand text
+// Segmented pill button - active = brand-soft fill, brand text
 bool seg_button(const char* label, bool active) {
     // De-cyaned (2026-07-17): selected = monochrome raised (bg-2 + text-1),
     // slim ~24px. Teal is reserved for CTAs / links / live data, never on-states.
@@ -123,7 +123,7 @@ void DOMWidget::update() {
 
     if (auto_center_) {
         // Boot transient: the (seeded) book lands before the first trade, so
-        // last_price is still 0 — centering there rendered a placeholder
+        // last_price is still 0 - centering there rendered a placeholder
         // 0.000-price ladder until playback's first trade. Fall back to the
         // book mid so the seeded depth is on-screen from frame one.
         double center = ob->last_price;
@@ -140,7 +140,7 @@ void DOMWidget::update() {
     handle_keyboard_input();
     trade_accumulator_.check_auto_reset();
 
-    // Rebuild the row models ONLY when an input actually changed — the book
+    // Rebuild the row models ONLY when an input actually changed - the book
     // read-buffer moves at server cadence, not at render FPS.
     if (ob->timestamp_ms != cache_ob_ts_ ||
         ob->last_update_id != cache_ob_uid_ ||
@@ -197,7 +197,7 @@ void DOMWidget::update_max_sizes(const Terminal::Orderbook& ob) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Row-model cache build — ALL formatting + book/tape lookups happen here, on
+// Row-model cache build - ALL formatting + book/tape lookups happen here, on
 // input change only. render_ladder() just draws these each frame.
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -302,7 +302,7 @@ void DOMWidget::handle_mouse_input() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Value formatting — COIN qty vs compact USD notional
+// Value formatting - COIN qty vs compact USD notional
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void DOMWidget::fmt_value(double qty, double price, char* buf, size_t n) const {
@@ -314,7 +314,7 @@ void DOMWidget::fmt_value(double qty, double price, char* buf, size_t n) const {
         else if (a >= 1e3) snprintf(buf, n, "%.1fK", usd / 1e3);
         else               snprintf(buf, n, "%.0f", usd);
     } else {
-        // Compact large COIN quantities too (else 5–6 digit sizes for low-priced
+        // Compact large COIN quantities too (else 5-6 digit sizes for low-priced
         // coins overflow the slim trade/Δ columns and clip past the panel edge).
         const double a = std::abs(qty);
         if (a >= 1e9)      snprintf(buf, n, "%.2fB", qty / 1e9);
@@ -365,7 +365,7 @@ void DOMWidget::render() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Controls bar — grouping · Auto/Reset · USD/COIN · flow hint (window via r-click)
+// Controls bar - grouping · Auto/Reset · USD/COIN · flow hint (window via r-click)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void DOMWidget::render_controls() {
@@ -507,7 +507,7 @@ void DOMWidget::render_controls() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Ladder table — buys · bids · PRICE · asks · sells · Δ
+// Ladder table - buys · bids · PRICE · asks · sells · Δ
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void DOMWidget::render_ladder(const Terminal::Orderbook& ob) {
@@ -540,7 +540,7 @@ void DOMWidget::render_ladder(const Terminal::Orderbook& ob) {
     }
     ImGui::TableSetupScrollFreeze(0, 1);
 
-    // Custom header row — uppercase micro-labels, TX4, ELEV bg
+    // Custom header row - uppercase micro-labels, TX4, ELEV bg
     {
         ImGui::TableNextRow(ImGuiTableRowFlags_Headers, 22.0f);
         ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::TX3);
@@ -561,7 +561,7 @@ void DOMWidget::render_ladder(const Terminal::Orderbook& ob) {
         head("ASKS", 0, false);
         if (show_trade_columns_) {
             head("SELLS", 2, false);
-            head("\u0394", 2, true);  // Δ — JetBrains Mono carries Greek
+            head("\u0394", 2, true);  // Δ - JetBrains Mono carries Greek
         }
         ImGui::PopStyleColor();
     }
@@ -591,7 +591,7 @@ void DOMWidget::render_ladder(const Terminal::Orderbook& ob) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Book-imbalance meter — pinned under the ladder (shown-window bid vs ask)
+// Book-imbalance meter - pinned under the ladder (shown-window bid vs ask)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void DOMWidget::render_imbalance(const Terminal::Orderbook& ob) {
@@ -644,7 +644,7 @@ void DOMWidget::render_imbalance(const Terminal::Orderbook& ob) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Level row — one price tick (ask or bid side)
+// Level row - one price tick (ask or bid side)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void DOMWidget::render_level_row(const RowModel& rm, bool is_ask,
@@ -654,7 +654,7 @@ void DOMWidget::render_level_row(const RowModel& rm, bool is_ask,
 
     int col = 0;
 
-    // ── BUYS — faint UP, right-aligned ──
+    // ── BUYS - faint UP, right-aligned ──
     if (show_trade_columns_) {
         ImGui::TableSetColumnIndex(col++);
         if (rm.has_buy) {
@@ -665,7 +665,7 @@ void DOMWidget::render_level_row(const RowModel& rm, bool is_ask,
         }
     }
 
-    // ── BIDS depth cell — ocean bar anchored to the price side (grows left) ──
+    // ── BIDS depth cell - ocean bar anchored to the price side (grows left) ──
     ImGui::TableSetColumnIndex(col++);
     if (!is_ask && rm.has_size) {
         const float frac = rm.depth_frac;
@@ -680,7 +680,7 @@ void DOMWidget::render_level_row(const RowModel& rm, bool is_ask,
         depth_cell_text(dl, rm.size_txt, /*right_align=*/true, bar_w, bar_t);
     }
 
-    // ── PRICE — TX2, centered ──
+    // ── PRICE - TX2, centered ──
     ImGui::TableSetColumnIndex(col++);
     {
         ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::TX2);
@@ -688,7 +688,7 @@ void DOMWidget::render_level_row(const RowModel& rm, bool is_ask,
         ImGui::PopStyleColor();
     }
 
-    // ── ASKS depth cell — ocean bar anchored to the price side (grows right) ──
+    // ── ASKS depth cell - ocean bar anchored to the price side (grows right) ──
     ImGui::TableSetColumnIndex(col++);
     if (is_ask && rm.has_size) {
         const float frac = rm.depth_frac;
@@ -704,7 +704,7 @@ void DOMWidget::render_level_row(const RowModel& rm, bool is_ask,
 
     if (!show_trade_columns_) return;
 
-    // ── SELLS — faint DOWN, right-aligned ──
+    // ── SELLS - faint DOWN, right-aligned ──
     ImGui::TableSetColumnIndex(col++);
     if (rm.has_sell) {
         ImVec4 c = Theme::Tokens::DOWN; c.w = 0.55f;
@@ -713,7 +713,7 @@ void DOMWidget::render_level_row(const RowModel& rm, bool is_ask,
         ImGui::PopStyleColor();
     }
 
-    // ── Δ — signed, direction-colored, right-aligned ──
+    // ── Δ - signed, direction-colored, right-aligned ──
     ImGui::TableSetColumnIndex(col++);
     if (rm.has_delta) {
         const ImVec4& c = rm.delta_pos ? Theme::Tokens::UP : Theme::Tokens::DOWN;
@@ -724,7 +724,7 @@ void DOMWidget::render_level_row(const RowModel& rm, bool is_ask,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Current-price row — ELEV fill, inset hairlines, solid BRAND price chip,
+// Current-price row - ELEV fill, inset hairlines, solid BRAND price chip,
 // cumulative buy/sell/Δ totals in the trade columns
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -751,7 +751,7 @@ void DOMWidget::render_current_row(const Terminal::Orderbook& ob, ImDrawList* dl
         }
     }
 
-    // ── BIDS — empty ──
+    // ── BIDS - empty ──
     ImGui::TableSetColumnIndex(col++);
     if (!show_trade_columns_) {
         const ImVec2 c0 = ImGui::GetCursorScreenPos();
@@ -759,7 +759,7 @@ void DOMWidget::render_current_row(const Terminal::Orderbook& ob, ImDrawList* dl
         x_left = c0.x - 6.0f;
     }
 
-    // ── PRICE — solid BRAND chip, BRAND_INK text ──
+    // ── PRICE - solid BRAND chip, BRAND_INK text ──
     ImGui::TableSetColumnIndex(col++);
     {
         const ImVec2 cur = ImGui::GetCursorScreenPos();
@@ -777,7 +777,7 @@ void DOMWidget::render_current_row(const Terminal::Orderbook& ob, ImDrawList* dl
         ImGui::PopStyleColor();
     }
 
-    // ── ASKS — empty ──
+    // ── ASKS - empty ──
     ImGui::TableSetColumnIndex(col++);
     float x_right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x + 6.0f;
 

@@ -1,16 +1,16 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// indicator_tokens.h — C++ constants for the Microstructure Indicator Suite
+// indicator_tokens.h - C++ constants for the Microstructure Indicator Suite
 //
 // SOURCE OF TRUTH: the Microstructure Indicator Suite tokens.json
 // (2026-07-03; RRGGBBAA), with its SPEC as the implementation contract.
-// This header carries only the tokens the shipped panes consume — each
+// This header carries only the tokens the shipped panes consume - each
 // wave adds its own block. Do not invent values here; edit tokens.json
 // first (design owns it), then mirror.
 //
 // The two color grammars (system rule):
 //   EMBER  = liquidation magnitude/density (Field owns it).
-//   RISK   = model-classified danger — toxicity regimes, cascade, pills.
+//   RISK   = model-classified danger - toxicity regimes, cascade, pills.
 //   Green/red stays direction. Teal stays chrome. They never mix.
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -26,7 +26,7 @@ namespace IndiTokens {
                         (rrggbbaa)       & 0xFF);
     }
 
-    // ── RISK ramp (--risk-*) — regime index 0..3 ──
+    // ── RISK ramp (--risk-*) - regime index 0..3 ──
     constexpr ImU32 RISK_NORMAL   = rgba(0x6F7F93FFu);
     constexpr ImU32 RISK_ELEVATED = rgba(0xC9A53CFFu);
     constexpr ImU32 RISK_HIGH     = rgba(0xD96F3DFFu);

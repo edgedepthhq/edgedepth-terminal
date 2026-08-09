@@ -1,12 +1,12 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// usage_emit.h — C++→JS product-usage emit (design §2/§3).
+// usage_emit.h - C++→JS product-usage emit (design §2/§3).
 //
 // Mirrors education/transport_emit.h's dispatch mechanic, but for PRODUCT usage
 // rather than transport state: build a JSON `detail` object and dispatch a window
 // CustomEvent 'edgedepth:usage'. The web usageBridge listens for it, attaches
 // {user (server-derived), anonId, sessionId}, and fans out to Umami (aggregate)
-// + POST /api/usage (per-user). C++ never touches window.umami directly — one
+// + POST /api/usage (per-user). C++ never touches window.umami directly - one
 // enrichment point (design §8).
 //
 // Detail shape the bridge understands:

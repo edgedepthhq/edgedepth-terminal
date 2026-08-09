@@ -4,7 +4,7 @@
 #include <cstdint>
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// RenkoBuilder — price-driven bricks from the candle CLOSE series
+// RenkoBuilder - price-driven bricks from the candle CLOSE series
 //
 // Renko abandons time: X = brick ordinal, price drives the chart. A brick is a
 // fixed-size step; a reversal needs 2x the brick size (traditional Renko). This
@@ -22,7 +22,7 @@ struct RenkoBrick {
     bool     up;            // true = up brick (close = open + size), false = down
     double   open;          // brick open price (on the brick_size grid)
     double   close;         // brick close price = open +/- brick_size
-    int64_t  close_time_ms; // source candle timestamp — the non-uniform axis label
+    int64_t  close_time_ms; // source candle timestamp - the non-uniform axis label
 };
 
 class RenkoBuilder {
@@ -46,7 +46,7 @@ public:
 
     // Provisional bricks from the live price on top of the committed terminal
     // state, WITHOUT mutating the committed sequence. Cleared + refilled each
-    // call — a retrace simply drops the provisional brick next frame.
+    // call - a retrace simply drops the provisional brick next frame.
     void fold_building(double price, int64_t time_ms);
 
     const std::vector<RenkoBrick>& bricks()   const { return bricks_; }    // committed

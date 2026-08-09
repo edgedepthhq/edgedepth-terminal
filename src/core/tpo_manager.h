@@ -1,6 +1,6 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// tpo_manager.h — TPO (Time Price Opportunity) / Market Profile
+// tpo_manager.h - TPO (Time Price Opportunity) / Market Profile
 //
 // Client-side computation from 30m candle data. No backend endpoint needed.
 // Each session = 24h (00:00-00:00 UTC). Sessions are built by iterating
@@ -89,7 +89,7 @@ public:
     // Clear data for a symbol.
     void clear(const std::string& symbol);
 
-    // ── Config (public — read/written by settings UI) ───────────────────
+    // ── Config (public - read/written by settings UI) ───────────────────
 
     // Session period in hours (24 = daily, 168 = weekly)
     int   session_period_hours = 24;

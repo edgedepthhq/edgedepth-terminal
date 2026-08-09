@@ -47,7 +47,7 @@ enum Stream {
     STREAM_SCANNER = 30;
     // 31 is RESERVED for STREAM_FLOW_DEVIATION (liq Field v2 P3 dedicated
     // stream, deferred behind the Field-swap scorer gate). Mirrors backend
-    // proto/websocket.proto — defined so the id can never be reused.
+    // proto/websocket.proto - defined so the id can never be reused.
     STREAM_FLOW_DEVIATION = 31;
     STREAM_HISTORICAL_VPIN = 32; // VPINHistoryBatch (get_historical_vpin response)
     // Scrub-preview candle batch (get_replay_preview_candles response): the
@@ -144,7 +144,7 @@ message Stat {
 }
 
 // WS4 (2026-07-03): field numbers MUST mirror the backend's canonical wire
-// message `LiquidationUpdate` (the backend's market.proto) — the
+// message `LiquidationUpdate` (the backend's market.proto) - the
 // bytes on the LIQUIDATIONS NATS stream, in archive bundles (raw), and from
 // the replay liquidation_events seed are all that message. The old client
 // numbering (price=1..timestamp_ms=5) predated any consumer and never parsed
@@ -162,13 +162,13 @@ message Liquidation {
 // VPIN / Toxicity (Indicators V1 S1b, 2026-07-03)
 //
 // Field numbers MUST mirror the backend's canonical proto/analytics.proto
-// (WS4 rule — hand-maintained mirrors fail SILENTLY on shape drift; never
+// (WS4 rule - hand-maintained mirrors fail SILENTLY on shape drift; never
 // renumber). The same VPINStateUpdate bytes arrive from three paths: the
 // live STATE_VPIN NATS stream, the replay fetchVPINTimeline DB seed, and
 // archive-bundle vpin.parquet frames.
 // ═══════════════════════════════════════════════════════════════
 message VPINStateUpdate {
-    reserved 1;                  // backend common.Pair — never set on the wire
+    reserved 1;                  // backend common.Pair - never set on the wire
     int64 timestamp_ms = 2;
     double vpin = 3;
     string regime = 4;           // "Normal" | "Elevated" | "High" | "Critical"
@@ -176,7 +176,7 @@ message VPINStateUpdate {
     double sell_pressure = 6;    // unused (backend never fills)
     double mark_price = 7;
     // HMM regime state 0-3, or -1 when the HMM is not driving the regime
-    // (warmup / fallback era / pre-M1 rows) — proto3 zero-default would
+    // (warmup / fallback era / pre-M1 rows) - proto3 zero-default would
     // alias state 0, so absence is explicit.
     int32 hmm_state = 8;
     double hmm_confidence = 9;
@@ -187,7 +187,7 @@ message VPINStateUpdate {
 // CFTI mirror (analytics.cfti.{sym} frames + archive analytics.parquet).
 // Mirrored NOW per the S1b contract so the S7 Toxicity-v2 pane merge is a
 // pure client change; NOT yet routed (the ANALYTICS stream interleaves
-// several message types on one stream id — disambiguation is S7's job).
+// several message types on one stream id - disambiguation is S7's job).
 message CFTIUpdate {
     reserved 1;                  // backend common.Pair
     int64 timestamp_ms = 2;
@@ -209,7 +209,7 @@ message CFTIUpdate {
 // stream: state.positioning.binancef.{sym} live + archive positioning.parquet.
 // Field numbers MUST mirror backend proto/analytics.proto PositioningStateUpdate.
 message PositioningStateUpdate {
-    reserved 1;                  // backend common.Pair — never set on the wire
+    reserved 1;                  // backend common.Pair - never set on the wire
     double top_trader_long_account = 2;   // smart-money long fraction (0..1)
     double global_long_account = 3;       // retail crowd long fraction (0..1)
     double funding_rate = 4;
@@ -239,7 +239,7 @@ message ContagionSnapshot {
 }
 
 // get_historical_vpin response (STREAM_HISTORICAL_VPIN). One point per
-// vpin_buckets row — VOLUME-clock grain, irregular timestamps.
+// vpin_buckets row - VOLUME-clock grain, irregular timestamps.
 message VPINHistoryPoint {
     int64 time_ms = 1;           // bucket end_time (the volume-clock print)
     double vpin = 2;
@@ -426,18 +426,18 @@ message LiquidationHeatmapUpdate {
     repeated double est_50x_usd = 17 [packed=true];
     repeated double est_75x_usd = 18 [packed=true];
     repeated double est_100x_usd = 19 [packed=true];
-    // Flow intensity at snapshot creation time (0.0–1.0).
+    // Flow intensity at snapshot creation time (0.0-1.0).
     // MMT-style per-plot weighting: high during cascades/surges, low during quiet.
     // Frontend scales GPU column brightness by this value.
     double flow_intensity = 20;
 
-    // Bayesian leverage uncertainty (Layer 1) — Var(π) of dominant Dirichlet tier.
+    // Bayesian leverage uncertainty (Layer 1) - Var(π) of dominant Dirichlet tier.
     // High = prior-dominated (few @forceOrder events), low = data-informed.
-    // Frontend uses this to modulate band opacity — uncertain bands rendered dimmer.
+    // Frontend uses this to modulate band opacity - uncertain bands rendered dimmer.
     double bayesian_uncertainty = 23;
 
-    // Hawkes cascade dynamics (Layer 4) — self-exciting point process metrics.
-    // branching_ratio: α/β — <1 subcritical, ~1 critical, >1 supercritical
+    // Hawkes cascade dynamics (Layer 4) - self-exciting point process metrics.
+    // branching_ratio: α/β - <1 subcritical, ~1 critical, >1 supercritical
     // hawkes_severity: 0-1 normalized cascade severity score
     double hawkes_branching_ratio = 24;
     double hawkes_severity = 25;
@@ -446,9 +446,9 @@ message LiquidationHeatmapUpdate {
     repeated double long_stop_density = 26 [packed=true];
     repeated double short_stop_density = 27 [packed=true];
 
-    // Liquidation RAILS (RailTracker lifecycle) — the MMT zero-overlap render. Each rail is one
+    // Liquidation RAILS (RailTracker lifecycle) - the MMT zero-overlap render. Each rail is one
     // episode of liquidity at a (side, price) level, drawn formed_ms → consumed_ms (or to the live
-    // edge while consumed_ms == 0 / pending). A discrete LIST, not per-band arrays — a swept long-liq
+    // edge while consumed_ms == 0 / pending). A discrete LIST, not per-band arrays - a swept long-liq
     // level stops lighting as a long band, so a per-band array can't carry its consume time. Tag 32
     // matches backend liquidation.proto. (28/29 are cascade_sev on the backend, unused here.)
     repeated LiqRail rails = 32;
@@ -506,7 +506,7 @@ message FlowLiquidityUpdate {
     double mark_price = 3;
     double band_width_pct = 4;
 
-    // SoA — per-band data, all arrays same length
+    // SoA - per-band data, all arrays same length
     repeated double price_mid = 5 [packed=true];
     repeated double score = 6 [packed=true];            // Composite flow score 0-1
     repeated double long_score = 7 [packed=true];
@@ -525,7 +525,7 @@ message FlowLiquidityUpdate {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Tick Volume — Per-price-level volume for footprint charts
+// Tick Volume - Per-price-level volume for footprint charts
 // Also used for live VPVR incremental updates
 // ═══════════════════════════════════════════════════════════════
 message TickVolumeLevel {
@@ -541,7 +541,7 @@ message TickVolumeLevels {
 }
 
 message TickVolumeUpdate {
-    reserved 1;                   // backend has common.Pair at field 1 — omitted on wire
+    reserved 1;                   // backend has common.Pair at field 1 - omitted on wire
     int64 timestamp_ms = 2;
     int64 timeframe = 3;
     int64 start_time = 4;
@@ -564,7 +564,7 @@ message TickVolumeUpdateBatch {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// VPVR — Volume Profile Visible Range
+// VPVR - Volume Profile Visible Range
 // ═══════════════════════════════════════════════════════════════
 message VolumeProfileLevel {
     double price = 1;
@@ -592,7 +592,7 @@ message VolumeProfileResponse {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// TPO — Time Price Opportunity / Market Profile
+// TPO - Time Price Opportunity / Market Profile
 // ═══════════════════════════════════════════════════════════════
 message TPOBlock {
     double price = 1;
@@ -634,7 +634,7 @@ message TPOResponse {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Paper Trading — Simulated position tracking
+// Paper Trading - Simulated position tracking
 // ═══════════════════════════════════════════════════════════════
 message PaperPositionUpdate {
     string position_id = 1;
@@ -665,7 +665,7 @@ message PaperPositionUpdate {
     double slippage_entry = 26;
     double slippage_exit = 27;
     int64 duration_seconds = 28;
-    // Partial fill state — frontend renders TP1/TP2 ladder status and
+    // Partial fill state - frontend renders TP1/TP2 ladder status and
     // remaining size. Added 2026-04-16 alongside the partial-fill P&L fix.
     bool tp1_hit = 29;
     bool tp2_hit = 30;
@@ -711,7 +711,7 @@ message Ticker24hUpdate {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Market Scanner — per-symbol microstructure summary for symbol picker.
+// Market Scanner - per-symbol microstructure summary for symbol picker.
 // Published every 10s on scanner.binancef.global.
 // ═══════════════════════════════════════════════════════════════════
 
@@ -744,7 +744,7 @@ message MarketScannerUpdate {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Replay pack (.edpack) — Hot Replay Path B. MIRRORS the backend's
+// Replay pack (.edpack) - Hot Replay Path B. MIRRORS the backend's
 // proto/replaypack.proto (field numbers frozen; keep in lockstep).
 // File layout: "EDPK" + version byte + u32 LE header len + PackHeader,
 // then zstd blocks at the header's (data-section-relative) offsets.
@@ -754,7 +754,7 @@ message MarketScannerUpdate {
 // ═══════════════════════════════════════════════════════════════
 
 message PackFrame {
-    int64 ts_ms = 1;      // event time — becomes WSPayload.event_time_ms
+    int64 ts_ms = 1;      // event time - becomes WSPayload.event_time_ms
     uint32 stream = 2;    // Stream enum numeric value
     int64 timeframe = 3;  // WSPayload.timeframe (0 for archive streams)
     bytes payload = 4;    // WSPayload.data, verbatim
@@ -789,7 +789,7 @@ message PackHeader {
     string description = 12;
     repeated string tags = 13;
 
-    // ── v2 (format_version 2) — optional; empty on v1 packs. Fat seeds sit
+    // ── v2 (format_version 2) - optional; empty on v1 packs. Fat seeds sit
     //    in a seed section at the start of the data area, range-fetched
     //    lazily on first use (never taxes the boot header fetch). ──
     double tick_size = 14;              // instrument tick size (0 = unset)

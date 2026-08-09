@@ -12,7 +12,7 @@ namespace Indicators {
         // Stacked by default (James, 2026-07-04): every indicator gets its
         // own stacked plot. Right-click → Unstack tabs it into the shared
         // active-tab slot (the previous default). Drag-to-merge tab GROUPS
-        // is the S4/F1 follow-up — needs a multi-tab-group pane model.
+        // is the S4/F1 follow-up - needs a multi-tab-group pane model.
         pinned_.push_back(true);
         active_tab_ = static_cast<int>(indicators.size()) - 1;  // focus the new tab
         pane_hidden_ = false;                                   // re-show on add
@@ -86,7 +86,7 @@ namespace Indicators {
         const ImVec2 h0 = ImGui::GetCursorScreenPos();
         ImDrawList* dl = ImGui::GetWindowDrawList();
 
-        // ── Header strip — ELEV fill, BD2 top hairline, BD1 bottom ──
+        // ── Header strip - ELEV fill, BD2 top hairline, BD1 bottom ──
         dl->AddRectFilled(h0, ImVec2(h0.x + avail_w, h0.y + header_h),
                           Theme::u32(Theme::Tokens::ELEV));
         dl->AddLine(ImVec2(h0.x, h0.y + 0.5f),
@@ -96,7 +96,7 @@ namespace Indicators {
 
         int pending_delete = -1;
 
-        // ── Tab pills (left) — small tabs, active = brand-soft / brand text ──
+        // ── Tab pills (left) - small tabs, active = brand-soft / brand text ──
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 2.5f));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.0f, 0.0f));
         ImGui::SetCursorScreenPos(ImVec2(h0.x + 8.0f, h0.y + (header_h - 21.0f) * 0.5f));
@@ -182,8 +182,8 @@ namespace Indicators {
             ImGui::PopStyleVar();
             ImGui::PopStyleColor(4);
 
-            // live value of the active indicator — mono; explicit tag color
-            // (SPEC §0.2 — e.g. Toxicity regime) wins over direction coloring
+            // live value of the active indicator - mono; explicit tag color
+            // (SPEC §0.2 - e.g. Toxicity regime) wins over direction coloring
             double latest = 0.0;
             if (active && active->get_latest_value(latest)) {
                 char vbuf[32];
@@ -246,7 +246,7 @@ namespace Indicators {
 
         if (collapsed_) return;
 
-        // ── Stacked indicator plots — one per pinned indicator + the active
+        // ── Stacked indicator plots - one per pinned indicator + the active
         //    tab; the last one owns the time axis. All x-linked to the chart.
         //    Heights are per-indicator (drag the splitter strip between two
         //    plots to resize the one above; the chart reallocates next frame
@@ -300,7 +300,7 @@ namespace Indicators {
                     ImGui::PopFont();
                 }
 
-                // Latest-value axis tag — explicit tag color (regime etc.)
+                // Latest-value axis tag - explicit tag color (regime etc.)
                 // wins; otherwise direction-colored as before
                 {
                     double latest_val = 0.0;

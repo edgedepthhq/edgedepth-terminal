@@ -60,7 +60,7 @@ void PaperTradingManager::apply_account(const pb::PaperAccountState& pb) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Snapshot handler — full state load on client connect
+// Snapshot handler - full state load on client connect
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void PaperTradingManager::apply_snapshot(const pb::PaperTradingSnapshot& snapshot) {
@@ -85,17 +85,17 @@ void PaperTradingManager::apply_snapshot(const pb::PaperTradingSnapshot& snapsho
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Incremental position update — open, update, or close
+// Incremental position update - open, update, or close
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void PaperTradingManager::apply_position_update(const pb::PaperPositionUpdate& pb) {
     auto pos = parse_position(pb);
 
     if (pos.is_open()) {
-        // Open or update — upsert into active positions
+        // Open or update - upsert into active positions
         positions_[pos.position_id] = std::move(pos);
     } else {
-        // Closed — remove from active, add to journal
+        // Closed - remove from active, add to journal
         positions_.erase(pos.position_id);
         closed_trades_.push_front(std::move(pos));
         while (static_cast<int>(closed_trades_.size()) > MAX_CLOSED) {

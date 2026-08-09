@@ -1,8 +1,8 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// theme.h — edgedepth design system: tokens + ImGui/ImPlot style + fonts
+// theme.h - edgedepth design system: tokens + ImGui/ImPlot style + fonts
 //
-// Source of truth: the edgedepth design system — tokens.json (v0.1.0) and
+// Source of truth: the edgedepth design system - tokens.json (v0.1.0) and
 // edgedepth.css (:root block). Dark-only.
 // Near-black cool charcoal surfaces, teal-up / magenta-rose-down market data,
 // cyan brand accent (used sparingly), amber for replay/events/POC.
@@ -40,37 +40,37 @@ namespace Theme {
     enum class CandleConvention : uint8_t { TealMag, Classic, Muted };
 
     namespace Tokens {
-        // ── Surfaces — theme-tokens.json bg ramp (2026-07-02 redesign) ───────
+        // ── Surfaces - theme-tokens.json bg ramp (2026-07-02 redesign) ───────
         // bg-0 app background / chart canvas · bg-1 bars + panel chrome ·
         // bg-2 raised (hover rows, chips, active tab). Idle controls sit at
         // bg-1 (flat until interacted); hover/pressed raise to bg-2.
         inline constexpr ImVec4 BASE   = from_hex(0x0b0e13);  // bg-0
         inline constexpr ImVec4 PANEL  = from_hex(0x10141b);  // bg-1
         inline constexpr ImVec4 ELEV   = from_hex(0x161b24);  // bg-2
-        inline constexpr ImVec4 INPUT  = from_hex(0x10141b);  // bg-1 — idle controls
+        inline constexpr ImVec4 INPUT  = from_hex(0x10141b);  // bg-1 - idle controls
         inline constexpr ImVec4 HOVER  = from_hex(0x161b24);  // bg-2
         inline constexpr ImVec4 ACTIVE = from_hex(0x161b24);  // bg-2 (accent marks "on")
 
-        // ── Hairlines — line-1 borders/dividers, line-2 control borders ──────
-        inline constexpr ImVec4 BD1  = from_hex(0x1e242e);          // line-1 — the only separation
-        inline constexpr ImVec4 BD2  = from_hex(0x2a3140);          // line-2 — control borders
+        // ── Hairlines - line-1 borders/dividers, line-2 control borders ──────
+        inline constexpr ImVec4 BD1  = from_hex(0x1e242e);          // line-1 - the only separation
+        inline constexpr ImVec4 BD2  = from_hex(0x2a3140);          // line-2 - control borders
         inline constexpr ImVec4 BD3  = from_hex(0x566070, 0.55f);   // hover borders (text-3 hue)
         inline constexpr ImVec4 GRID = from_hex(0x1e242e, 0.55f);   // chart gridlines (line-1)
 
-        // ── Text ramp — text-1/2/3 (+ dimmed text-3 for axis/disabled) ───────
+        // ── Text ramp - text-1/2/3 (+ dimmed text-3 for axis/disabled) ───────
         inline constexpr ImVec4 TX1 = from_hex(0xdfe6ee);  // primary numerals, titles
         inline constexpr ImVec4 TX2 = from_hex(0x8b95a5);  // labels, secondary data
         inline constexpr ImVec4 TX3 = from_hex(0x566070);  // captions, units, group labels
         inline constexpr ImVec4 TX4 = from_hex(0x566070, 0.72f);  // axis ticks, disabled
 
-        // ── Semantic — runtime-mutable (candle convention / accent tweaks) ──
+        // ── Semantic - runtime-mutable (candle convention / accent tweaks) ──
         inline ImVec4 UP         = from_hex(0x2fd6ad);         // up / bid / positive
         inline ImVec4 DOWN       = from_hex(0xee5c78);         // down / ask / negative
         inline ImVec4 UP_SOFT    = from_hex(0x2fd6ad, 0.13f);
         inline ImVec4 DOWN_SOFT  = from_hex(0xee5c78, 0.13f);
         inline ImVec4 UP_LINE    = from_hex(0x2fd6ad, 0.50f);
         inline ImVec4 DOWN_LINE  = from_hex(0xee5c78, 0.50f);
-        inline ImVec4 BRAND      = from_hex(0x35c9c4);         // accent — the only on-state hue
+        inline ImVec4 BRAND      = from_hex(0x35c9c4);         // accent - the only on-state hue
         inline ImVec4 BRAND_SOFT = from_hex(0x35c9c4, 0.14f);
         inline ImVec4 BRAND_LINE = from_hex(0x35c9c4, 0.55f);
         inline ImVec4 BRAND_TX   = from_hex(0x3fe0d0);         // accent textTint (on-state text)
@@ -79,17 +79,17 @@ namespace Theme {
         // dark ink for text on solid BRAND fills (play orb, price chip, pills)
         inline constexpr ImVec4 BRAND_INK = from_hex(0x04181d);
         // resting-book blue (DOM v2): pending limit-order depth, side-agnostic. The
-        // one neutral data hue — teal/rose stays reserved for EXECUTED flow. (Confirm
-        // this hue or remap to a brand blue before shipping — dom.SPEC.md §8.)
+        // one neutral data hue - teal/rose stays reserved for EXECUTED flow. (Confirm
+        // this hue or remap to a brand blue before shipping - dom.SPEC.md §8.)
         inline constexpr ImVec4 REST      = from_hex(0x4d8cd6);
         inline constexpr ImVec4 REST_SOFT = from_hex(0x4d8cd6, 0.30f);
 
         // ── Heatmap ramps (fixed LUT stops; full LUTs built in heatmap code) ─
-        // viridis — liquidation field legend / colormap stops
+        // viridis - liquidation field legend / colormap stops
         inline constexpr ImVec4 VIRIDIS[6] = {
             from_hex(0x440154), from_hex(0x414487), from_hex(0x2a788e),
             from_hex(0x22a884), from_hex(0x7ad151), from_hex(0xfde725)};
-        // ocean — DOM depth cells (small=deep blue → large=green/yellow)
+        // ocean - DOM depth cells (small=deep blue → large=green/yellow)
         inline constexpr ImVec4 OCEAN[6] = {
             from_hex(0x06101d), from_hex(0x0e2f5e), from_hex(0x1c6a8e),
             from_hex(0x26a59a), from_hex(0x7fd17a), from_hex(0xeaf06a)};
@@ -98,7 +98,7 @@ namespace Theme {
     }
 
     // ── Radii ────────────────────────────────────────────────────────────────
-    // Chrome rules: docked panels are SQUARE with 1px line-1 borders only —
+    // Chrome rules: docked panels are SQUARE with 1px line-1 borders only -
     // radius + shadow are reserved for floating chrome (settings panels, menus).
     namespace Radius {
         inline constexpr float R1 = 3.0f;   // small chips / table chips
@@ -106,7 +106,7 @@ namespace Theme {
         inline constexpr float R3 = 6.0f;   // floating panels / popups / menus
     }
 
-    // ── Layout metrics (px, logical) — theme-tokens.json `density` ──────────
+    // ── Layout metrics (px, logical) - theme-tokens.json `density` ──────────
     namespace Layout {
         inline constexpr float TOPBAR_H        = 44.0f;
         inline constexpr float STATSBAR_H      = 52.0f;   // v2 market header (was 62); closeable
@@ -124,11 +124,11 @@ namespace Theme {
         inline constexpr float TIME_AXIS_B     = 22.0f;
     }
 
-    // ── Density (Tweaks-driven; 3–10, default 8) ─────────────────────────────
+    // ── Density (Tweaks-driven; 3-10, default 8) ─────────────────────────────
     int  density();
     void set_density(int d);                 // clamps to [3,10], re-derives row heights
-    float row_h();                           // watchlist rows — d8 = WATCHLIST_ROW_H (24)
-    float row_h_dense();                     // DOM/tape rows — d8 = DOMTAPE_ROW_H (18)
+    float row_h();                           // watchlist rows - d8 = WATCHLIST_ROW_H (24)
+    float row_h_dense();                     // DOM/tape rows - d8 = DOMTAPE_ROW_H (18)
 
     // ── Runtime tweaks ───────────────────────────────────────────────────────
     Accent accent();
@@ -140,15 +140,15 @@ namespace Theme {
     // Hanken Grotesk = chrome/labels/headings. JetBrains Mono = ALL numerics
     // (naturally fixed-advance → tabular alignment for free).
     namespace Fonts {
-        ImFont* ui();           // Hanken Regular 13 — default chrome text
-        ImFont* ui_semibold();  // Hanken SemiBold 13 — emphasis, symbol names
-        ImFont* heading();      // Hanken SemiBold 17 — panel/modal headings
-        ImFont* label();        // Hanken SemiBold 9.5 — uppercase micro-labels
-        ImFont* mono_xs();      // JBM SemiBold ~9.5 — EARLY ACCESS pill / micro badges
-        ImFont* mono_sm();      // JBM Regular 10.5 — dense ladders/tape
-        ImFont* mono();         // JBM Regular 12 — default numerics
-        ImFont* mono_md();      // JBM Medium 14 — mark price, replay clock
-        ImFont* mono_lg();      // JBM SemiBold 20 — large displays
+        ImFont* ui();           // Hanken Regular 13 - default chrome text
+        ImFont* ui_semibold();  // Hanken SemiBold 13 - emphasis, symbol names
+        ImFont* heading();      // Hanken SemiBold 17 - panel/modal headings
+        ImFont* label();        // Hanken SemiBold 9.5 - uppercase micro-labels
+        ImFont* mono_xs();      // JBM SemiBold ~9.5 - EARLY ACCESS pill / micro badges
+        ImFont* mono_sm();      // JBM Regular 10.5 - dense ladders/tape
+        ImFont* mono();         // JBM Regular 12 - default numerics
+        ImFont* mono_md();      // JBM Medium 14 - mark price, replay clock
+        ImFont* mono_lg();      // JBM SemiBold 20 - large displays
     }
 
     // ── Style application ────────────────────────────────────────────────────
@@ -165,7 +165,7 @@ namespace Theme {
     void end_tooltip();
     void tooltip(const char* fmt, ...) IM_FMTARGS(1);  // SetTooltip replacement
 
-    // ── Legacy compatibility layer — migrate widgets off these per-phase ─────
+    // ── Legacy compatibility layer - migrate widgets off these per-phase ─────
     namespace Colors {
         inline const ImVec4& BUY_GREEN       = Tokens::UP;
         inline const ImVec4& SELL_RED        = Tokens::DOWN;

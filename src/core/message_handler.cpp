@@ -19,11 +19,11 @@ int64_t MessageHandler::last_timestamp_ms = 0;
 // ── Reusable arena for protobuf message allocation ──────────────────────────
 // Instead of stack-allocating pb::Trade, pb::BookUpdate, etc. per message
 // (which triggers malloc for internal repeated fields and strings), we reuse
-// a single arena. Reset() reclaims all memory at once — zero per-object frees.
+// a single arena. Reset() reclaims all memory at once - zero per-object frees.
 // ArenaOptions configures a 64KB initial block to avoid early growth.
 static google::protobuf::ArenaOptions make_arena_options() {
     google::protobuf::ArenaOptions opts;
-    opts.initial_block_size = 64 * 1024;  // 64KB — covers most messages
+    opts.initial_block_size = 64 * 1024;  // 64KB - covers most messages
     opts.max_block_size = 256 * 1024;     // 256KB cap
     return opts;
 }
@@ -32,7 +32,7 @@ static thread_local google::protobuf::Arena s_arena(s_arena_opts);
 
 void MessageHandler::handle_message(const std::string& data, const MessageContext& ctx) {
     if (data.empty()) return;
-    // Reset arena — reclaims all memory from previous message at once (zero per-object frees)
+    // Reset arena - reclaims all memory from previous message at once (zero per-object frees)
     s_arena.Reset();
     const auto decompress_result = MessageParser::decompress_zstd(data);
     if (!decompress_result.success) {
@@ -96,7 +96,7 @@ void MessageHandler::route_message(const pb::WSPayload& ws_payload, const Messag
                                      inner_data, inner_size, ctx.streams);
             break;
         case pb::Stream::STREAM_REPLAY_PREVIEW_CANDLES:
-            // Ghost scrub-preview batch — replay contexts only (ctx.preview is
+            // Ghost scrub-preview batch - replay contexts only (ctx.preview is
             // null in live mode and the store write is a main-thread concern,
             // so queue when a dispatch queue is installed, heatmap-style).
             if (ctx.dispatch_queue) {
@@ -279,7 +279,7 @@ void MessageHandler::route_message(const pb::WSPayload& ws_payload, const Messag
         // VPIN (Indicators V1 S1b): finalized volume-bucket prints from the
         // live STATE_VPIN stream, the replay fetchVPINTimeline seed, or an
         // archive bundle's vpin.parquet. Routed to the SeriesCache on the
-        // main thread (same queue rule as heatmap/pattern/debug — the cache
+        // main thread (same queue rule as heatmap/pattern/debug - the cache
         // is written main-thread-only, read during render lock-free).
         case pb::Stream::STREAM_VPIN_STATE:
             if (ctx.series) {
@@ -402,7 +402,7 @@ void MessageHandler::handle_ticker_message(const Terminal::Pair& pair, const voi
 }
 
 void MessageHandler::handle_volumes_message(const Terminal::Pair& pair, int64_t timeframe, const void* data, size_t size, StreamManager* stream_mgr) {
-    // Try batch first — only accept if it has values (same proto3 wire-type issue as stats)
+    // Try batch first - only accept if it has values (same proto3 wire-type issue as stats)
     auto* volumes_pb = google::protobuf::Arena::CreateMessage<pb::Volumes>(&s_arena);
     if (volumes_pb->ParseFromArray(data, static_cast<int>(size)) && volumes_pb->values_size() > 0) {
         handle_volumes_batch(pair, timeframe, *volumes_pb, stream_mgr);
@@ -417,7 +417,7 @@ void MessageHandler::handle_volumes_message(const Terminal::Pair& pair, int64_t 
 }
 
 void MessageHandler::handle_stats_message(const Terminal::Pair& pair, int64_t timeframe, const void* data, size_t size, StreamManager* stream_mgr) {
-    // Try batch first — but only accept if it actually contains values.
+    // Try batch first - but only accept if it actually contains values.
     // A single Stat can be "successfully" parsed as Stats with zero values
     // due to protobuf wire type mismatches being silently skipped in proto3.
     auto* stats_pb = google::protobuf::Arena::CreateMessage<pb::Stats>(&s_arena);
@@ -444,7 +444,7 @@ void MessageHandler::handle_historical_candles(const Terminal::Pair& pair, int64
 void MessageHandler::handle_replay_preview_candles(int64_t timeframe,
                                                    const void* data, size_t size,
                                                    PreviewCandleStore* preview) {
-    if (!preview) return;  // live mode or store torn down — batch is moot
+    if (!preview) return;  // live mode or store torn down - batch is moot
     auto* candles_pb = google::protobuf::Arena::CreateMessage<pb::Candles>(&s_arena);
     if (!candles_pb->ParseFromArray(data, static_cast<int>(size))) {
         return;
@@ -761,7 +761,7 @@ void MessageHandler::handle_liquidation_levels_message(
     }
 
     // The census store is keyed by UNDERLYING ({"hl","BTC"}), which is what the chart
-    // subscribes to — but the ENVELOPE pair is the venue pair the frame arrived under.
+    // subscribes to - but the ENVELOPE pair is the venue pair the frame arrived under.
     // Live those agree (the subject is liquidation_levels.hl.BTC); in REPLAY they do
     // not: an archived binancef/btcusdt event carries census frames stamped with the
     // event's own pair, which would file real HL levels under a key nothing reads and
@@ -913,7 +913,7 @@ void MessageHandler::handle_paper_trading_message(
 {
     if (!paper_mgr) return;
 
-    // Try snapshot first (sent on connect — contains account + all positions)
+    // Try snapshot first (sent on connect - contains account + all positions)
     auto* snapshot_pb = google::protobuf::Arena::CreateMessage<pb::PaperTradingSnapshot>(&s_arena);
     if (snapshot_pb->ParseFromArray(data, static_cast<int>(size)) &&
         snapshot_pb->has_account()) {
@@ -964,11 +964,11 @@ void MessageHandler::handle_scanner_message(
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Indicators V1 (S1b) — VPIN pathfinder
+// Indicators V1 (S1b) - VPIN pathfinder
 // ═══════════════════════════════════════════════════════════════════════════
 
 // One VPINStateUpdate = one finalized volume-bucket print (the backend only
-// publishes from completeBucket) — insert straight into the SeriesCache as a
+// publishes from completeBucket) - insert straight into the SeriesCache as a
 // grain point. Live, replay seed, and archive frames are the same bytes.
 void MessageHandler::handle_vpin_state_message(
     const Terminal::Pair& pair,

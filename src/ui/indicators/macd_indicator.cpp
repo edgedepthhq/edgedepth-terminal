@@ -141,7 +141,7 @@ void MACDIndicator::render_content(double x_min, double x_max) {
     const ImVec2 z_b = ImPlot::PlotToPixels(x_max, 0);
     draw_list->AddLine(z_a, z_b, IM_COL32(128, 128, 128, 40), 1.0f);
 
-    // Layer 1: Histogram bars — pixel-decimated
+    // Layer 1: Histogram bars - pixel-decimated
     {
         int last_px_col = -1;
         double col_hist = 0;

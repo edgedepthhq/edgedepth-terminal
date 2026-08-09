@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// logo_manager.cpp — see logo_manager.h.
+// logo_manager.cpp - see logo_manager.h.
 //
 // Browser-decode → GL-texture, mirroring recorder_glue's cam-upload path:
 //   1. logo_js_load(url)   starts an <img crossOrigin=anonymous> (R2 CORS).
@@ -68,7 +68,7 @@ std::string coin_icon_base(const std::string& base_asset) {
     s.reserve(base_asset.size());
     for (char c : base_asset) s += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-    // strip trailing quote (defensive — base_asset usually has none)
+    // strip trailing quote (defensive - base_asset usually has none)
     static const char* quotes[] = {"usdt", "usdc", "busd", "fdusd", "usd"};
     for (const char* q : quotes) {
         const size_t ql = std::char_traits<char>::length(q);
@@ -229,7 +229,7 @@ void LogoManager::draw_exchange(ImDrawList* dl, const std::string& exchange_id, 
     if (tex) {
         dl->AddImage(tex, p, ImVec2(p.x + size, p.y + size));
     }
-    // No fallback glyph — exchange call sites keep their text label regardless.
+    // No fallback glyph - exchange call sites keep their text label regardless.
 }
 
 void LogoManager::tick() {

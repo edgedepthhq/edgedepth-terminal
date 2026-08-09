@@ -1,14 +1,14 @@
 #pragma once
 // ═══════════════════════════════════════════════════════════════════════════════
-// indicator_series.h — IndicatorSeriesManager (the shared SeriesCache)
+// indicator_series.h - IndicatorSeriesManager (the shared SeriesCache)
 //
 // Indicators V1 §5.6: the client-side cache for stream-backed indicator
-// series — per (symbol, series) sorted vectors keyed by absolute ms,
+// series - per (symbol, series) sorted vectors keyed by absolute ms,
 // dedup on equal timestamp (replace), trim_after for replay rewinds,
 // clear_all on seek. The observed_events semantics, generalized.
 //
 // VPIN is the pathfinder occupant; hawkes/cfti/flow-deviation add their
-// typed stores here in S5–S7. Stored points are the FINALIZED grain
+// typed stores here in S5-S7. Stored points are the FINALIZED grain
 // (parity grain rule): every VPINStateUpdate is a volume-bucket
 // completion, so live/replay/history/archive all converge on the same
 // series of record.
@@ -43,7 +43,7 @@ namespace Series {
 class IndicatorSeriesManager {
 public:
     // Insert one point, keeping the vector sorted by ts_ms. Equal timestamp
-    // replaces in place (idempotent re-delivery — replay rewind redispatch,
+    // replaces in place (idempotent re-delivery - replay rewind redispatch,
     // history overlapping the live stream).
     void add_vpin(const std::string& symbol, const Series::VPINPoint& p);
 
@@ -55,7 +55,7 @@ public:
     // Render-side read. Never null; empty vector when no data.
     const std::vector<Series::VPINPoint>& vpin(const std::string& symbol) const;
 
-    // Bumped on every mutation of the symbol's series — widgets compare to
+    // Bumped on every mutation of the symbol's series - widgets compare to
     // repopulate their render caches only when something actually changed.
     uint64_t vpin_revision(const std::string& symbol) const;
 
@@ -64,7 +64,7 @@ public:
     // one request never guarantees full window coverage).
     int64_t vpin_oldest_ts(const std::string& symbol) const;
 
-    // Replay hygiene — mirrors LiquidationHeatmapManager::observed_events:
+    // Replay hygiene - mirrors LiquidationHeatmapManager::observed_events:
     //   rewind (<<)  → trim_after(cutoff): points past the target are the
     //                  replay's future now.
     //   seek         → clear_all(): backend re-seeds the full window.

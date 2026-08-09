@@ -35,7 +35,7 @@ struct std::hash<OrderbookKey> {
 // The write buffer is continuously mutated (insert/erase on every depth update).
 // A pointer swap would expose widgets to a half-mutated state during the next
 // WS callback. Copying is ~50-100μs for a 1000-level orderbook (cache-friendly
-// FlatMap memcpy) — well within frame budget.
+// FlatMap memcpy) - well within frame budget.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 struct DoubleBufferedOrderbook {
@@ -74,7 +74,7 @@ public:
     // re-request path) that must not be changed as a side effect here.
     void set_replay_mode(bool on) { replay_mode_ = on; }
 
-    // Called by widgets — returns the READ buffer (stable for entire frame)
+    // Called by widgets - returns the READ buffer (stable for entire frame)
     const Terminal::Orderbook* get_orderbook(const Terminal::Pair& pair) const;
 
     // Called once per frame before update_and_render_widgets()
@@ -85,7 +85,7 @@ public:
     void clear_all() { orderbooks_.clear(); }
 
     // Zero last_update_id on all orderbooks (used when the data source changes,
-    // e.g., >> forward skip kills a drip-feed — the batch-delivered data has a
+    // e.g., >> forward skip kills a drip-feed - the batch-delivered data has a
     // completely different update_id chain). Zeroing bypasses the continuity
     // check for the first delta from the new source.
     void reset_update_ids() {
