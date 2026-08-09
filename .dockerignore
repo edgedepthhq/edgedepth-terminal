@@ -1,0 +1,7 @@
+.git
+.github
+build
+build-*
+node_modules
+*.edpack
+assets/screenshot.png

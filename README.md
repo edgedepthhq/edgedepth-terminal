@@ -8,6 +8,25 @@ C++20 compiled to WebAssembly. Dear ImGui + ImPlot for immediate-mode rendering,
 
 This is the full source of the terminal that powers [edgedepth.com](https://edgedepth.com): the same canvas, the same widgets, the same render loop. It is not a demo build or a stripped-down "community edition."
 
+## Quick start
+
+The terminal and a live market data feed, both on your machine:
+
+```bash
+git clone https://github.com/edgedepthhq/edgedepth-terminal.git
+cd edgedepth-terminal
+docker compose up
+```
+
+Then open **http://localhost:8080**. No API key, no account, no signup. The
+feed is [edgedepth-gateway](https://github.com/edgedepthhq/edgedepth-gateway),
+a small MIT-licensed Go service that bridges Binance's public WebSocket
+streams into this terminal's wire format.
+
+Images are pulled prebuilt so this starts in seconds. To compile the
+WebAssembly from source instead, `docker compose up --build` (that pulls the
+Emscripten toolchain and takes a while).
+
 ## Why this exists
 
 Web trading UIs are usually React apps fighting the DOM for every orderbook tick. This terminal takes the approach used by native trading software, an immediate-mode GUI redrawn every frame on the GPU, and ships it through WebAssembly. A full orderflow stack (chart, DOM ladder, tape, heatmap) renders at 170+ FPS in a browser tab with frame times around 5ms.
@@ -38,7 +57,7 @@ The terminal is a client. It speaks a documented protobuf-over-WebSocket wire fo
 
 The schema in [`protos/messages.proto`](protos/messages.proto) is the whole contract. A feed that emits trades, candles, orderbook updates, stats, and liquidation events, all derivable from any exchange's public streams, lights up the chart, DOM, tape, orderbook, heatmap, liquidation Field, volume profile, TPO, and paper trading.
 
-**Community gateway:** a small open-source Go service that bridges Binance's public WebSocket streams into this wire format (`docker compose up` for a live terminal on localhost) is on its way. Watch this org.
+**Community gateway:** [edgedepth-gateway](https://github.com/edgedepthhq/edgedepth-gateway) is exactly that feed, MIT licensed. It serves trades, candles, orderbook, stats and liquidations from Binance's free public streams, and answers historical candle requests from their REST klines so the chart boots with real history. It also builds **1s, 5s, 15s and 30s candles** from the raw trade stream, a resolution the exchange itself does not publish. See the [Quick start](#quick-start) to run both together.
 
 A few layers are driven by EdgeDepth's proprietary analytics streams: VPIN toxicity, positioning and smart-money flow, modelled liquidation estimates, pattern detection, and the scanner's composite scores. With a raw-data feed those panels simply stay empty and the terminal degrades gracefully. The hosted product at [edgedepth.com](https://edgedepth.com) provides them, along with deep historical replay and structured courses taught inside the terminal.
 

@@ -1,0 +1,62 @@
+name: release
+
+# Publishes the container image so `docker compose up` pulls in seconds
+# instead of making every visitor download the Emscripten toolchain and
+# compile C++20 to WebAssembly on first run.
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository }}
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # linux/amd64 only, deliberately. The build stage compiles C++20 to
+          # WebAssembly under Emscripten, and the output is architecture
+          # independent; only the nginx runtime layer differs per arch.
+          # Building for arm64 would run that whole toolchain under emulation
+          # for no benefit. Apple Silicon runs this image fine under Docker's
+          # emulation, because all it does at runtime is serve static files.
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

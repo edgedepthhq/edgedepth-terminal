@@ -1,0 +1,45 @@
+# The whole stack on your machine: a terminal and a market data feed.
+#
+#   docker compose up
+#   open http://localhost:8080
+#
+# No API key and no account. Binance's public market data needs neither.
+#
+# Images are pulled from GHCR by default so this starts in seconds. To compile
+# everything from source instead (the terminal build pulls the Emscripten
+# toolchain and takes a while):
+#
+#   docker compose up --build
+
+services:
+  gateway:
+    image: ghcr.io/edgedepthhq/edgedepth-gateway:latest
+    # Built from its own repo. MIT, separate from the AGPL terminal.
+    build: https://github.com/edgedepthhq/edgedepth-gateway.git
+    container_name: edgedepth-gateway
+    ports:
+      - "9001:8080"
+    environment:
+      EDGEDEPTH_ADDR: ":8080"
+      EDGEDEPTH_LOG: "info"
+      # Switch to "trade" if the tape stays empty while the orderbook updates.
+      # Some networks do not serve Binance's @aggTrade stream, and the gateway
+      # logs a warning naming this fix when it detects that.
+      BINANCE_TRADE_STREAM: "aggTrade"
+    restart: unless-stopped
+
+  terminal:
+    image: ghcr.io/edgedepthhq/edgedepth-terminal:latest
+    build: .
+    container_name: edgedepth-terminal
+    ports:
+      - "8080:8080"
+    environment:
+      # This URL is resolved by YOUR BROWSER, not by this container, so it must
+      # be the host-visible address. Using the compose service name here
+      # ("ws://gateway:8080/ws") is the obvious mistake and it fails: the
+      # browser cannot resolve Docker's internal DNS.
+      EDGEDEPTH_WS_URL: "ws://localhost:9001/ws"
+    depends_on:
+      - gateway
+    restart: unless-stopped

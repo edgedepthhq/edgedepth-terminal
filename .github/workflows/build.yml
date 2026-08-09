@@ -2,7 +2,7 @@ name: build
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
 
 jobs:
@@ -29,4 +29,6 @@ jobs:
         run: cd build && emmake make -j$(nproc) c_based_trader_client
 
       - name: Verify artifacts
-        run: ls -la build/index.wasm build/index.js build/index.html
+        # Four artifacts, not three. index.data holds the fonts preloaded via
+        # --preload-file in CMakeLists.txt; the app renders no text without it.
+        run: ls -la build/index.wasm build/index.js build/index.html build/index.data
