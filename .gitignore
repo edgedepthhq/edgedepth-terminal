@@ -1,20 +1,25 @@
-# Build artifacts
+# Build directories. Everything Emscripten emits lands in one of these, which
+# is why this file does NOT blanket-ignore *.js, *.html, *.wasm or *.data.
+# Those rules also swallowed src/shell.html, src/coi-serviceworker.js and
+# src/closure_externs.js, which are SOURCE files the build depends on
+# (--shell-file at CMakeLists.txt:528, the POST_BUILD copy at :635). The
+# result was a repo nobody could build from a clean clone.
 build/
 build-*/
 cmake-build-*/
-*.wasm
-*.js
-*.html
-*.data
-*.worker.js
+_deps/
 
-# Generated protobuf files (C++ only)
+# In-tree Emscripten output, if CMake is configured at the repo root rather
+# than in a build directory.
+/index.js
+/index.html
+/index.wasm
+/index.data
+/index.worker.js
+
+# Generated protobuf (C++ only)
 src/pb/*.pb.h
 src/pb/*.pb.cc
-*.pb.h
-*.pb.cc
-
-# But keep the directory structure
 !src/pb/.gitkeep
 
 # Compiled objects
@@ -22,8 +27,6 @@ src/pb/*.pb.cc
 *.a
 *.so
 *.dylib
-
-_deps/
 
 # IDE
 .vscode/
@@ -37,4 +40,4 @@ _deps/
 Thumbs.db
 
 # Logs
-*.logsrc/pb
+*.log

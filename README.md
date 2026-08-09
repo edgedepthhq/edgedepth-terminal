@@ -63,7 +63,17 @@ A few layers are driven by EdgeDepth's proprietary analytics streams: VPIN toxic
 
 ## Building
 
-Prerequisites: [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html), `protobuf-compiler` (`protoc`), CMake 3.15+.
+Prerequisites, and the versions matter:
+
+- [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html) **4.0 or newer**. The client builds with `-sUSE_SDL=3`, and the SDL3 port does not exist in Emscripten 3.x, where the build fails with `SDL3/SDL.h file not found`.
+- **`protoc` 21.x**, to match the protobuf v21.12 runtime CMake fetches. Distro packages are usually too old: Ubuntu 22.04 ships 3.12.4, which generates headers the runtime rejects. CMake checks this and tells you if it is wrong.
+  ```bash
+  curl -fsSLO https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
+  sudo unzip -o protoc-21.12-linux-x86_64.zip -d /usr/local
+  ```
+- CMake 3.15+.
+
+If you would rather not install any of this, `docker compose up --build` does the whole thing in a container.
 
 ```bash
 source /path/to/emsdk/emsdk_env.sh
