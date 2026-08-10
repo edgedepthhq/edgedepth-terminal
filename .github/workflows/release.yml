@@ -58,5 +58,11 @@ jobs:
           # for no benefit. Apple Silicon runs this image fine under Docker's
           # emulation, because all it does at runtime is serve static files.
           platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # No GitHub Actions cache here, deliberately. mode=max exports every
+          # intermediate layer, and this image is built on emsdk: several GB
+          # against a 10GB per-repo cache limit. That export failed with
+          # "error writing layer blob: not_found" and took the whole release
+          # down with it, while the much smaller gateway image cached fine.
+          # A slower release is a fair trade for one that finishes. If build
+          # time becomes a problem, use a registry cache instead of the
+          # Actions cache: type=registry,ref=...:buildcache has no size cap.
