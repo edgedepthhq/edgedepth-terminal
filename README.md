@@ -1,12 +1,16 @@
 # EdgeDepth Terminal
 
-**A professional orderflow trading terminal that runs in your browser at 170+ FPS.**
+**An open-source orderflow terminal and local market-data replay/testing workbench that runs in your browser at 170+ FPS.**
 
 C++20 compiled to WebAssembly. Dear ImGui + ImPlot for immediate-mode rendering, SDL3 + WebGL2 underneath, protobuf over WebSocket for data. No Electron, no DOM in the hot path, no garbage collector between you and the tape.
 
 ![EdgeDepth Terminal](assets/screenshot.png)
 
-This is the full source of the terminal that powers [edgedepth.com](https://edgedepth.com): the same canvas, the same widgets, the same render loop. It is not a demo build or a stripped-down "community edition."
+This is the full source of the terminal that powers [EdgeDepth](https://edgedepth.com/open-source?utm_source=github&utm_medium=oss&utm_campaign=terminal): the same canvas, the same widgets, the same render loop. It is not a demo build or a stripped-down "community edition."
+
+Run it against a local exchange feed, point it at your own wire-compatible data,
+or use deterministic `.edpack` recordings as repeatable fixtures. If you prefer
+a managed feed and stored history, open the [hosted live terminal](https://app.edgedepth.com/terminal?utm_source=github&utm_medium=oss&utm_campaign=terminal).
 
 ## Quick start
 
@@ -42,6 +46,7 @@ Open-source trade aggregators and charting components exist, but complete browse
 - **Volume profile (VPVR), TPO / Market Profile, footprint**: built client-side from per-price tick volume
 - **Liquidation heatmap layers**: the dense liquidation Field, leverage-tier levels, and profile rendering. The Field is computed client-side from candles, so it works on any feed
 - **Market replay**: deterministic replay engine with scrubbing, and self-contained `.edpack` files that play entirely client-side with no server
+- **Replay Library**: a manifest-driven browser of free, curated `.edpack` recordings for local replay and regression testing
 - **Paper trading**: simulated positions against live data
 - **Docking layout**: drag, split, and persist panel arrangements (ImGui docking)
 - **Watchlist / scanner**: 800+ Binance Futures pairs with 24h stats
@@ -59,11 +64,26 @@ The schema in [`protos/messages.proto`](protos/messages.proto) is the whole cont
 
 **Community gateway:** [edgedepth-gateway](https://github.com/edgedepthhq/edgedepth-gateway) is exactly that feed, MIT licensed. It serves trades, candles, orderbook, stats and liquidations from Binance's free public streams, and answers historical candle requests from their REST klines so the chart boots with real history. It also builds **1s, 5s, 15s and 30s candles** trade by trade from the raw stream, updating the building candle as each trade arrives. See the [Quick start](#quick-start) to run both together.
 
-A few layers are driven by EdgeDepth's proprietary analytics streams: VPIN toxicity, positioning and smart-money flow, modelled liquidation estimates, pattern detection, and the scanner's composite scores. With a raw-data feed those panels simply stay empty and the terminal degrades gracefully. The hosted product at [edgedepth.com](https://edgedepth.com) provides them, along with deep historical replay and structured courses taught inside the terminal.
+A few layers are driven by EdgeDepth's proprietary analytics streams: VPIN toxicity, positioning and smart-money flow, modelled liquidation estimates, pattern detection, and the scanner's composite scores. With a raw-data feed those panels simply stay empty and the terminal degrades gracefully. The [hosted product](https://app.edgedepth.com/terminal?utm_source=github&utm_medium=oss&utm_campaign=terminal) provides them, along with historical replay and structured courses taught inside the terminal.
 
-The dividing line is simple: self-hosting shows the live market; the hosted service remembers it. Pro rewinds 30 days and includes 10 record searches a month. Research extends replay and lookup to 90 days, with 300 searches a month plus REST API and MCP access.
+The main dividing line is time. Your local terminal starts recording when you
+install it. EdgeDepth has already been recording 660+ markets for months. Pro
+lets you replay an arbitrary moment from the last 30 days.
 
-## Replay a recorded event, no feed at all
+Research serves a different job: testing how often a defined condition occurred
+and what followed across a 90-day record. It includes a larger search budget plus
+REST API and MCP access. See [plans](https://edgedepth.com/pricing?utm_source=github&utm_medium=oss&utm_campaign=terminal) only when you need stored history or archive-wide evidence.
+
+## Replay Library and local test packs
+
+No feed is required for a recording. In the top bar choose **Replay**, then
+**Open Replay Library**. If a chart is already open, the same widget is under
+**+ widget**, then **Replay Library**. A selected pack streams directly from
+static hosting and replays locally with no account or replay server.
+
+The checked-in [`replay-library/manifest.json`](replay-library/manifest.json)
+is also the production catalog source. It starts with one verified ZEC event;
+additional picks can be published without rebuilding the terminal.
 
 The terminal can play a self-contained `.edpack` recording entirely
 client-side: orderbook, tape, liquidations, footprint and volume profile
@@ -73,8 +93,9 @@ included, with nothing but static file hosting behind it.
 ?pack=<url-encoded pack URL>&packsym=<symbol>
 ```
 
-Try it with a real one: 30 minutes of the June 2026 ZEC cascade, recorded
-tick-by-tick as it fell through 8 percent with a flash wick to 250 (53 MB):
+Try the catalog's first recording directly: 30 tick-by-tick minutes from a
+June 2026 ZEC selloff, including the order book, tape, liquidations, footprint
+and volume profile data (53 MB):
 
 ```
 http://localhost:8080/?pack=https%3A%2F%2Freplays.edgedepth.com%2Freplays%2Fzec_cascade_demo%2Fv1.edpack&packsym=zecusdt
@@ -85,6 +106,19 @@ seeking need it. If you host packs yourself, the server (and any CDN in front
 of it) must allow the `Range` header in its CORS policy and answer
 `206 Partial Content`; a server that ignores `Range` and answers `200` with
 the whole body forces the client to buffer the entire file into memory.
+
+To use the widget with a private or local corpus, point it at another v1
+manifest without rebuilding:
+
+```text
+?replayLibrary=http%3A%2F%2Flocalhost%3A9000%2Fmanifest.json
+```
+
+Or set `window.__EDGEDEPTH_REPLAY_LIBRARY_URL__` before the WebAssembly glue
+loads. See [`replay-library/README.md`](replay-library/README.md) for the
+manifest and CORS contract. The self-hosted client contains no phone-home
+analytics; public pack engagement can be measured from aggregate object
+requests at the pack host.
 
 ## Building
 
@@ -152,4 +186,4 @@ Please keep PRs focused. The render loop has strict conventions: no allocation i
 
 ---
 
-Built by [EdgeDepth](https://edgedepth.com): real-time crypto microstructure, liquidation heatmaps, orderflow analytics, and courses taught inside the live terminal.
+Built by [EdgeDepth](https://edgedepth.com/open-source?utm_source=github&utm_medium=oss&utm_campaign=terminal): real-time crypto microstructure, liquidation heatmaps, orderflow analytics, and courses taught inside the live terminal.

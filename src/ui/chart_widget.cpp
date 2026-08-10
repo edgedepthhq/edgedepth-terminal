@@ -2499,13 +2499,15 @@ void ChartWidget::render_controls() {
     // Add-widget menu (single-select). In the live terminal a symbol-bearing
     // choice opens the symbol picker (multi-symbol, same as the old topbar +); in
     // the embedded single-symbol replays it files a request for THIS chart's
-    // symbol. Paper Trading carries no symbol, so it always files a request.
+    // symbol. Global widgets carry no symbol, so they always file a request.
     if (ImGui::BeginPopup("add_widget_popup")) {
         using PW = Menu::SymbolPickerState::PendingWidget;
         const bool embedded = EducationBoot::instance().is_embedded()
                            || EducationBoot::instance().is_pack();
         auto add = [&](PW type) {
-            if (type != PW::PaperTrading && !embedded) {
+            const bool global_widget = type == PW::PaperTrading
+                                    || type == PW::ReplayLibrary;
+            if (!global_widget && !embedded) {
                 Menu::g_symbol_picker.pending = type;
                 Menu::g_symbol_picker.open = true;
                 Menu::g_symbol_picker.search_buf[0] = '\0';
@@ -2526,6 +2528,7 @@ void ChartWidget::render_controls() {
         if (ImGui::MenuItem("Debug"))     add(PW::Debug);
         ImGui::Separator();
         if (ImGui::MenuItem("Paper Trading")) add(PW::PaperTrading);
+        if (!embedded && ImGui::MenuItem("Replay Library")) add(PW::ReplayLibrary);
         ImGui::EndPopup();
     }
 

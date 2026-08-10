@@ -19,6 +19,7 @@ enum class WidgetType {
     Heatmap,
     DebugLog,
     PaperTrading,
+    ReplayLibrary,
     Watchlist
 };
 

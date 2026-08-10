@@ -877,6 +877,7 @@ void update_and_render_widgets() {
             case WidgetType::Watchlist:    sec = "Watchlist"; break;
             case WidgetType::Stats:        sec = "Stats";     break;
             case WidgetType::PaperTrading: sec = "Paper";     break;
+            case WidgetType::ReplayLibrary: sec = "ReplayLib"; break;
             default: break;
         }
         g_profiler.begin(sec);
@@ -1542,6 +1543,22 @@ int main(int, char**) {
                 const auto* meta = SymbolRegistry::instance().get(replay_pair.exchange, replay_pair.symbol);
                 double dom_tick = meta ? meta->tick_size : 0.1;
 
+                // A pack can be the terminal's first data source. In that zero-feed
+                // path there is no live chart to swap onto the replay managers, so
+                // create a replay-owned chart and rebuild the dock for this symbol.
+                const bool has_chart = std::any_of(
+                    g_app.widgets.begin(), g_app.widgets.end(), [](const auto& widget) {
+                        return widget && widget->is_open &&
+                               widget->type() == WidgetType::Chart;
+                    });
+                if (!has_chart) {
+                    LayoutManager::reset_layout_for(replay_pair.exchange, replay_pair.symbol);
+                    auto chart_w = std::make_unique<ChartWidget>(
+                        replay_pair, g_app.app_ctx, dom_tick);
+                    chart_w->is_replay_widget = true;
+                    g_app.widgets.push_back(std::move(chart_w));
+                }
+
                 auto trades_w = std::make_unique<TradesWidget>(replay_pair, g_app.app_ctx, fmt);
                 trades_w->is_replay_widget = true;
                 // No title suffix - inherit live widget's dock position via same ImGui window name
@@ -1554,15 +1571,19 @@ int main(int, char**) {
             }
         } else {
             // Close replay-created widgets, restore hidden live widgets.
+            bool closed_replay_chart = false;
             for (auto& w : g_app.widgets) {
                 if (!w) continue;
                 if (w->is_replay_widget) {
+                    closed_replay_chart = closed_replay_chart ||
+                                          w->type() == WidgetType::Chart;
                     w->is_open = false;  // Will be erased by cleanup loop
                 } else if (!w->is_open &&
                            (w->type() == WidgetType::Trades || w->type() == WidgetType::DOM)) {
                     w->is_open = true;  // Restore hidden live widget
                 }
             }
+            if (closed_replay_chart) LayoutManager::reset_layout();
             g_app.build_app_context();
             // Reset chart overlay subscriptions so they re-subscribe on live
             for (auto& w : g_app.widgets) {

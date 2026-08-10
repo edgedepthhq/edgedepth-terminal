@@ -9,6 +9,8 @@ float LayoutManager::top_reserve = 0.0f;
 float LayoutManager::bottom_reserve = 0.0f;
 float LayoutManager::status_reserve = 0.0f;
 float LayoutManager::left_reserve = 0.0f;
+std::string LayoutManager::pending_exchange;
+std::string LayoutManager::pending_symbol;
 
 void LayoutManager::setup_default_layout(const std::string& exchange, const std::string& symbol) {
     ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
@@ -112,7 +114,12 @@ void LayoutManager::render_dockspace(const std::function<void()>& menu_callback,
     ImGui::PopStyleVar(3);
 
     if (!is_initialized) {
-        setup_default_layout(exchange, symbol);
+        const bool has_pending_pair = !pending_exchange.empty() && !pending_symbol.empty();
+        setup_default_layout(
+            has_pending_pair ? pending_exchange : exchange,
+            has_pending_pair ? pending_symbol : symbol);
+        pending_exchange.clear();
+        pending_symbol.clear();
     }
 
     ImGui::DockSpace(ImGui::GetID("MainDockSpace"), ImVec2(0, 0),
@@ -127,4 +134,13 @@ void LayoutManager::render_dockspace(const std::function<void()>& menu_callback,
 
 void LayoutManager::reset_layout() {
     is_initialized = false;
+    pending_exchange.clear();
+    pending_symbol.clear();
+}
+
+void LayoutManager::reset_layout_for(
+    const std::string& exchange, const std::string& symbol) {
+    is_initialized = false;
+    pending_exchange = exchange;
+    pending_symbol = symbol;
 }

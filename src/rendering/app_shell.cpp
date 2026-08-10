@@ -1272,6 +1272,12 @@ namespace {
             ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
             ImGui::TextUnformatted("Right-click a candle on the chart, then \xE2\x80\x9CReplay from here\xE2\x80\x9D.");
             ImGui::PopStyleColor();
+            ImGui::Separator();
+            if (ImGui::MenuItem("Open Replay Library")) {
+                Menu::g_widget_add_request.type =
+                    Menu::SymbolPickerState::PendingWidget::ReplayLibrary;
+                Menu::g_widget_add_request.pending = true;
+            }
             ImGui::EndPopup();
         }
 
@@ -1663,7 +1669,7 @@ namespace {
         if (feed_alive && !ctx.replay_mgr().is_active() && vp->Size.x >= 1080.0f &&
             presence.absent(
                 static_cast<uint32_t>(Terminal::Stream::PositioningState))) {
-            const char* note = "SELF-HOSTED FEED \xc2\xb7 WHY SOME PANELS ARE EMPTY";
+            const char* note = "SELF-HOSTED FEED \xc2\xb7 OPEN A FULL REPLAY";
             const float note_x = sb_x + 12.0f + ImGui::CalcTextSize(left).x + 26.0f;
             const ImVec2 nts = ImGui::CalcTextSize(note);
             ImGui::SetCursorScreenPos(ImVec2(note_x, bar_y + 2.0f));
@@ -1673,13 +1679,14 @@ namespace {
             dl->AddText(ImVec2(note_x, ty),
                         u32(note_hov ? Tokens::BRAND_TX : Tokens::TX3), note);
             if (note_hov) {
-                Theme::tooltip("VPIN, positioning, scanner scores and modelled liquidation\n"
-                               "levels ride EdgeDepth's hosted analytics; a raw exchange\n"
-                               "feed does not carry them. Everything else works. Click to\n"
-                               "read what is in each tier.");
+                Theme::tooltip("Your raw feed does not carry every hosted analytics layer.\n"
+                               "Click to open a curated event with recorded order book,\n"
+                               "tape, liquidations, footprint and volume profile data.");
             }
             if (note_clicked) {
-                EM_ASM(window.open('https://edgedepth.com/open-source#empty-panels', '_blank'););
+                Menu::g_widget_add_request.type =
+                    Menu::SymbolPickerState::PendingWidget::ReplayLibrary;
+                Menu::g_widget_add_request.pending = true;
             }
         }
 

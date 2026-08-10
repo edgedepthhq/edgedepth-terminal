@@ -8,6 +8,7 @@
 #include "ui/stats_widget.h"
 #include "ui/debug_widget.h"
 #include "ui/positions_panel.h"
+#include "ui/replay_library_widget.h"
 #include "stream_handler.h"
 #include "types/types.h"
 #include "imgui.h"
@@ -884,6 +885,18 @@ void resolve_widget_add_request(
             widgets.push_back(std::make_unique<DebugWidget>(req.pair, ctx)); break;
         case PW::PaperTrading:
             widgets.push_back(std::make_unique<PositionsPanel>(ctx)); break;
+        case PW::ReplayLibrary: {
+            const bool already_open = std::any_of(
+                widgets.begin(), widgets.end(), [](const auto& widget) {
+                    return widget && widget->type() == WidgetType::ReplayLibrary;
+                });
+            if (!already_open) {
+                widgets.push_back(std::make_unique<ReplayLibraryWidget>(ctx));
+            } else {
+                ImGui::SetWindowFocus("Replay Library###replay_library");
+            }
+            break;
+        }
         default: break;
     }
 }

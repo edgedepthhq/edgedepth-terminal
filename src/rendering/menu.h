@@ -21,7 +21,8 @@ namespace Menu {
         bool open = false;
         char search_buf[64] = {};
         enum class PendingWidget {
-            None, Orderbook, DOM, Trades, Stats, Charts, Debug, PaperTrading
+            None, Orderbook, DOM, Trades, Stats, Charts, Debug, PaperTrading,
+            ReplayLibrary
         } pending = PendingWidget::None;
 
         int selected_category = -1;
@@ -87,7 +88,7 @@ namespace Menu {
     // suppressed, so the old topbar "+" symbol picker never renders. The chart
     // toolbar's "+ widget" instead files a resolved request for THIS chart's
     // symbol (single-symbol replays), drained once per frame by the main loop in
-    // EVERY host mode. PaperTrading carries no symbol and always uses this path.
+    // EVERY host mode. Global widgets carry no symbol and always use this path.
     struct WidgetAddRequest {
         SymbolPickerState::PendingWidget type = SymbolPickerState::PendingWidget::None;
         Terminal::Pair pair;

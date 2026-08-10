@@ -1,0 +1,25 @@
+{
+  "schema": "edgedepth.replay-library.v1",
+  "updated_at": "2026-08-10T00:00:00Z",
+  "packs": [
+    {
+      "id": "zec-liquidation-cascade-2026-06-05",
+      "event_id": "20260605_025328_zecusdt_crash_4h_4h_-25pct",
+      "title": "ZEC selloff, 5 Jun 2026",
+      "summary": "Thirty tick-by-tick minutes from a ZEC selloff, including the order book, tape, liquidations, footprint and volume profile data.",
+      "exchange": "Binance Futures",
+      "exchange_id": "binancef",
+      "symbol": "zecusdt",
+      "display_symbol": "ZEC/USDT",
+      "captured_at": "2026-06-05T06:45:00Z",
+      "window_start": "2026-06-05T06:45:00Z",
+      "window_end": "2026-06-05T07:15:00Z",
+      "duration_seconds": 1800,
+      "size_bytes": 55702606,
+      "sha256": "3917933938c6629e09efa634ae244738417751a21dcd63f16f8aedf2b6a4cc28",
+      "pack_url": "https://replays.edgedepth.com/replays/zec_cascade_demo/v1.edpack",
+      "tags": ["liquidation-cascade", "order-flow", "selloff"],
+      "featured": true
+    }
+  ]
+}

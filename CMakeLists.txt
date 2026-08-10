@@ -358,6 +358,8 @@ set(PROJECT_SRC
         src/ui/upsell_modal.cpp
         src/ui/research_moment_panel.h
         src/ui/research_moment_panel.cpp
+        src/ui/replay_library_widget.h
+        src/ui/replay_library_widget.cpp
         src/ui/chart_widget.h
         src/ui/chart_widget.cpp
         src/ui/chart_widget_scrub_preview.cpp
