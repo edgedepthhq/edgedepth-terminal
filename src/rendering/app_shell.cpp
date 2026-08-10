@@ -17,6 +17,7 @@
 #include "core/ticker_manager.h"
 #include "core/logo_manager.h"
 #include "core/analytics_manager.h"
+#include "core/stream_presence.h"
 #include "stream_handler.h"
 #include "ui/positions_panel.h"
 #include "ui/chart_widget.h"
@@ -1645,6 +1646,42 @@ namespace {
         dl->AddCircleFilled(ImVec2(sb_x + 3.0f, bar_y + Layout::STATUSBAR_H * 0.5f), 3.0f,
                             u32(ws_ok ? Tokens::UP : Tokens::TX4));
         dl->AddText(ImVec2(sb_x + 12.0f, ty), u32(Tokens::TX3), left);
+
+        // Self-hosted feeds never deliver the hosted analytics streams. One
+        // low-key pointer in the shell explains the panels that stay empty.
+        // Keyed on frame absence, not entitlements: bare mode defaults to
+        // Pro, so entitlements cannot tell the feeds apart. Hidden while a
+        // replay runs (replay data is not the live feed's fault) and on
+        // narrow bars where it would collide with the telemetry.
+        // "Feed is real" = any live market frame ever arrived; ws_ok is the
+        // stats strip's has_data, which itself rides a hosted-ish stream
+        // (ticker24h) and is false on networks that do not serve it.
+        auto& presence = StreamPresence::instance();
+        const bool feed_alive =
+            presence.seen(static_cast<uint32_t>(Terminal::Stream::Trades)) ||
+            presence.seen(static_cast<uint32_t>(Terminal::Stream::Orderbook));
+        if (feed_alive && !ctx.replay_mgr().is_active() && vp->Size.x >= 1080.0f &&
+            presence.absent(
+                static_cast<uint32_t>(Terminal::Stream::PositioningState))) {
+            const char* note = "SELF-HOSTED FEED \xc2\xb7 WHY SOME PANELS ARE EMPTY";
+            const float note_x = sb_x + 12.0f + ImGui::CalcTextSize(left).x + 26.0f;
+            const ImVec2 nts = ImGui::CalcTextSize(note);
+            ImGui::SetCursorScreenPos(ImVec2(note_x, bar_y + 2.0f));
+            const bool note_clicked = ImGui::InvisibleButton(
+                "##selfhosted_note", ImVec2(nts.x, Layout::STATUSBAR_H - 4.0f));
+            const bool note_hov = ImGui::IsItemHovered();
+            dl->AddText(ImVec2(note_x, ty),
+                        u32(note_hov ? Tokens::BRAND_TX : Tokens::TX3), note);
+            if (note_hov) {
+                Theme::tooltip("VPIN, positioning, scanner scores and modelled liquidation\n"
+                               "levels ride EdgeDepth's hosted analytics; a raw exchange\n"
+                               "feed does not carry them. Everything else works. Click to\n"
+                               "read what is in each tier.");
+            }
+            if (note_clicked) {
+                EM_ASM(window.open('https://edgedepth.com/selfhosted', '_blank'););
+            }
+        }
 
         // right - replay state + frame telemetry + interactive display zone/clock.
         // The selected zone only formats the epoch; it never changes replay time.

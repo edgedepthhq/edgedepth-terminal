@@ -1,5 +1,6 @@
 #include "message_handler.h"
 #include "message_parser.h"
+#include "stream_presence.h"
 #include "performance_tracker.h"
 #include "data_thread.h"
 #include <zstd.h>
@@ -60,6 +61,10 @@ void MessageHandler::route_message(const pb::WSPayload& ws_payload, const Messag
     if (ws_payload.event_time_ms() != 0) {
         last_timestamp_ms = ws_payload.event_time_ms();
     }
+
+    // One line covers every stream: panels ask StreamPresence whether their
+    // driving stream has ever produced a frame (see stream_presence.h).
+    StreamPresence::instance().note_frame(static_cast<uint32_t>(ws_payload.stream()));
 
     Terminal::Pair pair{
         ws_payload.pair().exchange(),

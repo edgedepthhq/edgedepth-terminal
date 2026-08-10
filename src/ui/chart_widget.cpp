@@ -20,6 +20,7 @@
 #include "core/footprint_manager.h"
 #include "core/heatmap_colormap.h"
 #include "core/entitlements.h"
+#include "core/stream_presence.h"
 #include "core/display_time_zone.h"
 #include "ui/upsell_modal.h"
 #include "ui/research_moment_panel.h"  // right-click "Investigate this minute"
@@ -2785,6 +2786,15 @@ void ChartWidget::render_controls() {
         if (layer_row("Liquidation levels", pro && liq_heatmap_enabled_, !pro)) {
             if (pro) toggle_liquidation_heatmap();
             else ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Layer);
+        }
+        // Modelled levels are a hosted stream. Once enabled on a feed that
+        // never delivers it, the layer stays invisible; say why on hover
+        // and point at the layers that do work here (see stream_presence.h).
+        if (ImGui::IsItemHovered() && StreamPresence::instance().absent(
+                static_cast<uint32_t>(Terminal::Stream::LiquidationHeatmap))) {
+            Theme::tooltip("Modelled levels ride EdgeDepth's hosted feed, which this\n"
+                           "feed has not delivered. The liquidation heatmap and\n"
+                           "profile are computed client-side and still work.");
         }
         if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) open_liq_settings_ = true;
         // Liq Levels HL = REAL predictive levels from the HL census (Pro, P2e) -

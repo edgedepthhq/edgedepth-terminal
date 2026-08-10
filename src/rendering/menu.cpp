@@ -17,6 +17,7 @@
 #include "core/ticker_manager.h"
 #include "core/logo_manager.h"
 #include "core/scanner_manager.h"
+#include "core/stream_presence.h"
 #include "core/url_router.h"
 #include <cctype>
 #include <algorithm>
@@ -537,6 +538,15 @@ void render_symbol_picker_popup(
         hdr_cell("24H %",  col_chg_r,   true,  SymbolPickerState::SortMode::Change24h);
         hdr_cell("VOLUME", col_vol_r,   true,  SymbolPickerState::SortMode::Volume);
         hdr_cell("SCORE",  col_score_r, true,  SymbolPickerState::SortMode::Score);
+        // Scanner scores are a hosted stream; on a feed that never delivered
+        // one, say so at the column that stays blank (see stream_presence.h).
+        if (StreamPresence::instance().absent(
+                static_cast<uint32_t>(Terminal::Stream::Scanner)) &&
+            ImGui::IsMouseHoveringRect(ImVec2(col_score_r - 60.0f, hdr_y),
+                                       ImVec2(col_score_r + 12.0f, hdr_y + hdr_h))) {
+            Theme::tooltip("Scanner scores ride EdgeDepth's hosted feed.\n"
+                           "This feed has not delivered them.");
+        }
         ImGui::PushFont(Fonts::label());
         const ImVec2 tts = ImGui::CalcTextSize("TYPE");
         dl->AddText(ImVec2(col_type_r - tts.x, hdr_y + (hdr_h - tts.y) * 0.5f), u32(Tokens::TX3), "TYPE");

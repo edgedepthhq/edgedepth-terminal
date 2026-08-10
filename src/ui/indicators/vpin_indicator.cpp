@@ -14,6 +14,8 @@
 #include "vpin_indicator.h"
 #include "indicator_tokens.h"
 #include "rendering/theme.h"
+#include "core/stream_presence.h"
+#include "types/types.h"
 
 #include <algorithm>
 #include <cmath>
@@ -100,7 +102,24 @@ void VPINIndicator::render_content(double x_min, double x_max) {
         }
     }
 
-    if (pts_.empty()) { ImPlot::PopPlotClipRect(); return; }
+    if (pts_.empty()) {
+        // Distinguish "no prints yet" from "this feed never carries VPIN": on
+        // a raw self-hosted feed the pane would otherwise sit silently blank
+        // forever (see stream_presence.h).
+        if (StreamPresence::instance().absent(
+                static_cast<uint32_t>(Terminal::Stream::VPINState))) {
+            const char* msg = "VPIN reads from EdgeDepth's hosted analytics. "
+                              "This feed has not delivered it.";
+            ImGui::PushFont(Theme::Fonts::label());
+            const ImVec2 ts = ImGui::CalcTextSize(msg);
+            dl->AddText(ImVec2(px_left + (px_right - px_left - ts.x) * 0.5f,
+                               plot_pos.y + (plot_size.y - ts.y) * 0.5f),
+                        ImGui::GetColorU32(Theme::Tokens::TX3), msg);
+            ImGui::PopFont();
+        }
+        ImPlot::PopPlotClipRect();
+        return;
+    }
 
     const size_t i0 = first_visible(x_min);
     size_t i_end = i0;

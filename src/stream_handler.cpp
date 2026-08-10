@@ -1,5 +1,6 @@
 #include "stream_handler.h"
 #include "core/data_thread.h"
+#include "core/stream_presence.h"
 
 using json = nlohmann::json;
 
@@ -466,6 +467,9 @@ void StreamManager::dispatch_pattern_impl(
 
 void StreamManager::send_subscribe(const StreamKey& key) const {
     if (replay_mode_ || live_subscriptions_paused_) return;
+    // Presence tracking keys off live subscriptions only: replay data comes
+    // from the pack or the box and its gaps are not the feed's fault.
+    StreamPresence::instance().note_subscribed(static_cast<uint32_t>(key.stream_type));
     const auto msg = Terminal::create_subscribe_message(
         key.pair.exchange,
         key.pair.symbol,

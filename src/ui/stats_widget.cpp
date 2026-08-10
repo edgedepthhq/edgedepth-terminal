@@ -7,6 +7,7 @@
 // in step 2; settings behaviors + replay-aware values in step 3.
 // ═══════════════════════════════════════════════════════════════════════════════
 #include "ui/stats_widget.h"
+#include "core/stream_presence.h"
 #include "rendering/theme.h"
 #include "core/entitlements.h"
 #include "ui/upsell_modal.h"
@@ -475,8 +476,33 @@ void StatsWidget::section_subhead(const char* txt) {
     ImGui::Dummy(ImVec2(ww, 20.0f));
 }
 
+// One honest line instead of a panel of dashes. Keyed on frame absence, not
+// entitlements (bare mode defaults to Pro, so an entitlement check cannot
+// tell a self-hosted feed from the hosted one); see stream_presence.h.
+void StatsWidget::feed_note() {
+    if (!StreamPresence::instance().absent(
+            static_cast<uint32_t>(Terminal::Stream::PositioningState))) return;
+    const ImVec2 org = ImGui::GetCursorScreenPos();
+    const float ww = ImGui::GetContentRegionAvail().x;
+    const float PADX = 12.0f;
+    ImGui::PushFont(Fonts::label());
+    ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX3);
+    ImGui::SetCursorScreenPos(ImVec2(org.x + PADX, org.y + 4.0f));
+    // PushTextWrapPos is window-local, not screen-space.
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ww - PADX * 2.0f);
+    ImGui::TextUnformatted(
+        "The analytics rows read from EdgeDepth's hosted feed. "
+        "This feed has not delivered those streams, so they stay empty. "
+        "Price, book, tape and liquidations are live.");
+    ImGui::PopTextWrapPos();
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(ww, 6.0f));
+}
+
 // ── Order flow (premium core; leads) ────────────────────────────────────────
 void StatsWidget::render_order_flow() {
+    feed_note();
     const PositioningState* pos = ctx_.analytics_mgr().get_positioning(pair_.symbol);
 
     // VPIN - latest finalized volume-bucket print from the SeriesCache (already

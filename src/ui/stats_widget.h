@@ -63,6 +63,7 @@ private:
 
     // ── Section bodies (step 2) ─────────────────────────────────────────────
     void render_order_flow();
+    void feed_note();
     void render_positioning();
     void render_liq_risk();
     void section_subhead(const char* txt);   // e.g. "SMART MONEY"
