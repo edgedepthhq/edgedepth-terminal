@@ -61,6 +61,29 @@ The schema in [`protos/messages.proto`](protos/messages.proto) is the whole cont
 
 A few layers are driven by EdgeDepth's proprietary analytics streams: VPIN toxicity, positioning and smart-money flow, modelled liquidation estimates, pattern detection, and the scanner's composite scores. With a raw-data feed those panels simply stay empty and the terminal degrades gracefully. The hosted product at [edgedepth.com](https://edgedepth.com) provides them, along with deep historical replay and structured courses taught inside the terminal.
 
+## Replay a recorded event, no feed at all
+
+The terminal can play a self-contained `.edpack` recording entirely
+client-side: orderbook, tape, liquidations, footprint and volume profile
+included, with nothing but static file hosting behind it.
+
+```
+?pack=<url-encoded pack URL>&packsym=<symbol>
+```
+
+Try it with a real one: 30 minutes of the June 2026 ZEC cascade, recorded
+tick-by-tick as it fell through 8 percent with a flash wick to 250 (53 MB):
+
+```
+http://localhost:8080/?pack=https%3A%2F%2Freplays.edgedepth.com%2Freplays%2Fzec_cascade_demo%2Fv1.edpack&packsym=zecusdt
+```
+
+The pack is fetched with HTTP range requests, block by block, as playback and
+seeking need it. If you host packs yourself, the server (and any CDN in front
+of it) must allow the `Range` header in its CORS policy and answer
+`206 Partial Content`; a server that ignores `Range` and answers `200` with
+the whole body forces the client to buffer the entire file into memory.
+
 ## Building
 
 Prerequisites, and the versions matter:
@@ -115,6 +138,11 @@ Issues and PRs welcome. The most valuable contributions right now:
 - Build and tooling portability (it should compile anywhere emsdk runs)
 
 Please keep PRs focused. The render loop has strict conventions: no allocation in the frame path, `PriceFormatter` for all price text, theme tokens for all colors. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Related projects
+
+- [edgedepth-gateway](https://github.com/edgedepthhq/edgedepth-gateway) (MIT): the self-host feed this terminal connects to, bridging Binance's public streams into the wire format, with a pluggable exchange layer for adding venues.
+- [edgedepth-research-mcp](https://github.com/edgedepthhq/edgedepth-research-mcp) (MIT): a Model Context Protocol server that lets Claude, Cursor, or any MCP client search EdgeDepth's recorded microstructure: every verified occurrence of a market condition, with forward outcomes and replay-linked evidence that opens in this terminal.
 
 ## License
 
