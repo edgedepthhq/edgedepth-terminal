@@ -17,6 +17,7 @@
 #include <nlohmann/json.hpp>
 
 #include "../core/research_url.h"
+#include "../core/usage_emit.h"
 #include "../education/transport_emit.h"
 #include "../rendering/theme.h"
 #include "upsell_modal.h"
@@ -38,7 +39,8 @@ constexpr const char* kLead = "%d of %d readings stood out at this minute.";
 constexpr const char* kFiredOne = "1 rulebook condition was firing at this minute.";
 constexpr const char* kFiredMany = "%d rulebook conditions were firing at this minute.";
 constexpr const char* kHonesty =
-    "These readings describe the minute, not what follows it. Counts with denominators live in Research.";
+    "These readings describe this minute, not what followed. A record search counts matching "
+    "minutes and shows what followed. Pro looks back 30 days; Research looks back 90.";
 constexpr const char* kLiveNote =
     "Live read: the newest closed minute, not the minute you pointed at.";
 constexpr const char* kProvisionalNote = "Some readings cover a candle that is still forming.";
@@ -49,7 +51,7 @@ constexpr const char* kMsgNoBridge =
     "This read needs the EdgeDepth page around the terminal. Open Research directly instead.";
 constexpr const char* kMsgTimeout = "The page did not answer. Open Research directly instead.";
 constexpr const char* kMsgBadResult = "The read came back malformed. Open Research directly instead.";
-constexpr const char* kCtaSearch = "Search the record for this";
+constexpr const char* kCtaSearch = "Count moments like this";
 constexpr const char* kCtaLive = "Get a live read";
 constexpr const char* kCtaOpen = "Open in Research";
 constexpr const char* kCtaRetry = "Retry";
@@ -57,6 +59,20 @@ constexpr const char* kCtaClose = "Close";
 
 constexpr float kPanelW = 400.0f;
 constexpr double kTimeoutS = 12.0;
+
+void emit_moment_usage(const char* event, const std::string& symbol, int64_t minute_ms,
+                       bool live, const nlohmann::json& props = nlohmann::json::object()) {
+    nlohmann::json merged = props;
+    merged["entry"] = "terminal";
+    merged["live"] = live;
+    merged["minute_ms"] = minute_ms;
+    usage::dispatch_detail(nlohmann::json{
+        {"event", event},
+        {"mode", "terminal"},
+        {"symbol", symbol},
+        {"props", std::move(merged)},
+    }.dump());
+}
 
 bool bridge_present() {
 #ifdef __EMSCRIPTEN__
@@ -127,6 +143,8 @@ void ResearchMomentPanel::open(const std::string& symbol_raw, int64_t minute_ms)
     bucket_label_.clear();
     message_.clear();
     bridge_available_ = bridge_present();
+    emit_moment_usage("research_moment_opened", symbol_norm_, minute_ms_, false,
+                      {{"bridge_available", bridge_available_}});
     if (!bridge_available_) {
         state_ = State::Error;
         message_ = kMsgNoBridge;
@@ -145,6 +163,8 @@ void ResearchMomentPanel::send_request(bool live) {
     req["symbol"] = symbol_norm_;
     req["iso"] = research_url::iso_utc(minute_ms_);
     req["live"] = live;
+    emit_moment_usage("research_moment_read", symbol_norm_, minute_ms_, live,
+                      {{"request_id", req_seq_}});
     edu::transport::dispatch_state("edgedepth:research-moment",
                                    "__EDGEDEPTH_RESEARCH_MOMENT_REQ__", req.dump());
 }
@@ -198,11 +218,15 @@ void ResearchMomentPanel::apply_result_json(const char* json) {
     // Auth outcomes funnel into the ONE conversion surface (§8.3) and the
     // panel leaves the screen: rendering a second paywall would fork it.
     if (state == "auth") {
+        emit_moment_usage("research_moment_result", symbol_norm_, minute_ms_, last_request_live_,
+                          {{"state", "auth"}});
         close();
         UpsellModal::instance().open_login(message.empty() ? nullptr : message.c_str());
         return;
     }
     if (state == "pro") {
+        emit_moment_usage("research_moment_result", symbol_norm_, minute_ms_, last_request_live_,
+                          {{"state", "pro"}});
         close();
         UpsellModal::instance().open(UpsellModal::Trigger::Research,
                                      message.empty() ? nullptr : message.c_str());
@@ -211,11 +235,15 @@ void ResearchMomentPanel::apply_result_json(const char* json) {
     if (state == "edge") {
         state_ = State::Edge;
         message_ = message.empty() ? kMsgEdgeFallback : message;
+        emit_moment_usage("research_moment_result", symbol_norm_, minute_ms_, last_request_live_,
+                          {{"state", "edge"}});
         return;
     }
     if (state != "ok" && state != "ok_live") {
         state_ = State::Error;
         message_ = message.empty() ? kMsgBadResult : message;
+        emit_moment_usage("research_moment_result", symbol_norm_, minute_ms_, last_request_live_,
+                          {{"state", "error"}});
         return;
     }
 
@@ -248,11 +276,21 @@ void ResearchMomentPanel::apply_result_json(const char* json) {
     }
     mfields_ = research_url::join_mfields(checked);
     state_ = live_read_ ? State::ReadyLive : State::Ready;
+    emit_moment_usage("research_moment_result", symbol_norm_, minute_ms_, live_read_,
+                      {{"state", live_read_ ? "ok_live" : "ok"},
+                       {"standouts", static_cast<int>(standouts_.size())},
+                       {"readings", total_readings_},
+                       {"checked", static_cast<int>(checked.size())},
+                       {"fired_rules", fired_rules_}});
 }
 
 void ResearchMomentPanel::open_handoff(bool live) const {
     const std::string url = live ? research_url::moment_live_url(symbol_norm_, mfields_)
                                  : research_url::moment_url(symbol_norm_, minute_ms_, mfields_);
+    emit_moment_usage("research_moment_handoff", symbol_norm_, minute_ms_, live,
+                      {{"checked", static_cast<int>(
+                           std::count(mfields_.begin(), mfields_.end(), ',') +
+                           (mfields_.empty() ? 0 : 1))}});
 #ifdef __EMSCRIPTEN__
     // A new tab, never a navigation: the terminal holds live WS state and
     // possibly a replay session, and navigating away throws both away.

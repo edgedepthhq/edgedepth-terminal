@@ -5,14 +5,51 @@
 #include "upsell_modal.h"
 
 #include "imgui.h"
+#include <nlohmann/json.hpp>
 #include "../rendering/theme.h"
 #include "../core/entitlements.h"
+#include "../core/usage_emit.h"
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
 
 namespace ui {
+
+namespace {
+
+const char* trigger_name(UpsellModal::Trigger t) {
+    using T = UpsellModal::Trigger;
+    switch (t) {
+        case T::Range:      return "range";
+        case T::Preset:     return "preset";
+        case T::Speed:      return "speed";
+        case T::Symbol:     return "symbol";
+        case T::Layer:      return "layer";
+        case T::ServerTier: return "server_tier";
+        case T::Events:     return "events";
+        case T::Lesson:     return "lesson";
+        case T::Daily:      return "daily";
+        case T::Auth:       return "auth";
+        case T::Research:   return "research";
+        default:            return "generic";
+    }
+}
+
+void emit_upsell_usage(const char* event, UpsellModal::Trigger trigger, bool login,
+                       const nlohmann::json& props = nlohmann::json::object()) {
+    nlohmann::json merged = props;
+    merged["source"] = "terminal";
+    merged["trigger"] = trigger_name(trigger);
+    merged["variant"] = login ? "login" : "pro";
+    usage::dispatch_detail(nlohmann::json{
+        {"event", event},
+        {"mode", "terminal"},
+        {"props", std::move(merged)},
+    }.dump());
+}
+
+}  // namespace
 
 UpsellModal& UpsellModal::instance() {
     static UpsellModal inst;
@@ -38,12 +75,19 @@ static const char* default_subline(UpsellModal::Trigger t, bool login) {
     }
 }
 
+static const char* modal_headline(UpsellModal::Trigger t, bool login) {
+    if (login) return "Log in to replay";
+    if (t == UpsellModal::Trigger::Research) return "Investigate past moments with Pro";
+    return "Replay any moment of the last 30 days";
+}
+
 void UpsellModal::open(Trigger t, const char* detail) {
     trigger_ = t;
     login_variant_ = (t == Trigger::Auth);
     detail_ = detail ? detail : "";
     dismiss_redirect_.clear();  // never inherit an event/lesson-boot redirect
     want_open_ = true;
+    emit_upsell_usage("locked_action", trigger_, login_variant_);
 }
 
 void UpsellModal::open_login(const char* detail) {
@@ -52,6 +96,7 @@ void UpsellModal::open_login(const char* detail) {
     detail_ = detail ? detail : "";
     dismiss_redirect_.clear();  // never inherit an event/lesson-boot redirect
     want_open_ = true;
+    emit_upsell_usage("locked_action", trigger_, login_variant_);
 }
 
 void UpsellModal::set_dismiss_redirect(const char* symbol) {
@@ -95,10 +140,14 @@ void UpsellModal::render() {
             toast_text_   = "Pro unlocks this - see pricing";
             toast_active_ = true;
             toast_until_  = ImGui::GetTime() + 3.2;
+            emit_upsell_usage("upsell_impression", trigger_, login_variant_,
+                              {{"surface", "toast"}});
         } else {
             full_shown_mask_ |= bit;
             ImGui::OpenPopup("##edx_upsell");
             open_ = true;
+            emit_upsell_usage("upsell_impression", trigger_, login_variant_,
+                              {{"surface", "modal"}});
         }
     }
 
@@ -162,8 +211,7 @@ void UpsellModal::render_modal_body() {
     // Headline
     ImGui::PushFont(Fonts::heading());
     ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX1);
-    ImGui::TextUnformatted(login_variant_ ? "Log in to replay"
-                                          : "Replay any moment of the last 30 days");
+    ImGui::TextUnformatted(modal_headline(trigger_, login_variant_));
     ImGui::PopStyleColor();
     ImGui::PopFont();
 
@@ -257,6 +305,7 @@ void UpsellModal::render_modal_body() {
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Radius::R2);
         ImGui::PushFont(Fonts::ui_semibold());
         if (ImGui::Button("Log in", ImVec2(w, 38.0f))) {
+            emit_upsell_usage("login_click", trigger_, true);
             Entitlements::open_login();
             ImGui::CloseCurrentPopup();
             open_ = false;
@@ -273,6 +322,8 @@ void UpsellModal::render_modal_body() {
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Radius::R2);
         ImGui::PushFont(Fonts::ui_semibold());
         if (ImGui::Button("Go Pro: pay by card", ImVec2(w, 38.0f))) {
+            emit_upsell_usage("upgrade_click", trigger_, false,
+                              {{"plan", "pro"}, {"billing", "yearly"}, {"rail", "card"}});
             Entitlements::open_upgrade_rail("card");
             ImGui::CloseCurrentPopup();
             open_ = false;
@@ -292,6 +343,8 @@ void UpsellModal::render_modal_body() {
         ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
         ImGui::PushFont(Fonts::ui_semibold());
         if (ImGui::Button("Pay with Bitcoin: $216/yr (save 10%)", ImVec2(w, 36.0f))) {
+            emit_upsell_usage("upgrade_click", trigger_, false,
+                              {{"plan", "pro"}, {"billing", "yearly"}, {"rail", "btc"}});
             Entitlements::open_upgrade_rail("btc");
             ImGui::CloseCurrentPopup();
             open_ = false;

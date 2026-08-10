@@ -66,15 +66,16 @@ int main() {
     // The full handoff URL: floors internally, normalizes internally.
     expect_eq(moment_url("BTC/USDT", t_mid_minute),
               "https://edgedepth.com/research?source=record&study=investigate"
-              "&moment=btcusdt,2026-08-01T13:57:00Z",
+              "&entry=terminal&moment=btcusdt,2026-08-01T13:57:00Z",
               "moment url");
     expect_eq(moment_url("blessusdt", t_minute, "feature.vpin,feature.taker_buy_ratio_15m"),
               "https://edgedepth.com/research?source=record&study=investigate"
-              "&moment=blessusdt,2026-08-01T13:57:00Z"
+              "&entry=terminal&moment=blessusdt,2026-08-01T13:57:00Z"
               "&mfields=feature.vpin,feature.taker_buy_ratio_15m",
               "moment url with mfields");
     expect_eq(moment_live_url("ETH/USDT"),
-              "https://edgedepth.com/research?source=record&study=investigate&moment=ethusdt,now",
+              "https://edgedepth.com/research?source=record&study=investigate"
+              "&entry=terminal&moment=ethusdt,now",
               "live url");
     expect_eq(join_mfields({}), "", "join empty");
     expect_eq(join_mfields({"feature.vpin"}), "feature.vpin", "join one");
