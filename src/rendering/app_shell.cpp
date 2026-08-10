@@ -1679,7 +1679,7 @@ namespace {
                                "read what is in each tier.");
             }
             if (note_clicked) {
-                EM_ASM(window.open('https://edgedepth.com/selfhosted', '_blank'););
+                EM_ASM(window.open('https://edgedepth.com/open-source#empty-panels', '_blank'););
             }
         }
 
