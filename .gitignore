@@ -41,3 +41,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Local-machine compose overrides (e.g. per-network trade-stream fallback)
+docker-compose.override.yml

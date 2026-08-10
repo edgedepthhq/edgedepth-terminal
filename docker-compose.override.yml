@@ -1,8 +1,0 @@
-# Local-machine override, NOT for the repo. This network does not serve
-# Binance's @aggTrade stream (only @trade and @depth* deliver here), so the
-# shipped aggTrade default produces an empty tape. See the gateway's own
-# warning in its logs. Compose merges this file automatically.
-services:
-  gateway:
-    environment:
-      BINANCE_TRADE_STREAM: "trade"
