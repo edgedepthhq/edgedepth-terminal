@@ -13,7 +13,7 @@ body:
     id: os
     attributes:
       label: OS + protoc version
-      placeholder: "Ubuntu 24.04, protoc 3.21.12"
+      placeholder: "Windows 11 PowerShell, libprotoc 3.21.12"
     validations:
       required: true
   - type: textarea
@@ -28,7 +28,7 @@ body:
     attributes:
       label: Checklist
       options:
-        - label: I ran `emcmake cmake` (not plain `cmake`) from a clean build directory
+        - label: I ran `emcmake cmake` or `emcmake.bat cmake` (not plain `cmake`) from a clean build directory
           required: true
         - label: I'm serving the threaded build with COOP/COEP headers (serve_threaded.py), not a plain file server
           required: true

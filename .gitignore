@@ -44,3 +44,7 @@ Thumbs.db
 
 # Local-machine compose overrides (e.g. per-network trade-stream fallback)
 docker-compose.override.yml
+
+# Python bytecode from running the examples
+__pycache__/
+*.pyc

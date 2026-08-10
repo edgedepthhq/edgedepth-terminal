@@ -7,9 +7,16 @@ on:
 
 jobs:
   wasm:
+    name: Ubuntu / Emscripten
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Run native tests
+        run: |
+          cmake -S tests/native -B build-native-tests -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-native-tests --config Release --parallel
+          cmake -E chdir build-native-tests ctest -C Release --output-on-failure
 
       - name: Install protoc
         # Pinned, NOT apt. protoc must be 21.x to match the protobuf v21.12
@@ -43,4 +50,94 @@ jobs:
       - name: Verify artifacts
         # Four artifacts, not three. index.data holds the fonts preloaded via
         # --preload-file in CMakeLists.txt; the app renders no text without it.
-        run: ls -la build/index.wasm build/index.js build/index.html build/index.data
+        run: |
+          test -s build/index.html
+          test -s build/index.js
+          test -s build/index.wasm
+          test -s build/index.data
+          ls -la build/index.html build/index.js build/index.wasm build/index.data
+
+  wasm-windows:
+    name: Windows / Emscripten + Ninja
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run native tests
+        shell: pwsh
+        run: |
+          cmake -S tests/native -B build-native-tests
+          cmake --build build-native-tests --config Release --parallel
+          cmake -E chdir build-native-tests ctest -C Release --output-on-failure
+
+      - name: Install protoc 21.12
+        shell: pwsh
+        run: |
+          $protocVersion = "21.12"
+          $protocArchive = Join-Path $env:RUNNER_TEMP "protoc-$protocVersion-win64.zip"
+          $protocRoot = Join-Path $env:RUNNER_TEMP "protoc-$protocVersion"
+          Invoke-WebRequest `
+            -Uri "https://github.com/protocolbuffers/protobuf/releases/download/v$protocVersion/protoc-$protocVersion-win64.zip" `
+            -OutFile $protocArchive
+          Expand-Archive -LiteralPath $protocArchive -DestinationPath $protocRoot -Force
+          $protocBin = Join-Path $protocRoot "bin"
+          $protocExe = Join-Path $protocBin "protoc.exe"
+          $protocBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "PROTOC_EXE=$protocExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.15
+          actions-cache-folder: emsdk-cache
+
+      - name: Verify toolchain versions
+        shell: pwsh
+        run: |
+          $emccVersion = (emcc --version | Select-Object -First 1)
+          if ($emccVersion -notmatch "\b4\.0\.15\b") {
+            throw "Expected Emscripten 4.0.15, got: $emccVersion"
+          }
+          $protocVersion = (protoc --version)
+          if ($protocVersion -ne "libprotoc 3.21.12") {
+            throw "Expected libprotoc 3.21.12, got: $protocVersion"
+          }
+          $emccVersion
+          $protocVersion
+          ninja --version
+
+      - name: Configure with Emscripten and Ninja
+        shell: pwsh
+        run: emcmake.bat cmake -S . -B build-windows -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Prove CMake detected the pinned protoc
+        shell: pwsh
+        run: |
+          $cacheMatch = Select-String `
+            -Path build-windows/CMakeCache.txt `
+            -Pattern '^PROTOC_EXECUTABLE:FILEPATH=(.+)$'
+          if (-not $cacheMatch) {
+            throw "PROTOC_EXECUTABLE is missing from CMakeCache.txt"
+          }
+          $detectedProtoc = $cacheMatch.Matches[0].Groups[1].Value
+          if ((Resolve-Path $detectedProtoc).Path -ne (Resolve-Path $env:PROTOC_EXE).Path) {
+            throw "CMake detected '$detectedProtoc', expected '$env:PROTOC_EXE'"
+          }
+          $cacheMatch.Line
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build-windows --target c_based_trader_client --parallel
+
+      - name: Verify artifacts
+        shell: pwsh
+        run: |
+          $artifacts = @("index.html", "index.js", "index.wasm", "index.data") |
+            ForEach-Object { Join-Path "build-windows" $_ }
+          $invalid = $artifacts | Where-Object {
+            -not (Test-Path -LiteralPath $_ -PathType Leaf) -or (Get-Item -LiteralPath $_).Length -eq 0
+          }
+          if ($invalid) {
+            throw "Missing or empty WASM artifacts: $($invalid -join ', ')"
+          }
+          Get-Item -LiteralPath $artifacts | Format-Table Name, Length

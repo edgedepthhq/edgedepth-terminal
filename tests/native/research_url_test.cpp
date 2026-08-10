@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // research_url_test.cpp - native pin on the terminal → /research URL builder.
 //
-// Run:  bash tests/native/run_tests.sh   (plain host g++, no Emscripten)
+// Run through tests/native/CMakeLists.txt with CMake/CTest (no Emscripten).
 //
 // The one bug class this exists to catch forever: reusing the chart's
 // timeframe-floored context timestamp for research. A 4H chart floors the

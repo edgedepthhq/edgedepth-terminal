@@ -62,6 +62,13 @@ The terminal is a client. It speaks a documented protobuf-over-WebSocket wire fo
 
 The schema in [`protos/messages.proto`](protos/messages.proto) is the whole contract. A feed that emits trades, candles, orderbook updates, stats, and liquidation events, all derivable from any exchange's public streams, lights up the chart, DOM, tape, orderbook, heatmap, liquidation Field, volume profile, TPO, and paper trading.
 
+**Write your own feed:** [`examples/synthetic_feed.py`](examples/synthetic_feed.py) is a working feed in one file, with no `protoc` step and no protobuf package. It answers historical candle requests and streams trades plus an order book, which is enough to drive the chart, the tape and the DOM. Run it and open the terminal with `?ws=ws://localhost:8765` to see your own data on the screen, then swap the random walk for a strategy, a simulator, or a replay of your own capture:
+
+```bash
+pip install websockets
+python3 examples/synthetic_feed.py
+```
+
 **Community gateway:** [edgedepth-gateway](https://github.com/edgedepthhq/edgedepth-gateway) is exactly that feed, MIT licensed. It serves trades, candles, orderbook, stats and liquidations from Binance's free public streams, and answers historical candle requests from their REST klines so the chart boots with real history. It also builds **1s, 5s, 15s and 30s candles** trade by trade from the raw stream, updating the building candle as each trade arrives. See the [Quick start](#quick-start) to run both together.
 
 A few layers are driven by EdgeDepth's proprietary analytics streams: VPIN toxicity, positioning and smart-money flow, modelled liquidation estimates, pattern detection, and the scanner's composite scores. With a raw-data feed those panels simply stay empty and the terminal degrades gracefully. The [hosted product](https://app.edgedepth.com/terminal?utm_source=github&utm_medium=oss&utm_campaign=terminal) provides them, along with historical replay and structured courses taught inside the terminal.
@@ -120,42 +127,155 @@ manifest and CORS contract. The self-hosted client contains no phone-home
 analytics; public pack engagement can be measured from aggregate object
 requests at the pack host.
 
-## Building
+## Building and platform support
 
-Prerequisites, and the versions matter:
+The build target is WebAssembly, not a native operating-system executable. A
+successful source build produces `index.html`, `index.js`, `index.wasm`, and
+`index.data`. The build is threaded, so the server must return COOP and COEP
+headers for `SharedArrayBuffer`; the bundled `serve_threaded.py` does this.
 
-- [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html) **4.0 or newer**. The client builds with `-sUSE_SDL=3`, and the SDL3 port does not exist in Emscripten 3.x, where the build fails with `SDL3/SDL.h file not found`.
-- **`protoc` 21.x**, to match the protobuf v21.12 runtime CMake fetches. Distro packages are usually too old: Ubuntu 22.04 ships 3.12.4, which generates headers the runtime rejects. CMake checks this and tells you if it is wrong.
-  ```bash
-  curl -fsSLO https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
-  sudo unzip -o protoc-21.12-linux-x86_64.zip -d /usr/local
-  ```
-- CMake 3.15+.
+Source builds require:
 
-If you would rather not install any of this, `docker compose up --build` does the whole thing in a container.
+- [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html) **4.0.15 or newer**. SDL3 support is unavailable in Emscripten 3.x.
+- **`protoc` 21.x**. The instructions below pin 21.12, which reports itself as `libprotoc 3.21.12`. Do not substitute a newer release family.
+- CMake 3.15+ and Ninja.
+
+All other dependencies are fetched and pinned by CMake. There are no
+submodules or additional system libraries.
+
+### Docker Desktop quick start
+
+On Windows or macOS, install Docker Desktop and use Linux containers. Then:
+
+```text
+git clone https://github.com/edgedepthhq/edgedepth-terminal.git
+cd edgedepth-terminal
+docker compose up
+```
+
+Open `http://localhost:8080`. This pulls prebuilt images. To compile the
+terminal from source inside the Linux build container, run
+`docker compose up --build`. Docker Desktop is an alternative build path; it
+does not exercise the native Windows toolchain described below.
+
+### WSL2 source build
+
+Install Ubuntu under WSL2 with `wsl --install -d Ubuntu` from an elevated
+PowerShell window, then run the rest inside Ubuntu. Keeping the clone in the
+WSL Linux filesystem avoids unnecessary `/mnt/c` filesystem overhead.
 
 ```bash
-source /path/to/emsdk/emsdk_env.sh
+sudo apt-get update
+sudo apt-get install -y build-essential cmake curl git ninja-build python3 unzip
 
+mkdir -p "$HOME/.local/protoc-21.12"
+curl -fsSL \
+  -o /tmp/protoc-21.12-linux-x86_64.zip \
+  https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip
+unzip -q /tmp/protoc-21.12-linux-x86_64.zip -d "$HOME/.local/protoc-21.12"
+export PATH="$HOME/.local/protoc-21.12/bin:$PATH"
+
+git clone https://github.com/emscripten-core/emsdk.git "$HOME/emsdk"
+cd "$HOME/emsdk"
+./emsdk install 4.0.15
+./emsdk activate 4.0.15
+source ./emsdk_env.sh
+
+cd "$HOME"
 git clone https://github.com/edgedepthhq/edgedepth-terminal.git
 cd edgedepth-terminal
 
-# Threaded build (pthreads, needs COOP/COEP headers to run, see below)
-mkdir build-threaded && cd build-threaded
-emcmake cmake -DCMAKE_BUILD_TYPE=Release ..
-emmake make -j$(nproc)
+emcmake cmake -S . -B build-wsl -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-wsl --target c_based_trader_client --parallel
+for artifact in index.html index.js index.wasm index.data; do
+  test -s "build-wsl/$artifact"
+done
+ls -l build-wsl/index.html build-wsl/index.js build-wsl/index.wasm build-wsl/index.data
+
+cmake -S tests/native -B build-native-tests -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-native-tests --config Release --parallel
+cmake -E chdir build-native-tests ctest -C Release --output-on-failure
+
+python3 serve_threaded.py 8000 build-wsl
 ```
 
-All other dependencies (ImGui docking, ImPlot, zstd, protobuf-lite, nlohmann/json) are fetched and pinned by CMake. No submodules, no system libraries.
+Open `http://localhost:8000` from Windows. Add
+`?ws=ws://localhost:8080/ws` to connect to your own feed.
 
-Serve it. The threaded build requires cross-origin isolation for `SharedArrayBuffer`, and the bundled dev server sets the headers:
+The same commands are the supported Linux source-build path outside WSL2.
 
-```bash
-cd ..
-python3 serve_threaded.py 8000 build-threaded
-# open http://localhost:8000                             connects to EdgeDepth's hosted feed
-# open http://localhost:8000?ws=ws://localhost:8080/ws   connects to your own feed
+### Native Windows PowerShell and Ninja source build
+
+Install Git, CMake 3.15+, Ninja, Python 3.8+, and Visual Studio 2022 Build
+Tools with the Desktop development with C++ workload. Start a Developer
+PowerShell for VS 2022 so the host compiler is available for the native tests.
+The WASM build itself uses Emscripten's Clang.
+
+From that PowerShell window, install the pinned tools for the current user:
+
+```powershell
+$ToolsRoot = Join-Path $env:LOCALAPPDATA "EdgeDepth\tools"
+$EmsdkRoot = Join-Path $ToolsRoot "emsdk"
+$ProtocRoot = Join-Path $ToolsRoot "protoc-21.12"
+$ProtocZip = Join-Path $ToolsRoot "protoc-21.12-win64.zip"
+New-Item -ItemType Directory -Force -Path $ToolsRoot | Out-Null
+
+git clone https://github.com/emscripten-core/emsdk.git $EmsdkRoot
+Push-Location $EmsdkRoot
+.\emsdk.ps1 install 4.0.15
+.\emsdk.ps1 activate 4.0.15
+. .\emsdk_env.ps1
+Pop-Location
+
+Invoke-WebRequest -Uri "https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-win64.zip" -OutFile $ProtocZip
+Expand-Archive -LiteralPath $ProtocZip -DestinationPath $ProtocRoot -Force
+$env:Path = "$(Join-Path $ProtocRoot 'bin');$env:Path"
+
+emcc --version
+protoc --version
+ninja --version
 ```
+
+The version checks must show Emscripten 4.0.15 and `libprotoc 3.21.12`.
+Clone and build the terminal in the same Developer PowerShell session:
+
+```powershell
+git clone https://github.com/edgedepthhq/edgedepth-terminal.git
+Set-Location edgedepth-terminal
+
+emcmake.bat cmake -S . -B build-windows -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-windows --target c_based_trader_client --parallel
+
+$Artifacts = @("index.html", "index.js", "index.wasm", "index.data") |
+  ForEach-Object { Join-Path "build-windows" $_ }
+$Invalid = $Artifacts | Where-Object {
+  -not (Test-Path -LiteralPath $_ -PathType Leaf) -or (Get-Item -LiteralPath $_).Length -eq 0
+}
+if ($Invalid) { throw "Missing or empty build artifacts: $($Invalid -join ', ')" }
+Get-Item -LiteralPath $Artifacts
+
+cmake -S tests/native -B build-native-tests -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build-native-tests --config Release --parallel
+cmake -E chdir build-native-tests ctest -C Release --output-on-failure
+
+python .\serve_threaded.py 8000 build-windows
+```
+
+Open `http://localhost:8000`. For later PowerShell sessions, dot-source
+`emsdk_env.ps1` again and add the 21.12 `bin` directory to `PATH` before
+configuring a new build directory.
+
+### MSYS2 status and caveats
+
+MSYS2 is not in the supported or CI-tested matrix. It may work, but no MSYS2
+build has been reproduced for this project, so the project does not claim
+support yet. In particular, combining MSYS-style paths with native Windows
+Emscripten, CMake, Ninja, or `protoc.exe` can trigger automatic path conversion
+and produce malformed compiler, preload-file, or protobuf arguments.
+
+Use native PowerShell/CMD for the Windows toolchain, or WSL2 for a consistent
+Linux toolchain. If you experiment with MSYS2, keep every tool and path model
+consistent and include the exact shell and tool versions in any build report.
 
 ## Design system
 

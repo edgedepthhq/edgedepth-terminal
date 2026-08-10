@@ -6,7 +6,7 @@ Thanks for your interest. A few ground rules keep this maintainable by a very sm
 
 - **Open an issue first for anything non-trivial.** Agreeing on the direction before you write code protects your time and ours.
 - **Keep PRs small and single-purpose.** One widget, one fix, one behavior. Large or mixed PRs will be asked to split.
-- **CI must pass.** Every PR is built with Emscripten; a red build won't be reviewed.
+- **CI must pass.** Every PR is built with Emscripten on Ubuntu and native Windows, and the host-side tests run on both platforms. A red build won't be reviewed.
 
 ## Code conventions (enforced in review)
 
@@ -28,6 +28,19 @@ Thanks for your interest. A few ground rules keep this maintainable by a very sm
 - Large refactors of working systems ("modernization" PRs)
 - New dependencies. The dependency set is deliberately small and pinned
 - Features that require EdgeDepth's closed backend to test
+
+## Native tests
+
+The small host-side test suite is CMake/CTest based and does not require
+Emscripten. These commands work from Bash, PowerShell, or CMD:
+
+```text
+cmake -S tests/native -B build-native-tests -DCMAKE_BUILD_TYPE=Release
+cmake --build build-native-tests --config Release --parallel
+cmake -E chdir build-native-tests ctest -C Release --output-on-failure
+```
+
+Linux and WSL contributors can also run `bash tests/native/run_tests.sh`.
 
 ## Expectations
 

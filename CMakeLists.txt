@@ -14,7 +14,9 @@ include(FetchContent)
 if(NOT EMSCRIPTEN)
     message(FATAL_ERROR
             "This project requires Emscripten for WebAssembly builds.\n"
-            "Usage: emcmake cmake .. && emmake make\n"
+            "Configure with Emscripten and Ninja, for example:\n"
+            "  emcmake cmake -S . -B build -G Ninja\n"
+            "On native Windows, invoke the wrapper as emcmake.bat.\n"
             "Install Emscripten: https://emscripten.org/docs/getting_started/downloads.html"
     )
 endif()
@@ -184,12 +186,22 @@ set(PROTOBUF_LITE_SRCS
 # PROTOBUF CODE GENERATION (AUTOMATIC)
 # ===================================================================
 
-# Find host protoc compiler (must be installed on system)
-find_program(PROTOC_EXECUTABLE protoc REQUIRED)
+# Find the host protoc compiler. The generated C++ is then compiled for WASM,
+# but protoc itself must be a native executable for the contributor's host OS.
+find_program(
+        PROTOC_EXECUTABLE
+        NAMES protoc protoc.exe
+        DOC "Path to the host Protocol Buffers compiler (version 21.x)"
+)
 if(NOT PROTOC_EXECUTABLE)
-    message(FATAL_ERROR "protoc not found! Install with: sudo apt install protobuf-compiler")
+    message(FATAL_ERROR
+            "protoc 21.x was not found on PATH.\n"
+            "Download the v21.12 compiler for your platform from:\n"
+            "  https://github.com/protocolbuffers/protobuf/releases/tag/v21.12\n"
+            "Then add its bin directory to PATH or configure with:\n"
+            "  -DPROTOC_EXECUTABLE=<absolute-path-to-protoc>"
+    )
 endif()
-message(STATUS "Using protoc: ${PROTOC_EXECUTABLE}")
 
 # The generated .pb.h files embed the protoc version and the v21.12 runtime
 # fetched above refuses anything older. Without this guard a mismatch surfaces
@@ -198,23 +210,35 @@ message(STATUS "Using protoc: ${PROTOC_EXECUTABLE}")
 # the protoc on PATH. Ubuntu 22.04's protobuf-compiler is 3.12.4 and hits this
 # every time.
 execute_process(
-        COMMAND ${PROTOC_EXECUTABLE} --version
+        COMMAND "${PROTOC_EXECUTABLE}" --version
+        RESULT_VARIABLE PROTOC_VERSION_RESULT
         OUTPUT_VARIABLE PROTOC_VERSION_RAW
+        ERROR_VARIABLE PROTOC_VERSION_ERROR
         OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_STRIP_TRAILING_WHITESPACE
 )
-string(REGEX MATCH "([0-9]+)\\.([0-9]+)\\.([0-9]+)" _ "${PROTOC_VERSION_RAW}")
-set(PROTOC_VERSION_MAJOR ${CMAKE_MATCH_1})
-set(PROTOC_VERSION_MINOR ${CMAKE_MATCH_2})
-# protoc reports 21.x as "3.21.x", so accept either spelling of major 21.
-if(NOT (PROTOC_VERSION_MINOR STREQUAL "21" OR PROTOC_VERSION_MAJOR STREQUAL "21"))
+if(NOT PROTOC_VERSION_RESULT STREQUAL "0")
     message(FATAL_ERROR
-            "protoc ${PROTOC_VERSION_RAW} is incompatible with the protobuf "
-            "v21.12 runtime this project fetches.\n"
-            "Install a 21.x protoc, for example:\n"
-            "  curl -fsSLO https://github.com/protocolbuffers/protobuf/releases/download/v21.12/protoc-21.12-linux-x86_64.zip\n"
-            "  sudo unzip -o protoc-21.12-linux-x86_64.zip -d /usr/local\n"
-            "Distro packages are often too old: Ubuntu 22.04 ships 3.12.4.")
+            "Failed to run protoc at:\n"
+            "  ${PROTOC_EXECUTABLE}\n"
+            "Exit code: ${PROTOC_VERSION_RESULT}\n"
+            "Error: ${PROTOC_VERSION_ERROR}"
+    )
 endif()
+
+# The v21 line reports either "libprotoc 3.21.x" or "libprotoc 21.x",
+# depending on the package. Reject every other release family.
+if(NOT PROTOC_VERSION_RAW MATCHES "^libprotoc (3\\.21|21)\\.[0-9]+$")
+    message(FATAL_ERROR
+            "${PROTOC_VERSION_RAW} at ${PROTOC_EXECUTABLE} is incompatible "
+            "with the protobuf v21.12 runtime this project fetches.\n"
+            "Install protoc 21.x for your platform from:\n"
+            "  https://github.com/protocolbuffers/protobuf/releases/tag/v21.12\n"
+            "Distro packages are often too old; do not substitute a newer "
+            "protoc release family."
+    )
+endif()
+message(STATUS "Using protoc ${PROTOC_VERSION_RAW}: ${PROTOC_EXECUTABLE}")
 
 # Output directory for generated files
 set(PROTO_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/pb)
@@ -227,7 +251,7 @@ set(PROTO_HDRS ${PROTO_OUTPUT_DIR}/messages.pb.h)
 # Custom command to generate C++ from .proto
 add_custom_command(
         OUTPUT ${PROTO_SRCS} ${PROTO_HDRS}
-        COMMAND ${PROTOC_EXECUTABLE}
+        COMMAND "${PROTOC_EXECUTABLE}"
         ARGS --cpp_out=lite:${PROTO_OUTPUT_DIR}
         --proto_path=${CMAKE_SOURCE_DIR}/protos
         ${CMAKE_SOURCE_DIR}/protos/messages.proto

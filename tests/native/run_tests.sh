@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Native (host g++) unit tests for the pure, Emscripten-free modules.
-# No CMake target on purpose: the project CMake is an Emscripten build, and
-# these tests must stay runnable in seconds with nothing but a host compiler.
+# Native unit tests for the pure, Emscripten-free modules.
+# CMake/CTest is the portable entrypoint; this Bash file is a Linux/WSL
+# convenience wrapper around the same build Windows CI runs.
 set -euo pipefail
-cd "$(dirname "$0")"
-OUT="$(mktemp -d)"
-trap 'rm -rf "$OUT"' EXIT
-g++ -std=c++20 -Wall -Wextra -Werror -o "$OUT/research_url_test" research_url_test.cpp
-"$OUT/research_url_test"
+TEST_SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
+TEST_BUILD_DIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_BUILD_DIR"' EXIT
+
+cmake -S "$TEST_SOURCE_DIR" -B "$TEST_BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+cmake --build "$TEST_BUILD_DIR" --config Release --parallel
+cmake -E chdir "$TEST_BUILD_DIR" ctest -C Release --output-on-failure
