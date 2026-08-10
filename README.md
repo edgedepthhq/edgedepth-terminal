@@ -283,7 +283,7 @@ The terminal's visual language (surfaces, text ramp, market-data semantics, heat
 
 ## Architecture in one paragraph
 
-A dedicated worker thread owns the WebSocket, zstd decompression, and protobuf decode. Parsed messages flow through lock-guarded managers (orderbook, candles, heatmap, liquidations) that the render thread reads. The main loop is a single ImGui frame: every widget draws from current manager state, every frame, and the GPU does the rest, including the orderbook heatmap and liquidation Field, which render as shader-driven texture quads rather than per-cell draw calls. The replay engine substitutes the live feed with a time-ordered historical stream and drives the same managers, so live and replay are pixel-identical code paths.
+The browser-facing main thread owns the WebSocket callbacks, ImGui/ImPlot, and WebGL rendering. Live binary frames are copied to a data worker for zstd and protobuf processing; order-book updates use a protected write/read model, while most other updates return through a time-budgeted main-thread dispatch queue. Replay creates an isolated manager set, then points the same widgets and renderers at it. See [ARCHITECTURE.md](ARCHITECTURE.md) for the source-linked build, threading, live-data, replay, rendering, and browser-deployment design.
 
 ## Contributing
 
