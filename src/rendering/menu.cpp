@@ -17,6 +17,7 @@
 #include "core/ticker_manager.h"
 #include "core/logo_manager.h"
 #include "core/scanner_manager.h"
+#include "core/url_router.h"
 #include <cctype>
 #include <algorithm>
 #include <cstring>
@@ -221,13 +222,9 @@ void render_symbol_picker_popup(
         g_symbol_picker.record_recent(m.symbol);
         persist_recents();
         if (g_symbol_picker.replace_mode) {
-            // Mirror url_router::build_terminal_path (not #included here - its EM_JS
-            // defs must stay single-TU): ?exchange= only for non-binancef venues.
-            std::string new_path = "/terminal/" + m.symbol;
-            if (!m.exchange.empty() && m.exchange != "binancef") new_path += "?exchange=" + m.exchange;
-#ifdef __EMSCRIPTEN__
-            EM_ASM({ var path = UTF8ToString($0); window.location.href = path; }, new_path.c_str());
-#endif
+            // url_navigate carries ?ws= (and any other user params) across the
+            // reload; a bare location.href would drop a self-hosted feed here.
+            url_navigate(build_terminal_path(m.exchange, m.symbol));
         } else {
             switch (g_symbol_picker.pending) {
                 case SymbolPickerState::PendingWidget::Orderbook:

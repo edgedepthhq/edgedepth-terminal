@@ -12,6 +12,7 @@
 #include "rendering/theme.h"
 #include "core/ticker_manager.h"
 #include "core/logo_manager.h"
+#include "core/url_router.h"
 #include "imgui.h"
 #include "imgui_internal.h"          // ImGuiDockNodeFlags_NoTabBar (window class)
 #include <algorithm>
@@ -710,10 +711,10 @@ void WatchlistWidget::render_rows() {
                     else favorites_.erase(it);
                 } else if (!selected) {
 #ifdef __EMSCRIPTEN__
-                    std::string new_path = "/terminal/" + meta->symbol;
-                    if (!meta->exchange.empty() && meta->exchange != "binancef")
-                        new_path += "?exchange=" + meta->exchange;
-                    EM_ASM({ window.location.href = UTF8ToString($0); }, new_path.c_str());
+                    // url_navigate carries ?ws= (and any other user params)
+                    // across the reload; a bare location.href would drop a
+                    // self-hosted feed here.
+                    url_navigate(build_terminal_path(meta->exchange, meta->symbol));
 #endif
                 }
             }

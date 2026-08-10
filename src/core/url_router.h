@@ -6,39 +6,17 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#endif
 
-EM_JS(void, js_push_url, (const char* path), {
-    var p = UTF8ToString(path);
-    if (window.location.pathname !== p) {
-        window.history.pushState({}, "", p);
-    }
-});
-
-EM_JS(char*, js_get_path, (), {
-    var path = window.location.pathname;
-    var len = lengthBytesUTF8(path) + 1;
-    var buf = _malloc(len);
-    stringToUTF8(path, buf, len);
-    return buf;
-});
-
-EM_JS(char*, js_get_search, (), {
-    var s = window.location.search;
-    var len = lengthBytesUTF8(s) + 1;
-    var buf = _malloc(len);
-    stringToUTF8(s, buf, len);
-    return buf;
-});
-
-EM_JS(void, js_register_popstate, (void), {
-    window.addEventListener("popstate", function() {
-        if (Module._on_popstate) {
-            Module._on_popstate();
-        }
-    });
-});
-
-#endif // __EMSCRIPTEN__
+// Query-string discipline: neither the boot normalization (url_push) nor a
+// symbol navigation (url_navigate) may eat the user's query params. ?ws= is
+// the load-bearing one: a self-hoster pointing the terminal at their own
+// gateway would otherwise lose the override on boot or on the first watchlist
+// click and silently reconnect to the production feed. Route-owned keys
+// (exchange) and one-shot deep links (pack/packsym/packt/t/lesson/event) are
+// dropped on NAVIGATION, because a symbol click is an intent to leave those
+// modes; everything else is carried over. Everything here is EM_ASM, not
+// EM_JS, so this header is safe to include from any translation unit.
 
 struct Route {
     std::string symbol;
@@ -49,7 +27,13 @@ struct Route {
 
 inline std::string url_get_current_path() {
 #ifdef __EMSCRIPTEN__
-    char* raw = js_get_path();
+    char* raw = reinterpret_cast<char*>(EM_ASM_PTR({
+        var path = window.location.pathname;
+        var len = lengthBytesUTF8(path) + 1;
+        var buf = _malloc(len);
+        stringToUTF8(path, buf, len);
+        return buf;
+    }));
     std::string path(raw);
     free(raw);
     return path;
@@ -60,7 +44,13 @@ inline std::string url_get_current_path() {
 
 inline std::string url_get_current_search() {
 #ifdef __EMSCRIPTEN__
-    char* raw = js_get_search();
+    char* raw = reinterpret_cast<char*>(EM_ASM_PTR({
+        var s = window.location.search;
+        var len = lengthBytesUTF8(s) + 1;
+        var buf = _malloc(len);
+        stringToUTF8(s, buf, len);
+        return buf;
+    }));
     std::string s(raw);
     free(raw);
     return s;
@@ -69,9 +59,62 @@ inline std::string url_get_current_search() {
 #endif
 }
 
+// pushState to path, merging the current query string (the path's own query
+// wins per key). Boot uses this to normalize / into /terminal/<symbol>.
 inline void url_push(const std::string& path) {
 #ifdef __EMSCRIPTEN__
-    js_push_url(path.c_str());
+    EM_ASM({
+        var p = UTF8ToString($0);
+        var qi = p.indexOf('?');
+        var params = new URLSearchParams(window.location.search);
+        if (qi >= 0) {
+            new URLSearchParams(p.slice(qi + 1)).forEach(function(v, k) {
+                params.set(k, v);
+            });
+            p = p.slice(0, qi);
+        }
+        var q = params.toString();
+        var url = q ? p + '?' + q : p;
+        if (window.location.pathname + window.location.search !== url) {
+            window.history.pushState({}, "", url);
+        }
+    }, path.c_str());
+#endif
+}
+
+// Full navigation to path (reloads the app). Carries the query string over,
+// minus route-owned and one-shot deep-link keys; the path's own query wins.
+inline void url_navigate(const std::string& path) {
+#ifdef __EMSCRIPTEN__
+    EM_ASM({
+        var p = UTF8ToString($0);
+        var qi = p.indexOf('?');
+        var params = new URLSearchParams(window.location.search);
+        // split(' ') instead of an array literal: EM_ASM is a C macro and the
+        // preprocessor would treat the literal's commas as argument breaks.
+        'exchange pack packsym packt t lesson event'.split(' ')
+            .forEach(function(k) { params.delete(k); });
+        if (qi >= 0) {
+            new URLSearchParams(p.slice(qi + 1)).forEach(function(v, k) {
+                params.set(k, v);
+            });
+            p = p.slice(0, qi);
+        }
+        var q = params.toString();
+        window.location.href = q ? p + '?' + q : p;
+    }, path.c_str());
+#endif
+}
+
+inline void url_register_popstate() {
+#ifdef __EMSCRIPTEN__
+    EM_ASM({
+        window.addEventListener("popstate", function() {
+            if (Module._on_popstate) {
+                Module._on_popstate();
+            }
+        });
+    });
 #endif
 }
 

@@ -1677,7 +1677,7 @@ SDL_GL_MakeCurrent(g_app.window, g_app.gl_context);
     // container (vp9 → vp8 → webm → mp4); a failed probe renders the transport's
     // record button disabled instead of letting a click fail silently.
     ClipRecorder::probe_support();
-    js_register_popstate();
+    url_register_popstate();
     emscripten_set_main_loop(main_loop, 0, 1);
 #else
     while (!g_app.done) {
