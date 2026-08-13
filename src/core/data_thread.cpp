@@ -87,8 +87,12 @@ size_t DataThread::drain_dispatches(StreamManager& stream_mgr, double budget_ms)
         carry_.clear();
         carry_pos_ = 0;
         dispatches_.drain(carry_);
+        backlog_counters_.set(BacklogQueue::Carry, carry_.size());
     }
-    if (carry_pos_ >= carry_.size()) return 0;
+    if (carry_pos_ >= carry_.size()) {
+        backlog_counters_.set(BacklogQueue::Carry, 0);
+        return 0;
+    }
 
     const auto t0 = std::chrono::steady_clock::now();
     size_t executed = 0;
@@ -108,6 +112,6 @@ size_t DataThread::drain_dispatches(StreamManager& stream_mgr, double budget_ms)
         carry_.clear();
         carry_pos_ = 0;
     }
+    backlog_counters_.set(BacklogQueue::Carry, carry_.size() - carry_pos_);
     return executed;
 }
-

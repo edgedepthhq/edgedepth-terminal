@@ -375,6 +375,8 @@ set(PROJECT_SRC
         src/rendering/menu.cpp
         src/rendering/app_shell.h
         src/rendering/app_shell.cpp
+        src/rendering/performance_diagnostics.h
+        src/rendering/performance_diagnostics.cpp
 
         # UI Widgets
         src/ui/widget.h
@@ -500,6 +502,8 @@ set(PROJECT_SRC
         src/core/scanner_manager.h
         src/core/scanner_manager.cpp
         src/core/indicator_series.cpp
+        src/core/queue_metrics.h
+        src/core/data_queues.h
         src/core/data_thread.h
         src/core/data_thread.cpp
         src/ui/datetime_picker.h

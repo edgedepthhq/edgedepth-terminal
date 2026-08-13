@@ -4,7 +4,9 @@
 
 C++20 compiled to WebAssembly. Dear ImGui + ImPlot for immediate-mode rendering, SDL3 + WebGL2 underneath, protobuf over WebSocket for data. No Electron, no DOM in the hot path, no garbage collector between you and the tape.
 
-![EdgeDepth Terminal](assets/screenshot.png)
+![The Replay Library replaying a TUT short squeeze: an empty terminal fills with chart, DOM and tape, then the climax prints](assets/replay-library-tut.gif)
+
+*A real +856% short squeeze replayed from a static `.edpack` file in the built-in Replay Library: no feed, no account, no replay server. ([still screenshot](assets/screenshot.png))*
 
 This is the full source of the terminal that powers [EdgeDepth](https://edgedepth.com/open-source?utm_source=github&utm_medium=oss&utm_campaign=terminal): the same canvas, the same widgets, the same render loop. It is not a demo build or a stripped-down "community edition."
 
@@ -89,8 +91,8 @@ No feed is required for a recording. In the top bar choose **Replay**, then
 static hosting and replays locally with no account or replay server.
 
 The checked-in [`replay-library/manifest.json`](replay-library/manifest.json)
-is also the production catalog source. It starts with one verified ZEC event;
-additional picks can be published without rebuilding the terminal.
+is also the production catalog source. It currently lists four curated
+recordings; additional picks can be published without rebuilding the terminal.
 
 The terminal can play a self-contained `.edpack` recording entirely
 client-side: orderbook, tape, liquidations, footprint and volume profile
@@ -100,7 +102,7 @@ included, with nothing but static file hosting behind it.
 ?pack=<url-encoded pack URL>&packsym=<symbol>
 ```
 
-Try the catalog's first recording directly: 30 tick-by-tick minutes from a
+Try one of the catalog's recordings directly: 30 tick-by-tick minutes from a
 June 2026 ZEC selloff, including the order book, tape, liquidations, footprint
 and volume profile data (53 MB):
 

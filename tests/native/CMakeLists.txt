@@ -3,13 +3,19 @@ project(edgedepth_terminal_native_tests LANGUAGES CXX)
 
 enable_testing()
 
-add_executable(research_url_test research_url_test.cpp)
-target_compile_features(research_url_test PRIVATE cxx_std_20)
+function(add_terminal_native_test target source)
+    add_executable(${target} ${source})
+    target_compile_features(${target} PRIVATE cxx_std_20)
 
-if(MSVC)
-    target_compile_options(research_url_test PRIVATE /W4 /WX /utf-8)
-else()
-    target_compile_options(research_url_test PRIVATE -Wall -Wextra -Werror)
-endif()
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4 /WX /utf-8)
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Werror)
+    endif()
 
-add_test(NAME research_url_test COMMAND research_url_test)
+    add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+add_terminal_native_test(research_url_test research_url_test.cpp)
+add_terminal_native_test(frame_profiler_test frame_profiler_test.cpp)
+add_terminal_native_test(queue_metrics_test queue_metrics_test.cpp)

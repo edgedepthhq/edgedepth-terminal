@@ -1835,8 +1835,7 @@ void ChartWidget::draw_status_chip() const {
                                             TimeZoneFormat::TimeSeconds,
                                             clk, sizeof(clk));
         const float fr = ImGui::GetIO().Framerate;
-        const float ms = fr > 0.0f ? 1000.0f / fr : 0.0f;
-        snprintf(text, sizeof(text), "LIVE \xc2\xb7 %s \xc2\xb7 %s \xc2\xb7 %.0fms", sym.c_str(), clk, ms);
+        snprintf(text, sizeof(text), "LIVE \xc2\xb7 %s \xc2\xb7 %s \xc2\xb7 %.0f FPS", sym.c_str(), clk, fr);
     }
 
     const ImVec4 fg = replay ? Tokens::WARN : Tokens::UP;

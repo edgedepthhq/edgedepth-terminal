@@ -23,71 +23,17 @@
 //   Queueing ensures all widget state mutations happen on the main thread.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-#include <vector>
-#include <mutex>
 #include <atomic>
 #include <cstdint>
-#include <functional>
-#include <string>
 #include <pthread.h>
+#include "data_queues.h"
 #include "message_context.h"
-#include "stream_handler.h"
-
-// ─── Inbound queue: raw WS bytes from main thread → data thread ─────────────
-
-struct RawMessage {
-    std::vector<uint8_t> data;
-};
-
-class InboundQueue {
-public:
-    void push(const uint8_t* data, size_t len) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        queue_.push_back(RawMessage{{data, data + len}});
-    }
-
-    void drain(std::vector<RawMessage>& out) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        out.swap(queue_);
-        // After swap, queue_ has out's old contents (empty if caller cleared it)
-    }
-
-private:
-    std::mutex mutex_;
-    std::vector<RawMessage> queue_;
-};
-
-// ─── Pending dispatches: parsed data queued for main thread dispatch ─────────
-// These are type-erased dispatch calls that the main thread executes.
-// Each one captures the StreamKey + data needed to call dispatch_* on StreamManager.
-
-struct PendingDispatch {
-    // Type-erased callable - captures everything needed for dispatch
-    std::function<void(StreamManager&)> execute;
-};
-
-class DispatchQueue {
-public:
-    void push(PendingDispatch&& dispatch) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        queue_.push_back(std::move(dispatch));
-    }
-
-    void drain(std::vector<PendingDispatch>& out) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        out.swap(queue_);
-    }
-
-private:
-    std::mutex mutex_;
-    std::vector<PendingDispatch> queue_;
-};
 
 // ─── DataThread: the pthread that does the heavy lifting ─────────────────────
 
 class DataThread {
 public:
-    DataThread() = default;
+    DataThread() : inbound_(backlog_counters_), dispatches_(backlog_counters_) {}
     ~DataThread() { stop(); }
 
     DataThread(const DataThread&) = delete;
@@ -117,6 +63,10 @@ public:
     // Dispatches still queued locally after a budgeted drain (diagnostics).
     size_t carry_backlog() const { return carry_.size() - carry_pos_; }
 
+    // Lock-free diagnostic snapshot. Current producer counts are maintained
+    // while their existing queue mutexes are already held.
+    QueueBacklogSnapshot queue_metrics() const { return backlog_counters_.snapshot(); }
+
     bool is_running() const { return running_.load(std::memory_order_relaxed); }
 
     // Expose dispatch queue for MessageHandler to push into
@@ -126,6 +76,7 @@ private:
     static void* thread_func(void* arg);
     void run();
 
+    QueueBacklogCounters backlog_counters_;
     InboundQueue inbound_;
     DispatchQueue dispatches_;
     // Main-thread carry-over for budgeted drains: executed front-to-back;
@@ -137,4 +88,3 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> should_stop_{false};
 };
-

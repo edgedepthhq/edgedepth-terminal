@@ -57,6 +57,7 @@
 #include "rendering/theme.h"
 #include "rendering/menu.h"
 #include "rendering/app_shell.h"
+#include "rendering/performance_diagnostics.h"
 #include "rendering/shader_heatmap_resources.h"
 #include "stream_handler.h"
 #include "replayer/replay_manager.h"
@@ -386,9 +387,9 @@ void connect_websocket() {
 void render_debug() {
     ImGui::Begin("WebSocket Debug");
     const ImGuiIO& io = ImGui::GetIO();
-    ImGui::Text("FPS: %.1f (%.3f ms/frame)",
+    ImGui::Text("Presentation: %.1f FPS (%.3f ms interval, smoothed)",
                 io.Framerate,
-                1000.0f / io.Framerate);
+                io.Framerate > 0.0f ? 1000.0f / io.Framerate : 0.0f);
     ImGui::Separator();
     ImGui::Text("Display: %.0f x %.0f (Scale: %.2fx%.2f)",
                 io.DisplaySize.x, io.DisplaySize.y,
@@ -971,13 +972,20 @@ static void apply_embedded_viewport(int css_w, int css_h, double dpr) {
 
 
 void main_loop() {
-    static auto last_frame = std::chrono::steady_clock::now();
-    auto now = std::chrono::steady_clock::now();
+    static std::chrono::steady_clock::time_point last_frame{};
+    static bool has_previous_frame = false;
+    const auto now = std::chrono::steady_clock::now();
+    [[maybe_unused]] ProfileFrameScope frame_cpu_scope(g_profiler, now);
 
     // Record frame time for percentile tracking (interval between loop entries -
     // includes browser idle between rAF ticks; what the FPS counter reflects)
-    float frame_ms = std::chrono::duration<float, std::milli>(now - last_frame).count();
-    g_frame_tracker.record(frame_ms);
+    float frame_ms = 0.0f;
+    if (has_previous_frame) {
+        frame_ms = std::chrono::duration<float, std::milli>(now - last_frame).count();
+        g_frame_tracker.record(frame_ms);
+    }
+    last_frame = now;
+    has_previous_frame = true;
 
 #ifdef __EMSCRIPTEN__
     // Viewport/DPR sync. Crosses the JS↔WASM boundary, so we throttle.
@@ -1104,7 +1112,7 @@ void main_loop() {
     const bool full_shell = !edu.is_embedded() && !edu.is_pack() && !rec_focus;
     // Event (archive) + demo (pack) chromes suppress the native topbar/statsbar
     // (the React host owns the top nav) but still want the live terminal's bottom
-    // telemetry strip (symbol · WS · FPS · frame · UTC). Draw the status bar only.
+    // telemetry strip (symbol · WS · FPS · present interval · UTC). Draw the status bar only.
     const bool status_bar_only = !rec_focus && !full_shell &&
                                  (edu.is_event() || edu.is_pack());
     if (full_shell) {
@@ -1247,6 +1255,12 @@ void main_loop() {
         edu::RecorderRuntime::instance().emit_state(g_app.app_ctx);
         edu::RecorderRuntime::instance().render_overlay(g_app.app_ctx);
     }
+    if (!rec_focus && PerformanceDiagnostics::enabled()) {
+        const QueueBacklogSnapshot queues = g_app.data_thread
+            ? g_app.data_thread->queue_metrics()
+            : QueueBacklogSnapshot{};
+        PerformanceDiagnostics::render(g_profiler, g_frame_tracker, queues);
+    }
     // render_debug();
     g_profiler.begin("ImGui::Render");
     ImGui::Render();
@@ -1270,11 +1284,6 @@ void main_loop() {
     g_profiler.begin("SwapWindow");
     SDL_GL_SwapWindow(g_app.window);
     g_profiler.end("SwapWindow");
-    // CPU time of THIS frame (loop entry → here) - drives spike attribution.
-    const double frame_cpu_ms = std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now() - now).count();
-    g_profiler.end_frame(frame_cpu_ms);
-    last_frame = now;
 }
 
 extern "C" {

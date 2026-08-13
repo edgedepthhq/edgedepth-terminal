@@ -1690,12 +1690,12 @@ namespace {
             }
         }
 
-        // right - replay state + frame telemetry + interactive display zone/clock.
+        // right - replay state + presentation telemetry + interactive display zone/clock.
         // The selected zone only formats the epoch; it never changes replay time.
         const bool replaying = ctx.replay_mgr().is_active();
         const float fr = ImGui::GetIO().Framerate;
         char telemetry[112];
-        snprintf(telemetry, sizeof(telemetry), "%s \xc2\xb7 %.0f FPS \xc2\xb7 %.1fMS FRAME",
+        snprintf(telemetry, sizeof(telemetry), "%s \xc2\xb7 %.0f FPS \xc2\xb7 %.1fMS PRESENT",
                  replaying ? "REPLAY" : "REPLAY READY",
                  fr, fr > 0.0f ? 1000.0f / fr : 0.0f);
 

@@ -41,7 +41,7 @@ namespace AppShell {
     void render(std::vector<std::unique_ptr<Widget>>& widgets,
                 const AppContext& ctx);
 
-    // Draw ONLY the bottom telemetry bar (symbol · WS · FPS · frame · UTC), no
+    // Draw ONLY the bottom telemetry bar (symbol · WS · FPS · present interval · UTC), no
     // topbar/statsbar. For the embedded event/demo chromes that suppress the
     // native shell but still want the live status strip. symbol_lc = active
     // symbol (lowercase); ws_ok drives the connection pill.
