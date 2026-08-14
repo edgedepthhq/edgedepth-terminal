@@ -51,13 +51,17 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # linux/amd64 only, deliberately. The build stage compiles C++20 to
-          # WebAssembly under Emscripten, and the output is architecture
-          # independent; only the nginx runtime layer differs per arch.
-          # Building for arm64 would run that whole toolchain under emulation
-          # for no benefit. Apple Silicon runs this image fine under Docker's
-          # emulation, because all it does at runtime is serve static files.
-          platforms: linux/amd64
+          # Multi-arch WITHOUT emulating the compiler. The Emscripten stage is
+          # pinned to $BUILDPLATFORM in the Dockerfile, so C++20 to WebAssembly
+          # runs once natively on the amd64 runner and its output, which is
+          # architecture independent, gets copied into a per-arch nginx layer.
+          # Only that thin runtime layer is built twice.
+          #
+          # Worth the second layer: without it Apple Silicon pulls an amd64
+          # image, prints a platform-mismatch warning and runs nginx emulated.
+          # It works, but it is a poor first impression for a quick start that
+          # advertises "starts in seconds".
+          platforms: linux/amd64,linux/arm64
           # No GitHub Actions cache here, deliberately. mode=max exports every
           # intermediate layer, and this image is built on emsdk: several GB
           # against a 10GB per-repo cache limit. That export failed with

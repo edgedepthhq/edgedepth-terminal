@@ -3,7 +3,14 @@
 # with -sUSE_SDL=3 and the SDL3 port does not exist in older Emscripten. On
 # 3.1.61 the ports directory contains sdl2* only, and the build dies with
 # "SDL3/SDL.h file not found" partway through.
-FROM emscripten/emsdk:4.0.15 AS build
+#
+# Pinned to BUILDPLATFORM, not TARGETPLATFORM. WebAssembly is architecture
+# independent, so this stage should run ONCE on the builder's own arch no
+# matter how many platforms the final image targets. Without the pin, a
+# multi-arch build would run this entire toolchain under qemu for arm64, which
+# is both pointless and extremely slow, and would fail outright: the protoc
+# release fetched below is a linux-x86_64 binary.
+FROM --platform=$BUILDPLATFORM emscripten/emsdk:4.0.15 AS build
 
 # protoc must be a 21.x release to match the protobuf v21.12 runtime that
 # CMakeLists.txt fetches. Distro packages are the trap here: Ubuntu 22.04
