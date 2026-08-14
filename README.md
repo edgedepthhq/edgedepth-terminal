@@ -33,6 +33,14 @@ Images are pulled prebuilt so this starts in seconds. To compile the
 WebAssembly from source instead, `docker compose up --build` (that pulls the
 Emscripten toolchain and takes a while).
 
+**If the tape stays empty while the order book keeps moving**, your network
+cannot reach Binance's `@aggTrade` stream. The gateway detects this and logs a
+warning naming the fix after 30 seconds (`docker compose logs gateway`). Set
+`BINANCE_TRADE_STREAM: "trade"` in `docker-compose.yml` and restart: the tape,
+and the live candles built from it, fill in immediately. The market stats
+strip above the chart is fed by separate streams and can stay empty
+independently of this.
+
 ## Why this exists
 
 Web trading UIs are usually React apps fighting the DOM for every orderbook tick. This terminal takes the approach used by native trading software, an immediate-mode GUI redrawn every frame on the GPU, and ships it through WebAssembly. A full orderflow stack (chart, DOM ladder, tape, heatmap) renders at 170+ FPS in a browser tab with frame times around 5ms.
@@ -73,7 +81,7 @@ python3 examples/synthetic_feed.py
 
 **Community gateway:** [edgedepth-gateway](https://github.com/edgedepthhq/edgedepth-gateway) is exactly that feed, MIT licensed. It serves trades, candles, orderbook, stats and liquidations from Binance's free public streams, and answers historical candle requests from their REST klines so the chart boots with real history. It also builds **1s, 5s, 15s and 30s candles** trade by trade from the raw stream, updating the building candle as each trade arrives. See the [Quick start](#quick-start) to run both together.
 
-A few layers are driven by EdgeDepth's proprietary analytics streams: VPIN toxicity, positioning and smart-money flow, modelled liquidation estimates, pattern detection, and the scanner's composite scores. With a raw-data feed those panels simply stay empty and the terminal degrades gracefully. The [hosted product](https://app.edgedepth.com/terminal?utm_source=github&utm_medium=oss&utm_campaign=terminal) provides them, along with historical replay and structured courses taught inside the terminal.
+A few layers are driven by EdgeDepth's proprietary analytics streams: VPIN toxicity, positioning and smart-money flow, modelled liquidation estimates, pattern detection, and the scanner's composite scores. With a raw-data feed those panels simply stay empty and the terminal degrades gracefully; [which panels, and why](https://edgedepth.com/open-source?utm_source=github&utm_medium=oss&utm_campaign=terminal#empty-panels) lists them side by side. The [hosted product](https://app.edgedepth.com/terminal?utm_source=github&utm_medium=oss&utm_campaign=terminal) provides them, along with historical replay and structured courses taught inside the terminal.
 
 The main dividing line is time. Your local terminal starts recording when you
 install it. EdgeDepth has already been recording 660+ markets for months. Pro
