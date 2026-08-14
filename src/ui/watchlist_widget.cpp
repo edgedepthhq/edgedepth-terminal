@@ -663,8 +663,15 @@ void WatchlistWidget::render_rows() {
     const float w = ImGui::GetContentRegionAvail().x;
 
     const float pad_l = 8.0f, pad_r = 10.0f, gap = 8.0f;
-    const float star_w = 15.0f, spark_w = 52.0f, last_w = 74.0f, chg_w = 62.0f;
-    const bool  compact = compact_ || w < 300.0f;
+    // These four move as one set. The non-symbol chrome below adds up to a
+    // fixed ~215px regardless of panel width, so at the old default rail the
+    // symbol column got about 30 to 41px and every row rendered nameless with
+    // LAST and 24H% pushed off-panel. Widening the rail alone would not have
+    // fixed it: LAST and 24H% were also too narrow for a real price and a
+    // signed percentage, and the condense threshold sat below the new default,
+    // so the rail would have opened already condensed.
+    const float star_w = 15.0f, spark_w = 52.0f, last_w = 92.0f, chg_w = 88.0f;
+    const bool  compact = compact_ || w < 410.0f;
     const bool  show_spark = !compact;
     const float content_h = compact ? 22.0f : 27.0f;
     const float vol_h = 12.0f;                      // dim 24h-volume figure line

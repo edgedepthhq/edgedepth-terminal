@@ -2,15 +2,20 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // vpin_indicator.h - Toxicity pane (VPIN, Indicators V1 Wave B pathfinder)
 //
-// Implementation contract: the Microstructure Indicator Suite SPEC §2
+// Implementation contract: SPEC §2 as amended by the "Eras" revamp
+// (James pick from the 2026-08-13 mockup round; SPEC/tokens.json mirror
+// pending):
 //   · fixed 0-1.0 axis, gridlines .25/.50/.75, dotted landmark rules at
-//     .30/.45/.60 (the fallback thresholds - drawn always)
-//   · VPIN = 1px STEP-HOLD line (H then V at each volume-clock print),
-//     stroke colored by regime; shelves are honest - quiet symbols hold
+//     .30/.45/.60 at 20% alpha WITH in-plot value labels
+//   · VPIN = 1px STEP-HOLD line (H then V at each volume-clock print) in
+//     ONE bright ink (TX1); shelves are honest - quiet symbols hold; the
+//     hold past the last finalized bucket renders at tentative alpha
 //   · conf < 0.65 in HMM eras → that segment at 0.55 alpha (quantized)
-//   · 2px regime strip ON the time axis, drawn only for regime ≥ ELEVATED;
+//   · regime = full-height background washes (>= ELEVATED only, alpha
+//     .05/.07/.09, halved in threshold-fallback eras) + 3px on-axis strip;
 //     color seams land exactly on state-change prints (no extra glyphs);
-//     threshold-fallback eras at strip alpha × 0.4 + one THRESH|HMM→ seam
+//     fallback eras at strip alpha × 0.4 + one THRESH|HMM→ seam
+//   · persistent corner readout: regime word · brain (+conf) · latest VPIN
 //   · axis tag = regime color, NORMAL → neutral (SPEC §0.2)
 //
 // Data = finalized volume-bucket prints from the IndicatorSeriesManager

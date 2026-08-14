@@ -1,5 +1,6 @@
 #include "ui/trades_widget.h"
 #include "core/display_time_zone.h"
+#include "core/stream_presence.h"
 #include "rendering/theme.h"
 #include "imgui.h"
 #include <algorithm>
@@ -105,6 +106,37 @@ void TradesWidget::render_header() {
 }
 
 void TradesWidget::render_table() {
+    // A tape that has never printed looks identical to a broken app: column
+    // headers over nothing, with no clue whose fault it is. The terminal
+    // already knows the difference, and knows it about five seconds before the
+    // gateway logs its own warning. Four other surfaces already say so from the
+    // same detector; say it here too, because this is the panel a stranger
+    // stares at first. Keyed on frame absence rather than entitlements, since
+    // bare mode defaults to Pro and cannot tell the feeds apart.
+    //
+    // Replaces the table rather than adding a row to it: the note needs the
+    // panel width, and inside the table it would wrap to the PRICE column and
+    // be clipped at that column's edge. Column headers over nothing carry no
+    // information anyway, and the moment one trade arrives absent() goes false
+    // and the table comes back.
+    if (trade_count_ == 0 &&
+        StreamPresence::instance().absent(static_cast<uint32_t>(Terminal::Stream::Trades))) {
+        const float ww = ImGui::GetContentRegionAvail().x;
+        const float pad = 10.0f;
+        ImGui::PushFont(Theme::Fonts::label());
+        ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::TX3);
+        ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + pad, ImGui::GetCursorPosY() + pad));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ww - pad * 2.0f);
+        ImGui::TextUnformatted(
+            "No trades received. The feed is connected but its trade stream has "
+            "not delivered anything, which some networks block. The tape is "
+            "waiting, not broken.");
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
+        ImGui::PopFont();
+        return;
+    }
+
     // .tape-* - mono numerics, hairline-free dense rows, micro-label header
     ImGui::PushFont(Theme::Fonts::mono_sm());
     const float row_h = 18.0f;

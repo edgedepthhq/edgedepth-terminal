@@ -1138,7 +1138,12 @@ namespace {
         };
 
         // ── account pill (far right) + notifications bell ────────────────────
-        {
+        // Hosted only. Self-hosted there is no EdgeDepth account behind this
+        // stack, and the tier default is Pro, so rendering the pill showed a
+        // signed-in "PRO . FOUNDER RATE" user who does not exist, in the same
+        // window as an Unlock CTA. Skipping it also leaves rx where it was, so
+        // the rest of the bar simply closes up.
+        if (Entitlements::hosted()) {
             const bool pro = Entitlements::is_pro();
             const std::string email = Entitlements::user_email();
             std::string uname = email.empty() ? "Account" : email.substr(0, email.find('@'));
@@ -1283,12 +1288,24 @@ namespace {
 
         vdiv();
 
-        // Courses
-        rx -= courses_w; ImGui::SetCursorScreenPos(ImVec2(rx, icy));
-        if (tb_button("Courses", courses_w)) {
+        // Courses. Hosted only: self-hosted this was a same-origin relative
+        // navigation to localhost:8080/courses, which the bundled nginx 404s,
+        // so it replaced the terminal with an error page.
+        //
+        // The target is absolute and opens a new tab even on the hosted build,
+        // because /courses does not exist there either. The live hub is /learn;
+        // this line predates it and had been dead on every host since.
+        if (Entitlements::hosted()) {
+            rx -= courses_w; ImGui::SetCursorScreenPos(ImVec2(rx, icy));
+            if (tb_button("Courses", courses_w)) {
 #ifdef __EMSCRIPTEN__
-            EM_ASM({ window.location.href = '/courses'; });
+                EM_ASM({
+                    window.open('https://app.edgedepth.com/learn?utm_source=terminal'
+                                + '&utm_medium=topbar&utm_campaign=courses',
+                                '_blank', 'noopener');
+                });
 #endif
+            }
         }
 
         // (Top-bar Indicators popup removed in v2 3b; the chart toolbar owns it.
@@ -1310,8 +1327,9 @@ namespace {
             if (show_metrics) ImGui::ShowMetricsWindow(&show_metrics);
         }
 
-        // Account dropdown (opened by the user pill above).
-        render_account_menu();
+        // Account dropdown (opened by the user pill above, which only exists on
+        // the hosted build).
+        if (Entitlements::hosted()) render_account_menu();
 
         ImGui::End();
         ImGui::PopStyleColor();

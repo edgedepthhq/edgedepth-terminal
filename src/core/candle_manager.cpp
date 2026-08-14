@@ -408,6 +408,17 @@ void CandleManager::finalize_current_candle() {
         has_current_candle_ = false;
         return;
     }
+    // Never break the sorted-timestamp invariant. candles_ is binary searched
+    // by timestamp by the chart, the candle-derived liquidation field and the
+    // scrub preview, and one out-of-order entry at the back drags x_max
+    // backwards and renders an empty plot. The equal case returned above, so
+    // reaching here with a building candle no newer than the back means
+    // something upstream sent a candle that should never have been accepted.
+    // Drop it rather than corrupt the series.
+    if (!candles_.empty() && current_candle_.timestamp_ms <= candles_.back().timestamp_ms) {
+        has_current_candle_ = false;
+        return;
+    }
     candles_.push_back(current_candle_);
     has_current_candle_ = false;
     mark_dirty();
@@ -433,6 +444,23 @@ int64_t CandleManager::get_candle_timestamp(int64_t trade_timestamp_ms) const {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void CandleManager::handle_candle(const Terminal::Candle& candle) {
+    // A candle with no timestamp, or with no price at all, is not a candle.
+    // This is the exact shape a wire mismatch produces: proto3 skips fields it
+    // cannot match as unknown, the parse still succeeds, and every field comes
+    // back at its default. Such a candle aligns to bucket 0, becomes the
+    // building candle, gets finalized at the BACK of the series, and takes the
+    // chart's x_max to 0 against a real epoch x_min. The plot then renders
+    // empty and the OHLC readout prints zeros, and nothing recovers it except a
+    // timeframe change, because later zero frames are absorbed by the
+    // back-merge guard below. Refusing it here is cheap and local.
+    if (candle.timestamp_ms <= 0) {
+        return;
+    }
+    if (candle.open == 0.0 && candle.high == 0.0 &&
+        candle.low == 0.0 && candle.close == 0.0) {
+        return;
+    }
+
     if (!initial_load_complete_) {
         return;
     }

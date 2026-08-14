@@ -412,23 +412,43 @@ void RecorderRuntime::render_overlay(const AppContext& ctx) {
                 if (std::string(w->Name).find(hint) == std::string::npos) continue;
                 const float bx0 = w->Pos.x - 4.0f, by0 = w->Pos.y - 4.0f;
                 const float bx1 = bx0 + w->Size.x + 8.0f, by1 = by0 + w->Size.y + 8.0f;
-                const ImVec2 v0(0.0f, 0.0f);
-                const ImVec2 v1(io.DisplaySize.x, io.DisplaySize.y);
-                // Dim everything except the panel (four rects, no stencil).
-                // Between the lesson's track (92) and beat (184) alphas: the
-                // panel must pop while the chart stays readable as context.
-                const ImU32 dim = IM_COL32(0, 0, 0, 150);
-                dl->AddRectFilled(v0, ImVec2(v1.x, by0), dim);
-                dl->AddRectFilled(ImVec2(v0.x, by1), v1, dim);
-                dl->AddRectFilled(ImVec2(v0.x, by0), ImVec2(bx0, by1), dim);
-                dl->AddRectFilled(ImVec2(bx1, by0), ImVec2(v1.x, by1), dim);
-                // Brand-accent ring (#35c9c4 - the one accent, tokens.css).
-                dl->AddRect(ImVec2(bx0, by0), ImVec2(bx1, by1),
-                            IM_COL32(53, 201, 196, 235), 3.0f, 0, 1.6f);
                 last_focus_ = FocusBox{ bx0, by0, bx1 - bx0, by1 - by0, true };
                 break;
             }
         }
+    }
+
+    // Fade the lightbox in/out (~200ms) instead of popping. The fade-out
+    // keeps dimming the departing panel via fade_box_ after the shot's
+    // focus clears; a focused frame retargets fade_box_ every frame so
+    // docked-layout moves still track.
+    constexpr float kFadeS = 0.2f;
+    const float fade_step = io.DeltaTime > 0.0f ? io.DeltaTime / kFadeS : 1.0f;
+    if (last_focus_.valid) {
+        fade_box_ = last_focus_;
+        lightbox_alpha_ = std::min(1.0f, lightbox_alpha_ + fade_step);
+    } else {
+        lightbox_alpha_ = std::max(0.0f, lightbox_alpha_ - fade_step);
+    }
+    if (fade_box_.valid && lightbox_alpha_ > 0.01f) {
+        const float bx0 = fade_box_.x, by0 = fade_box_.y;
+        const float bx1 = fade_box_.x + fade_box_.w, by1 = fade_box_.y + fade_box_.h;
+        const ImVec2 v0(0.0f, 0.0f);
+        const ImVec2 v1(io.DisplaySize.x, io.DisplaySize.y);
+        // Dim everything except the panel (four rects, no stencil).
+        // Between the lesson's track (92) and beat (184) alphas: the
+        // panel must pop while the chart stays readable as context.
+        const ImU32 dim = IM_COL32(0, 0, 0,
+            static_cast<int>(150.0f * lightbox_alpha_));
+        dl->AddRectFilled(v0, ImVec2(v1.x, by0), dim);
+        dl->AddRectFilled(ImVec2(v0.x, by1), v1, dim);
+        dl->AddRectFilled(ImVec2(v0.x, by0), ImVec2(bx0, by1), dim);
+        dl->AddRectFilled(ImVec2(bx1, by0), ImVec2(v1.x, by1), dim);
+        // Brand-accent ring (#35c9c4 - the one accent, tokens.css).
+        dl->AddRect(ImVec2(bx0, by0), ImVec2(bx1, by1),
+                    IM_COL32(53, 201, 196,
+                             static_cast<int>(235.0f * lightbox_alpha_)),
+                    3.0f, 0, 1.6f);
     }
 
     // ── Badge - export style (recorder_glue.cpp export_tick_and_render): the

@@ -113,7 +113,12 @@ namespace Theme {
         inline constexpr float PILLSROW_H      = 44.0f;   // v2 chart toolbar band (was 36)
         inline constexpr float STATUSBAR_H     = 22.0f;   // owns telemetry (WS · FPS · CLOCK)
         inline constexpr float TRANSPORT_H     = 66.0f;
-        inline constexpr float WATCHLIST_W     = 256.0f;  // v2 dense-grid rail (was 384; ~1/3 narrower)
+        // 360, not 256. The rail's non-symbol chrome (star, sparkline, LAST,
+        // 24H%, gaps) costs a fixed ~215px, so 256 left the symbol column
+        // around 30 to 41px: a fresh user saw truncated, effectively nameless
+        // rows with the numbers pushed off-panel. Moves as one set with
+        // watchlist_widget.cpp's last_w, chg_w and condense threshold.
+        inline constexpr float WATCHLIST_W     = 360.0f;  // v2 dense-grid rail
         inline constexpr float RIGHTCOL_W      = 420.0f;  // DOM over TAPE (was 300; v2 DOM needs ~440)
         inline constexpr float INDI_PANE_H     = 172.0f;
         inline constexpr float PANEL_HEADER_H  = 26.0f;

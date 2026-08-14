@@ -98,6 +98,20 @@ inline bool  is_research() {
 }
 inline bool  is_admin() { return current() == Tier::Admin; }
 
+// Whether this build is running behind the hosted product, i.e. whether there
+// is an EdgeDepth account and a courses hub on the other side of the chrome.
+//
+// Defaults TRUE and only ever flips on an EXPLICIT window.__EDGEDEPTH_HOSTED__
+// === false. app.edgedepth.com never sets that global, so the hosted deploy is
+// byte-identical to before this existed; the bundled docker image sets it in
+// docker/entrypoint.sh. Read via detect() at boot.
+//
+// This exists because the tier default above is Pro, which is right for dev but
+// makes a self-hosted stack render a signed-in "PRO . FOUNDER RATE" account the
+// user does not have, contradicting the Unlock CTA in the same window. Tier
+// answers "what may this user do"; this answers "is there an account at all".
+inline bool& hosted() { static bool b = true; return b; }
+
 // Signed-in user's email (account menu header). Set by the host via
 // window.__EDGEDEPTH_USER_EMAIL__; empty in standalone/dev.
 inline std::string& user_email() { static std::string e; return e; }
@@ -155,6 +169,13 @@ inline void detect() {
                   : (s == "admin")    ? Tier::Admin
                                       : Tier::Pro;
     }
+    // Strict === false, so an absent or malformed global leaves hosted() true
+    // and nothing about app.edgedepth.com changes.
+    hosted() = EM_ASM_INT({
+        try { return window.__EDGEDEPTH_HOSTED__ === false ? 0 : 1; }
+        catch (e) { return 1; }
+    }) != 0;
+
     char ebuf[128] = {0};
     EM_ASM({
         try {

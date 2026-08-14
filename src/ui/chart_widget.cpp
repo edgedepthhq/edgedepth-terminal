@@ -747,6 +747,27 @@ void ChartWidget::render_chart() {
             x_min = x_max - static_cast<double>(rv->view_span_min) * 60000.0;
         }
     }
+    // Last-resort guard on a degenerate X range. Every branch above assumes
+    // x_min < x_max, and a feed that lands a bogus candle at the back of the
+    // series breaks that: an all-zero candle at timestamp 0 takes x_max to 0
+    // against a real epoch x_min. ImPlot then draws an empty plot on an
+    // inverted axis, and nothing clears it except a timeframe change, so the
+    // terminal looks broken for as long as the user leaves it alone. The candle
+    // manager now rejects that candle at the door; this is the backstop that
+    // keeps ANY such feed from blanking the chart permanently. Written as
+    // !(x_max > x_min) so a NaN from the same class of bug is caught too.
+    if (!(x_max > x_min)) {
+        const int64_t anchor_ms = ctx_.replay_mgr().is_active()
+            ? ctx_.replay_mgr().interpolated_time_ms()
+            : std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::system_clock::now().time_since_epoch()).count();
+        const double span_ms =
+            static_cast<double>(ctx_.candle_mgr().visible_candles_for_timeframe()) *
+            static_cast<double>(tf_sec) * 1000.0;
+        x_max = static_cast<double>(anchor_ms) + x_padding;
+        x_min = x_max - span_ms;
+    }
+
     // Real-time view (RT), any chart type: engage follow-live so the chart
     // streams and keeps the live edge current. We re-arm follow-live ONLY on the
     // rising edge of rt_mode_ (rt_was_on_ edge-detect) - not every frame - so the
@@ -3384,21 +3405,29 @@ void ChartWidget::handle_plot_interaction() {
     // While the drawing layer owns the mouse (armed tool, placement, drag, or
     // hover over a drawing), the chart's own click/drag handlers stand down.
     const bool draw_cap = drawing_layer_.captures_mouse();
+
+    // Capture the chart plot rect EVERY frame, not only when the chart is
+    // hovered: the indicator subplots reuse first_plot_min/last_plot_max for
+    // the shared crosshair, and hovering a pane while these still held the
+    // frame-start reset (0,0) dragged the vertical line to the window's
+    // left edge. render_tabbed overwrites last_plot_max with the bottom
+    // pane's rect right after this.
+    crosshair_state_.first_plot_min = ImPlot::GetPlotPos();
+    const ImVec2 plot_size = ImPlot::GetPlotSize();
+    crosshair_state_.first_plot_max = ImVec2(
+        crosshair_state_.first_plot_min.x + plot_size.x,
+        crosshair_state_.first_plot_min.y + plot_size.y
+    );
+    crosshair_state_.last_plot_max = crosshair_state_.first_plot_max;
+
     if (ImPlot::IsPlotHovered()) {
         crosshair_state_.is_active = true;
         crosshair_state_.plot_pos = ImPlot::GetPlotMousePos();
         crosshair_state_.chart_hovered = true;
         crosshair_state_.indicator_hovered = false;
 
-        crosshair_state_.first_plot_min = ImPlot::GetPlotPos();
-        const ImVec2 plot_size = ImPlot::GetPlotSize();
-        crosshair_state_.first_plot_max = ImVec2(
-            crosshair_state_.first_plot_min.x + plot_size.x,
-            crosshair_state_.first_plot_min.y + plot_size.y
-        );
         crosshair_state_.hovered_plot_min = crosshair_state_.first_plot_min;
         crosshair_state_.hovered_plot_max = crosshair_state_.first_plot_max;
-        crosshair_state_.last_plot_max = crosshair_state_.first_plot_max;
 
         const ImPlotRect limits = ImPlot::GetPlotLimits();
         crosshair_state_.hovered_y_min = limits.Y.Min;

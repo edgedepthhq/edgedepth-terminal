@@ -62,6 +62,16 @@ namespace IndiTokens {
     constexpr float TENTATIVE_ALPHA    = 0.55f;              // --indi-tentative-alpha
     constexpr float TENTATIVE_CONF     = 0.65f;              // --indi-tentative-conf-val
 
+    // ── Toxicity revamp, "Eras" direction (James pick 2026-08-13) ──
+    // Values signed off from the mockup round; PENDING their tokens.json
+    // mirror (design owns the sheet - add these, then this note goes).
+    constexpr float TOX_RULE_ALPHA    = 0.20f;  // threshold rules, up from 9%
+    constexpr float TOX_STRIP_H_V2_PX = 3.0f;   // strip = the wash's crisp edge
+    constexpr float TOX_WASH_ELEVATED = 0.05f;  // full-height regime washes
+    constexpr float TOX_WASH_HIGH     = 0.07f;
+    constexpr float TOX_WASH_CRITICAL = 0.09f;
+    constexpr float TOX_WASH_FALLBACK = 0.5f;   // wash mul in threshold eras
+
     // ── Empty-history epoch (SPEC §0.4) ──
     constexpr ImU32 EPOCH_RULE = rgba(0x5C687866u);
     constexpr ImU32 EPOCH_INK  = rgba(0x39424FFFu);

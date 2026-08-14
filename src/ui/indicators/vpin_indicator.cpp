@@ -1,14 +1,26 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// vpin_indicator.cpp - Toxicity pane render (SPEC.md §2, tokens.json)
+// vpin_indicator.cpp - Toxicity pane render ("Eras" revamp, 2026-08-13)
+//
+// Render model (supersedes the SPEC §2 line coloring; James sign-off from the
+// mockup round - SPEC/tokens.json mirror pending):
+//   · VPIN line = ONE bright ink step-hold stroke (TX1). The trend must read
+//     at a glance; per-segment regime coloring chopped it into confetti.
+//   · Regime = full-height background WASHES (merged runs, >= ELEVATED only,
+//     alpha quantized 0.05/0.07/0.09, NORMAL = void) + a 3px on-axis strip
+//     as the crisp edge. Seams land exactly on state-change prints.
+//   · Threshold rules .30/.45/.60 at 20% alpha with in-plot labels.
+//   · Persistent corner readout: regime word + brain + latest VPIN.
+//   · The hold past the last finalized bucket renders at tentative alpha -
+//     stale data must not masquerade as a live shelf.
 //
 // Two render paths (2026-07-04 FPS fix - the pane must cost O(plot width),
 // not O(points); per-print draws were ~10-15k prims zoomed out):
 //   · EXACT: ≤ ~1.25 points/px - true step-hold shelves per volume-clock
-//     print (H then V), per-segment regime color + tentative alpha.
-//   · DECIMATED: one vertical min-max line per pixel column, colored by the
-//     column's last print. Sub-pixel shelves are unreadable anyway; the
-//     min-max column preserves spike honesty (no averaging - grain rule).
-// The regime strip is merged into runs (one rect per regime run, both paths).
+//     print (H then V), tentative-confidence alpha per segment.
+//   · DECIMATED: one vertical min-max line per pixel column. Sub-pixel
+//     shelves are unreadable anyway; the min-max column preserves spike
+//     honesty (no averaging - grain rule).
+// Washes + strip are merged into runs (one rect per regime run, both paths).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "vpin_indicator.h"
@@ -66,9 +78,9 @@ bool VPINIndicator::get_latest_tag_color(ImU32& out_color) const {
 
 void VPINIndicator::render_settings() {
     // §4.5 settings - F2 popover pilot. Persisted blob is S4 (F2 full).
-    ImGui::Checkbox("Regime coloring", &regime_coloring_);
+    ImGui::Checkbox("Regime display", &regime_coloring_);
     if (ImGui::IsItemHovered())
-        Theme::tooltip("Color the VPIN line + strip by toxicity regime\n(HMM when available, threshold fallback otherwise)");
+        Theme::tooltip("Show toxicity regimes as background washes + the on-axis strip\n(HMM when available, threshold fallback otherwise)");
     ImGui::Checkbox("Imbalance line", &show_imbalance_);
     if (ImGui::IsItemHovered())
         Theme::tooltip("Order-imbalance companion (per completed volume bucket),\nstep-hold, drawn in the pane's secondary slate style");
@@ -89,17 +101,28 @@ void VPINIndicator::render_content(double x_min, double x_max) {
     const float px_right = plot_pos.x + plot_size.x;
     const float px_bot   = plot_pos.y + plot_size.y;
 
-    // ── Dotted threshold landmarks (.30/.45/.60) - drawn always ──
+    // ── Dotted threshold landmarks (.30/.45/.60) - drawn always, named.
+    //    At the old 9% alpha the line floated in an unlabeled 0-1 void. ──
     {
         const float ys[3] = {
             ImPlot::PlotToPixels(0.0, IndiTokens::TOX_THRESHOLD_1).y,
             ImPlot::PlotToPixels(0.0, IndiTokens::TOX_THRESHOLD_2).y,
             ImPlot::PlotToPixels(0.0, IndiTokens::TOX_THRESHOLD_3).y,
         };
+        const ImU32 rule_col =
+            IndiTokens::mul_alpha(IndiTokens::RISK_NORMAL, IndiTokens::TOX_RULE_ALPHA);
         for (float y : ys) {
-            dotted_hline(dl, px_left, px_right, y, IndiTokens::TOX_THRESHOLDS,
+            dotted_hline(dl, px_left, px_right, y, rule_col,
                          IndiTokens::TOX_THRESH_DASH_ON, IndiTokens::TOX_THRESH_DASH_OFF);
         }
+        static const char* const kLbl[3] = {"0.30", "0.45", "0.60"};
+        ImGui::PushFont(Theme::Fonts::label());
+        const float fh = ImGui::GetFontSize();
+        for (int t = 0; t < 3; ++t) {
+            dl->AddText(ImVec2(px_left + 4.0f, ys[t] - fh - 1.0f),
+                        IndiTokens::INK_FAINT, kLbl[t]);
+        }
+        ImGui::PopFont();
     }
 
     if (pts_.empty()) {
@@ -127,30 +150,32 @@ void VPINIndicator::render_content(double x_min, double x_max) {
            static_cast<double>(pts_[i_end].ts_ms) <= x_max) ++i_end;
     const size_t n_vis = i_end - i0;
 
-    const float strip_top = px_bot - IndiTokens::TOX_STRIP_H_PX;
+    const float strip_top = px_bot - IndiTokens::TOX_STRIP_H_V2_PX;
 
-    // Segment stroke color for a print (shared by both paths).
-    auto seg_color = [&](const Series::VPINPoint& p) -> ImU32 {
-        ImU32 col = regime_coloring_ ? IndiTokens::risk_color(p.regime)
-                                     : IndiTokens::RISK_NORMAL;
-        if (p.hmm_state >= 0 && p.hmm_conf < IndiTokens::TENTATIVE_CONF)
-            col = IndiTokens::mul_alpha(col, IndiTokens::TENTATIVE_ALPHA);
-        return col;
-    };
-
-    // ── Regime strip as merged RUNS (one rect per regime/era run) ──
+    // ── Regime RUNS, merged (one rect per regime/era run) ──
     // NORMAL draws nothing but still breaks runs; seams land exactly on
     // state-change prints (SPEC §2 - the seams ARE the transitions).
-    if (regime_coloring_) {
+    // Shared by the full-height washes and the on-axis strip; wash alpha is
+    // quantized per regime and halved in threshold-fallback eras.
+    auto draw_regime_runs = [&](float y_top, float y_bot, bool wash) {
         int8_t run_regime = -1;
         bool   run_era    = false;
         float  run_x0     = 0.0f;
+        auto run_alpha = [&](int8_t r, bool era) -> float {
+            if (wash) {
+                const float a = (r == 1) ? IndiTokens::TOX_WASH_ELEVATED
+                              : (r == 2) ? IndiTokens::TOX_WASH_HIGH
+                                         : IndiTokens::TOX_WASH_CRITICAL;
+                return era ? a : a * IndiTokens::TOX_WASH_FALLBACK;
+            }
+            return IndiTokens::TOX_STRIP_ALPHA *
+                   (era ? 1.0f : IndiTokens::TOX_FALLBACK_MUL);
+        };
         auto flush_run = [&](float x1) {
             if (run_regime >= 1 && x1 > run_x0) {
-                const float mul = IndiTokens::TOX_STRIP_ALPHA *
-                                  (run_era ? 1.0f : IndiTokens::TOX_FALLBACK_MUL);
-                dl->AddRectFilled(ImVec2(run_x0, strip_top), ImVec2(x1, px_bot),
-                                  IndiTokens::mul_alpha(IndiTokens::risk_color(run_regime), mul));
+                dl->AddRectFilled(ImVec2(run_x0, y_top), ImVec2(x1, y_bot),
+                                  IndiTokens::mul_alpha(IndiTokens::risk_color(run_regime),
+                                                        run_alpha(run_regime, run_era)));
             }
         };
         for (size_t i = i0; i < i_end; ++i) {
@@ -167,6 +192,15 @@ void VPINIndicator::render_content(double x_min, double x_max) {
         }
         const float x_last_edge = ImPlot::PlotToPixels(x_max, 0.0).x;
         flush_run(x_last_edge);  // final run extends to the right edge
+    };
+
+    // Regime eras: full-height washes UNDER everything, strip as the crisp
+    // edge. The V1 "no bg-tint" rejection assumed 3 stacked panes under a hot
+    // Field; with restraint (>= ELEVATED only, alpha <= 0.09) the wash is the
+    // regime-at-a-glance layer the 2px strip never managed to be.
+    if (regime_coloring_) {
+        draw_regime_runs(plot_pos.y, px_bot, true);
+        draw_regime_runs(strip_top, px_bot, false);
     }
 
     // ── THRESH → HMM changeover seam (rendered once, both paths) ──
@@ -196,6 +230,15 @@ void VPINIndicator::render_content(double x_min, double x_max) {
     const bool decimate = n_vis > static_cast<size_t>(plot_size.x * 1.25f) &&
                           plot_size.x > 0.0f;
 
+    // One bright ink stroke; regime lives in the washes + strip. The
+    // tentative-confidence quantized alpha survives (DECISIONS §2.2).
+    auto stroke_color = [&](const Series::VPINPoint& p) -> ImU32 {
+        ImU32 c = Theme::u32(Theme::Tokens::TX1);
+        if (p.hmm_state >= 0 && p.hmm_conf < IndiTokens::TENTATIVE_CONF)
+            c = IndiTokens::mul_alpha(c, IndiTokens::TENTATIVE_ALPHA);
+        return c;
+    };
+
     if (!decimate) {
         for (size_t i = i0; i < i_end; ++i) {
             const auto& p = pts_[i];
@@ -203,7 +246,11 @@ void VPINIndicator::render_content(double x_min, double x_max) {
             const bool   last = (i + 1 >= pts_.size());
             const double t1 = last ? x_max
                                    : std::min(static_cast<double>(pts_[i + 1].ts_ms), x_max);
-            const ImU32 col = seg_color(p);
+            ImU32 col = stroke_color(p);
+            // The hold past the LAST finalized bucket is not a print - render
+            // it tentative instead of masquerading as a live shelf.
+            if (last)
+                col = IndiTokens::mul_alpha(col, IndiTokens::TENTATIVE_ALPHA);
             const ImVec2 a = ImPlot::PlotToPixels(std::max(t0, x_min), static_cast<double>(p.vpin));
             const ImVec2 b = ImPlot::PlotToPixels(t1,                  static_cast<double>(p.vpin));
             dl->AddLine(a, b, col, 1.0f);                       // H shelf
@@ -215,10 +262,9 @@ void VPINIndicator::render_content(double x_min, double x_max) {
         // Shelf entering from the left when the next visible print is far
         // right of i_end-1 handled implicitly; final shelf handled above.
     } else {
-        // One min-max vertical per pixel column; column color = the LAST
-        // print's segment color (regime at sub-pixel is the latest brain
-        // state - no blending). Connect columns with the running level so
-        // flat stretches still read as a line.
+        // One min-max vertical per pixel column; column alpha = the LAST
+        // print's tentative state (no blending). Connect columns with the
+        // running level so flat stretches still read as a line.
         float  col_x   = 0.0f;
         float  col_min = 0.0f, col_max = 0.0f;
         float  col_last_y = 0.0f;
@@ -252,14 +298,15 @@ void VPINIndicator::render_content(double x_min, double x_max) {
                 col_max = std::max(col_max, pp.y);
             }
             col_last_y = pp.y;
-            col_col = seg_color(p);
+            col_col = stroke_color(p);
         }
         flush_col();
-        // Final shelf: hold the last value to the right edge.
+        // Final shelf: hold the last value to the right edge, tentative.
         if (have_prev) {
             const float xr = ImPlot::PlotToPixels(x_max, 0.0).x;
             if (xr > prev_x)
-                dl->AddLine(ImVec2(prev_x, prev_y), ImVec2(xr, prev_y), col_col, 1.0f);
+                dl->AddLine(ImVec2(prev_x, prev_y), ImVec2(xr, prev_y),
+                            IndiTokens::mul_alpha(col_col, IndiTokens::TENTATIVE_ALPHA), 1.0f);
         }
     }
 
@@ -306,6 +353,31 @@ void VPINIndicator::render_content(double x_min, double x_max) {
                 dl->AddLine(ImVec2(col_x, col_min), ImVec2(col_x, col_max),
                             IndiTokens::CFTI_LINE, 1.0f);
         }
+    }
+
+    // ── Persistent corner readout next to the pane name - regime word +
+    //    brain + latest VPIN without needing a hover (regime was hover-only).
+    //    Mono font; regime word in regime color. ──
+    if (!pts_.empty()) {
+        const auto& lp = pts_.back();
+        const ImU32 word_col = (regime_coloring_ && lp.regime >= 1)
+            ? IndiTokens::risk_color(lp.regime) : IndiTokens::INK;
+        char rest[64];
+        if (lp.hmm_state >= 0)
+            snprintf(rest, sizeof(rest), " \xC2\xB7 HMM %.2f \xC2\xB7 VPIN %.4f",
+                     lp.hmm_conf, lp.vpin);
+        else
+            snprintf(rest, sizeof(rest), " \xC2\xB7 THRESH \xC2\xB7 VPIN %.4f", lp.vpin);
+        ImGui::PushFont(Theme::Fonts::label());
+        const float name_w = ImGui::CalcTextSize(get_name()).x;
+        ImGui::PopFont();
+        ImGui::PushFont(Theme::Fonts::mono_sm());
+        const char* word = regime_word(lp.regime);
+        const ImVec2 base(px_left + 6.0f + name_w + 10.0f, plot_pos.y + 4.0f);
+        dl->AddText(base, word_col, word);
+        dl->AddText(ImVec2(base.x + ImGui::CalcTextSize(word).x, base.y),
+                    IndiTokens::INK_DIM, rest);
+        ImGui::PopFont();
     }
 
     // ── Hover: name the brain (SPEC §2 - "HIGH · HMM 0.82" vs "HIGH · THRESH") ──

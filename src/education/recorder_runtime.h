@@ -167,6 +167,11 @@ private:
     // Last resolved focus rect (CSS px), published in state as focusRect so
     // post can crop-zoom against exactly what the spotlight framed.
     struct FocusBox { float x = 0, y = 0, w = 0, h = 0; bool valid = false; } last_focus_;
+    // Lightbox fade (~200ms in/out instead of popping). fade_box_ keeps the
+    // departing panel's rect so the fade-out dims the right region after the
+    // shot's focus has already cleared.
+    float    lightbox_alpha_ = 0.0f;
+    FocusBox fade_box_;
 
     // transport_emit mechanics
     uint64_t emit_sig_ = 0;
