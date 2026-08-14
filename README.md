@@ -53,7 +53,7 @@ Open-source trade aggregators and charting components exist, but complete browse
 - **DOM ladder**: full depth-of-market with grouping, USD/coin modes, cumulative view, book imbalance
 - **Trade tape**: live time & sales with size highlighting
 - **Orderbook heatmap**: GPU-rendered depth history via a shader-based renderer
-- **Volume profile (VPVR), TPO / Market Profile, footprint**: built client-side from per-price tick volume
+- **Volume profile (VPVR), TPO / Market Profile, footprint**: built client-side from per-price tick volume, so they need a feed that carries it. Every `.edpack` does, which means the Replay Library packs below light all of them up with no account and no backend. A plain live feed does not: the bundled community gateway forwards trades, book and candles, not per-price volume history, so these panels stay empty on it
 - **Liquidation heatmap layers**: the dense liquidation Field, leverage-tier levels, and profile rendering. The Field is computed client-side from candles, so it works on any feed
 - **Market replay**: deterministic replay engine with scrubbing, and self-contained `.edpack` files that play entirely client-side with no server
 - **Replay Library**: a manifest-driven browser of free, curated `.edpack` recordings for local replay and regression testing
@@ -70,7 +70,7 @@ The terminal is a client. It speaks a documented protobuf-over-WebSocket wire fo
 2. `window.__EDGEDEPTH_WS_URL__` (set by the host page before the WASM glue loads)
 3. `wss://api.edgedepth.com/ws` (EdgeDepth's hosted backend, the default)
 
-The schema in [`protos/messages.proto`](protos/messages.proto) is the whole contract. A feed that emits trades, candles, orderbook updates, stats, and liquidation events, all derivable from any exchange's public streams, lights up the chart, DOM, tape, orderbook, heatmap, liquidation Field, volume profile, TPO, and paper trading.
+The schema in [`protos/messages.proto`](protos/messages.proto) is the whole contract. A feed that emits trades, candles, orderbook updates, stats, and liquidation events, all derivable from any exchange's public streams, lights up the chart, DOM, tape, orderbook, heatmap, liquidation Field and paper trading. Volume profile, TPO and footprint need per-price volume history on top of that, which a raw exchange stream does not carry; serve `get_volume_profile` and `get_footprint_history` and they light up too, which is exactly what a `.edpack` does.
 
 **Write your own feed:** [`examples/synthetic_feed.py`](examples/synthetic_feed.py) is a working feed in one file, with no `protoc` step and no protobuf package. It answers historical candle requests and streams trades plus an order book, which is enough to drive the chart, the tape and the DOM. Run it and open the terminal with `?ws=ws://localhost:8765` to see your own data on the screen, then swap the random walk for a strategy, a simulator, or a replay of your own capture:
 
