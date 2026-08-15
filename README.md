@@ -33,6 +33,15 @@ Images are pulled prebuilt so this starts in seconds. To compile the
 WebAssembly from source instead, `docker compose up --build` (that pulls the
 Emscripten toolchain and takes a while).
 
+**Browsers.** The canvas is threaded WebAssembly, so it needs WebGL2,
+`SharedArrayBuffer` and a cross-origin-isolated page; the bundled nginx sends the
+COOP and COEP headers that buys. Verified booting cross-origin isolated on
+2026-08-15: **Chrome 149** and **Firefox 146**. Safari is untested rather than
+supported: it has the pieces on paper, but nobody has run it, so treat it as
+unknown. If the canvas never appears, check `crossOriginIsolated` in the
+console: `false` means something upstream (a proxy, an extension) stripped the
+headers.
+
 **If the tape stays empty while the order book keeps moving**, your network
 cannot reach Binance's `@aggTrade` stream. The gateway detects this and logs a
 warning naming the fix after 30 seconds (`docker compose logs gateway`). Set
@@ -40,6 +49,24 @@ warning naming the fix after 30 seconds (`docker compose logs gateway`). Set
 and the live candles built from it, fill in immediately. The market stats
 strip above the chart is fed by separate streams and can stay empty
 independently of this.
+
+## Versions and pinning
+
+Both images publish `:latest` only, and `docker-compose.yml` pins that. There
+are no semver tags on the registry yet, so `:v0.2.0` and similar fail with
+`manifest unknown`. Saying so plainly beats letting you discover it: if you
+want a build that cannot change under you, pin the digest instead of a tag.
+
+```bash
+docker compose pull
+docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/edgedepthhq/edgedepth-terminal:latest
+docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/edgedepthhq/edgedepth-gateway:latest
+```
+
+Put the resulting `name@sha256:...` in `docker-compose.yml` and you have both a
+pin and a rollback target: keep the previous digest and you can go back to it.
+Semver tags are planned; until they exist the digest is the only stable handle,
+and `:latest` moves whenever a change lands on the default branch.
 
 ## Why this exists
 
@@ -59,7 +86,7 @@ Open-source trade aggregators and charting components exist, but complete browse
 - **Replay Library**: a manifest-driven browser of free, curated `.edpack` recordings for local replay and regression testing
 - **Paper trading**: simulated positions against live data
 - **Docking layout**: drag, split, and persist panel arrangements (ImGui docking)
-- **Watchlist / scanner**: 800+ Binance Futures pairs with 24h stats
+- **Watchlist / scanner**: every symbol the feed lists, with 24h stats. The bundled gateway serves about 900, of which 737 are Binance USDT-M perpetuals (counted 2026-08-15; exchanges list and delist, so expect drift)
 - **Wire format**: zstd-compressed protobuf ([`protos/messages.proto`](protos/messages.proto)), decoded off the render thread
 
 ## Bring your own data
