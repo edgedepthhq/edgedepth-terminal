@@ -9,6 +9,9 @@
 // interaction state.
 //
 // Contract with ChartWidget (kept to ~10 lines there - God-file rule):
+//   * begin_frame() runs at the top of render_chart(), BEFORE BeginPlot -
+//     applies the ImPlot input-map override from last frame's interaction
+//     state (see arbitration notes below for why it must be pre-plot).
 //   * render_in_plot() runs INSIDE the ##Price BeginPlot scope, immediately
 //     before handle_plot_interaction(), every frame the plot is live.
 //   * end_frame() runs right after render_chart() returns (after EndPlot,
@@ -18,10 +21,16 @@
 //     clear, Shift+drag replay selection, right-click context menu).
 //
 // Input arbitration (verified against the pinned ImPlot d65a2be):
-//   * While a tool is armed / placing: ImPlot::GetInputMap() is overridden -
-//     PanMod/SelectMod get an impossible 4-modifier chord, Fit and Menu move
-//     to the middle button. GetInputMap() returns a mutable ref that EndPlot
-//     reads LIVE, so a mid-frame override applies the same frame. Button
+//   * ImPlot consumes the input map in UpdateInput(), called from
+//     SetupFinish() - i.e. at the FIRST setup-locking call after BeginPlot
+//     (in practice the first plot item), NOT at EndPlot. An override applied
+//     from inside the plot scope therefore misses the frame's read entirely,
+//     which is why begin_frame() sets the map BEFORE BeginPlot, from last
+//     frame's armed/pending/drag/hover state (one-frame latency on the
+//     hover-only Fit override is fine; armed state is set by the rail before
+//     render_chart runs, so tool arming takes effect the same frame).
+//   * While a tool is armed / placing: PanMod/SelectMod get an impossible
+//     4-modifier chord, Fit and Menu move to the middle button. Button
 //     fields must stay in [0,5) - they index size-5 IO arrays; the chord
 //     trick is what makes Pan unreachable, never an out-of-range button.
 //     Crosshair, hover, and wheel zoom stay fully alive (the TV feel).
@@ -41,6 +50,7 @@ namespace drawing {
 
 class DrawingLayer {
 public:
+    void begin_frame(const AppContext& ctx, bool overlays_allowed);
     void render_in_plot(const AppContext& ctx, const PriceFormatter& fmt,
                         bool overlays_allowed, int64_t tf_seconds);
     void end_frame();

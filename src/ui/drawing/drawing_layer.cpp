@@ -638,6 +638,18 @@ void DrawingLayer::render_in_plot(const AppContext& ctx, const PriceFormatter& f
     const bool full = mgr.armed() != Tool::Cursor || !pending_.empty() ||
                       drag_id_ != 0;
     captures_ = full || hover_id_ != 0;
+}
+
+void DrawingLayer::begin_frame(const AppContext& ctx, bool overlays_allowed) {
+    // Must run BEFORE BeginPlot: ImPlot consumes the input map in
+    // UpdateInput() during SetupFinish(), i.e. at the first setup-locking
+    // call after BeginPlot (the first plot item). An override applied later,
+    // from inside the plot scope, misses the frame's read entirely. Decided
+    // from last frame's interaction state (members persist; armed state is
+    // current because the rail renders before render_chart).
+    if (!overlays_allowed) return;
+    const bool full = ctx.drawing_mgr().armed() != Tool::Cursor ||
+                      !pending_.empty() || drag_id_ != 0;
     if (full)
         apply_input_override(true);
     else if (hover_id_ != 0)

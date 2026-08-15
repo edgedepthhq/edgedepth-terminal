@@ -778,6 +778,10 @@ void ChartWidget::render_chart() {
         ctx_.candle_mgr().set_follow_live(true);
     }
     rt_was_on_ = rt_mode_;
+    // Drawing tools: the ImPlot input-map override must be in place BEFORE
+    // BeginPlot (ImPlot reads the map at setup-lock, i.e. the first plot
+    // item - not at EndPlot). Restored by end_frame() after render_chart.
+    drawing_layer_.begin_frame(ctx_, ct_allows_time_overlays(chart_type_));
     ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(10, 10));
     ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 1.0f);
     if (ImPlot::BeginPlot("##Price", ImVec2(-1, chart_allocated_height_),
@@ -1210,9 +1214,10 @@ void ChartWidget::render_chart() {
                 CustomImPlot::DrawAxisValueTag(cur_price, price_buf, tag_col, true);
             }
         }
-        // Drawing tools: placement/hit-test/drag + render, and the input-map
-        // override for this frame. Runs BEFORE handle_plot_interaction so
-        // captures_mouse() gates the chart's own handlers the same frame.
+        // Drawing tools: placement/hit-test/drag + render. Runs BEFORE
+        // handle_plot_interaction so captures_mouse() gates the chart's own
+        // handlers the same frame. (The input-map override is applied in
+        // begin_frame, before BeginPlot - too late to matter from here.)
         drawing_layer_.render_in_plot(ctx_, fmt_,
                                       ct_allows_time_overlays(chart_type_),
                                       tf_sec);
