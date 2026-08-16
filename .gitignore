@@ -22,6 +22,11 @@ src/pb/*.pb.h
 src/pb/*.pb.cc
 !src/pb/.gitkeep
 
+# Installed Node dependencies, wherever a helper script keeps them. The logo
+# pipeline under tools/ carries its own package.json, and its dependency tree
+# was tracked here for a while before this rule existed.
+node_modules/
+
 # Compiled objects
 *.o
 *.a

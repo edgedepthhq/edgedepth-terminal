@@ -462,6 +462,8 @@ set(PROJECT_SRC
         src/rendering/shader_heatmap_renderer.cpp
         src/rendering/liq_field_texture_renderer.h
         src/rendering/liq_field_texture_renderer.cpp
+        src/rendering/liq_field_renderer.h
+        src/rendering/liq_field_renderer.cpp
         src/types/frame_profiler.h
         src/core/candle_manager.cpp
         src/core/candle_manager.h
@@ -543,6 +545,58 @@ set(COMMON_COMPILE_FLAGS
         -pthread
 )
 
+# JS to WASM entry points, shared by Debug and Release so the two link steps
+# cannot drift. Adding an export here is the whole change; there is no second
+# list to update.
+#
+# The C functions are defined WITH a leading underscore in source (for example
+# `void _edu_cmd_continue()`). Emscripten strips ONE leading underscore for the
+# JS-prefix convention, so the name below needs a DOUBLE underscore to resolve
+# the real symbol (`__name` resolves symbol `_name`). JS calls them as
+# `Module.__name`.
+set(WASM_EXPORTED_FUNCTIONS
+        _main
+        __education_on_lesson_fetch
+        __edu_cmd_continue
+        __edu_cmd_back
+        __edu_cmd_restart
+        __edu_cmd_jump
+        __edu_cmd_set_paused
+        __edu_cmd_set_speed
+        __edu_cmd_seek
+        __edu_set_viewport
+        __set_chart_timeframe
+        __studio_cmd_set_source
+        __studio_cmd_set_paused
+        __studio_cmd_set_speed
+        __studio_cmd_seek
+        __studio_cmd_skip
+        __studio_cmd_export_start
+        __studio_cmd_export_stop
+        __studio_cmd_arm_capture
+        __event_cmd_set_paused
+        __event_cmd_set_speed
+        __event_cmd_seek
+        __event_cmd_skip
+        __event_cmd_restart
+        __replay_cmd_scrub_hover
+        __recorder_on_state
+        __edpack_on_fetch
+        __display_time_zone_changed
+        __research_moment_result
+)
+list(JOIN WASM_EXPORTED_FUNCTIONS "," WASM_EXPORTED_FUNCTIONS_CSV)
+
+# Runtime helpers JS needs on Module, likewise shared by both link steps.
+set(WASM_EXPORTED_RUNTIME_METHODS
+        ccall
+        cwrap
+        UTF8ToString
+        lengthBytesUTF8
+        stringToUTF8
+)
+list(JOIN WASM_EXPORTED_RUNTIME_METHODS "," WASM_EXPORTED_RUNTIME_METHODS_CSV)
+
 set(COMMON_LINK_FLAGS
         -sUSE_SDL=3
         -sUSE_WEBGL2=1
@@ -569,9 +623,11 @@ set(DEBUG_COMPILE_FLAGS
         ${COMMON_COMPILE_FLAGS}
         -g3                          # Full debug symbols
         -O0                          # No optimization
-        -sASSERTIONS=2              # Maximum runtime checks
-#        -sSAFE_HEAP=1               # Memory safety checks
-        -sSTACK_OVERFLOW_CHECK=2    # Stack overflow detection
+        # ASSERTIONS and STACK_OVERFLOW_CHECK are LINKER settings and are set in
+        # DEBUG_LINK_FLAGS below. Passing them here too did not enable anything
+        # extra, it just made em++ print "linker setting ignored during
+        # compilation" once per setting per source file, which buried the real
+        # compiler diagnostics under a few hundred lines of noise.
 )
 
 set(DEBUG_LINK_FLAGS
@@ -582,15 +638,8 @@ set(DEBUG_LINK_FLAGS
         --source-map-base http://localhost:8000/
         -g3
         -sENVIRONMENT=web
-        # Education bridge exports - MUST match Release. The C functions are defined
-        # WITH a leading underscore in source (e.g. `void _edu_cmd_continue()`), same
-        # as the pre-existing `_education_on_lesson_fetch`. Emscripten strips ONE
-        # leading underscore for the JS-prefix convention, so the EXPORTED_FUNCTIONS
-        # name needs a DOUBLE underscore to resolve the real symbol (`__name` → symbol
-        # `_name`). JS calls them as `Module.__name` (see lessonBridge.ts + the
-        # education_boot.cpp EM_ASM that already uses `__education_on_lesson_fetch`).
-        -sEXPORTED_FUNCTIONS=_main,__education_on_lesson_fetch,__edu_cmd_continue,__edu_cmd_back,__edu_cmd_restart,__edu_cmd_jump,__edu_cmd_set_paused,__edu_cmd_set_speed,__edu_cmd_seek,__edu_set_viewport,__set_chart_timeframe,__studio_cmd_set_source,__studio_cmd_set_paused,__studio_cmd_set_speed,__studio_cmd_seek,__studio_cmd_skip,__studio_cmd_export_start,__studio_cmd_export_stop,__studio_cmd_arm_capture,__event_cmd_set_paused,__event_cmd_set_speed,__event_cmd_seek,__event_cmd_skip,__event_cmd_restart,__replay_cmd_scrub_hover,__recorder_on_state,__edpack_on_fetch,__display_time_zone_changed,__research_moment_result
-        -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,lengthBytesUTF8,stringToUTF8
+        -sEXPORTED_FUNCTIONS=${WASM_EXPORTED_FUNCTIONS_CSV}
+        -sEXPORTED_RUNTIME_METHODS=${WASM_EXPORTED_RUNTIME_METHODS_CSV}
 )
 
 # Release-specific flags
@@ -619,8 +668,8 @@ set(RELEASE_LINK_FLAGS
         # "SHELL:--closure-args=--externs=${CMAKE_SOURCE_DIR}/src/closure_externs.js"
         --closure 0
         -sENVIRONMENT=web           # Web-only (no Node.js bloat)
-        -sEXPORTED_FUNCTIONS=_main,__education_on_lesson_fetch,__edu_cmd_continue,__edu_cmd_back,__edu_cmd_restart,__edu_cmd_jump,__edu_cmd_set_paused,__edu_cmd_set_speed,__edu_cmd_seek,__edu_set_viewport,__set_chart_timeframe,__studio_cmd_set_source,__studio_cmd_set_paused,__studio_cmd_set_speed,__studio_cmd_seek,__studio_cmd_skip,__studio_cmd_export_start,__studio_cmd_export_stop,__studio_cmd_arm_capture,__event_cmd_set_paused,__event_cmd_set_speed,__event_cmd_seek,__event_cmd_skip,__event_cmd_restart,__replay_cmd_scrub_hover,__recorder_on_state,__edpack_on_fetch,__display_time_zone_changed,__research_moment_result
-        -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,UTF8ToString,lengthBytesUTF8,stringToUTF8
+        -sEXPORTED_FUNCTIONS=${WASM_EXPORTED_FUNCTIONS_CSV}
+        -sEXPORTED_RUNTIME_METHODS=${WASM_EXPORTED_RUNTIME_METHODS_CSV}
         # ✅ ADD THESE OPTIMIZATIONS:
 #        -sFILESYSTEM=0                    # No filesystem = smaller binary
         -sMALLOC=mimalloc                 # Thread-safe malloc (emmalloc has global lock contention)
@@ -650,6 +699,34 @@ else()
     target_compile_options(c_based_trader_client PRIVATE ${DEBUG_COMPILE_FLAGS})
     target_link_options(c_based_trader_client PRIVATE ${DEBUG_LINK_FLAGS})
 endif()
+
+# ===================================================================
+# WARNINGS (first-party sources only)
+# ===================================================================
+
+# ImGui, ImPlot and zstd compile into this same executable, and they emit
+# thousands of warnings this project has no business fixing. Applying the flags
+# to the target would bury every first-party diagnostic in that noise, so scope
+# them to PROJECT_SRC instead.
+#
+# -Werror is deliberately NOT set. These flags were added to a codebase that
+# had been compiling with warnings off, so the existing backlog has to be read
+# and cleared before a warning is allowed to break the build. Turn it on once
+# a clean build is the baseline, not before.
+set(PROJECT_WARNING_FLAGS
+        -Wall
+        -Wextra
+)
+
+# messages.pb.cc is protoc output and lives in PROJECT_SRC. It is regenerated
+# every build and nobody edits it, so warning on it is pure noise.
+set(PROJECT_WARNED_SRC ${PROJECT_SRC})
+list(REMOVE_ITEM PROJECT_WARNED_SRC ${PROTO_SRCS})
+
+set_source_files_properties(
+        ${PROJECT_WARNED_SRC}
+        PROPERTIES COMPILE_OPTIONS "${PROJECT_WARNING_FLAGS}"
+)
 
 target_link_libraries(c_based_trader_client websocket.js)
 
