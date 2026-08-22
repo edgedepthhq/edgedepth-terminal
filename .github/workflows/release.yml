@@ -8,6 +8,13 @@ on:
   push:
     branches: [master]
     tags: ["v*"]
+    # Documentation-only commits do not change the image. Without this,
+    # every README or ARCHITECTURE edit rebuilds the toolchain and gives
+    # :latest a new digest for identical source. Use workflow_dispatch if
+    # a release ever needs publishing from a docs-only commit.
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
   workflow_dispatch:
 
 env:
