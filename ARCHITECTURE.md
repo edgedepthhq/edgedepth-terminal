@@ -11,21 +11,47 @@ This guide describes verified current behavior. It is not a roadmap, deployment 
 ## System at a glance
 
 ```mermaid
-flowchart LR
-    G[WebSocket market-data gateway] --> W[Browser WebSocket callback]
-    W -->|live binary bytes| Q[Mutex-protected inbound queue]
-    Q --> D[Data pthread]
-    D --> H[Zstd and protobuf routing]
-    H -->|order book writes| B[Protected write buffer]
-    H -->|typed work| X[Main-thread dispatch queue]
-    B -->|publish each frame| M[Live state managers]
-    X --> M
-    N[Network replay frames] --> R[MessageHandler on main thread]
-    P[Edpack range reader] --> R
-    R --> RM[Replay state managers]
-    M --> U[Widgets and ImPlot]
-    RM --> U
-    U --> GL[ImGui draw lists and WebGL2]
+flowchart TB
+    subgraph ext ["External peer (not in this repo)"]
+        G["WebSocket market-data gateway"]
+    end
+
+    subgraph worker ["Data pthread (1 created, pool of 2 reserved)"]
+        D["Batch drain loop"]
+        H["Zstd detect and decompress, protobuf envelope parse, route"]
+    end
+
+    subgraph boundary ["Thread boundary: mutex-protected handoff"]
+        Q["Inbound queue, owned by DataThread"]
+        B["OrderbookManager write model"]
+    end
+
+    subgraph main ["Browser main thread: Emscripten main loop, SDL, ImGui, WebGL2"]
+        W["Browser WebSocket callback"]
+        X["DispatchQueue, 3 ms per-frame budget, remainder carried"]
+        M["Live state managers"]
+        N["Network replay frames"]
+        P["Edpack range reader"]
+        R["MessageHandler"]
+        RM["Replay state managers, DataContext"]
+        U["Widgets and ImPlot"]
+        GL["ImGui draw lists to WebGL2"]
+    end
+
+    G -->|"protobuf over WS"| W
+    W -->|"copy bytes"| Q
+    Q -->|"drained in batches"| D
+    D --> H
+    H -->|"high-rate order book writes"| B
+    H -->|"typed callbacks"| X
+    B -->|"publish dirty state once per frame"| M
+    X -->|"drain in order, 3 ms budget"| M
+    N --> R
+    P --> R
+    R --> RM
+    M -->|"AppContext pointers"| U
+    RM -->|"active context override"| U
+    U --> GL
 ```
 
 Live and replay data use the same protobuf envelope, routing code, manager interfaces, and widgets. They do not use the same manager instances. Replay creates an isolated data context and makes it active by changing the pointers exposed through `AppContext`.
