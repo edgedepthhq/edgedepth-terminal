@@ -31,8 +31,20 @@ Thanks for your interest. A few ground rules keep this maintainable by a very sm
 
 ## Native tests
 
-The small host-side test suite is CMake/CTest based and does not require
-Emscripten. These commands work from Bash, PowerShell, or CMD:
+The host-side test suite is CMake/CTest based and does not require Emscripten,
+protoc, or any network access. It covers the parts of the terminal that are pure
+enough to run off the browser: the Renko and TPO chart transforms, the order
+book's sorted container and its publish-on-frame double buffer, the ingest
+queue's time-budgeted drain, the indicator series cache, replay entitlements,
+route parsing, and the liquidation heatmap's reach maths.
+
+There is no test framework and no external dependency. Each test is a single
+source file with its own `main()`, a file-static failure counter, and small
+`expect_*` helpers. Follow the shape of an existing one; please do not introduce
+gtest, Catch2, or doctest. Tests must be deterministic: no sleeps, no wall-clock
+reads, and no unseeded randomness. Where a module needs time, inject it.
+
+These commands work from Bash, PowerShell, or CMD:
 
 ```text
 cmake -S tests/native -B build-native-tests -DCMAKE_BUILD_TYPE=Release
@@ -41,6 +53,11 @@ cmake -E chdir build-native-tests ctest -C Release --output-on-failure
 ```
 
 Linux and WSL contributors can also run `bash tests/native/run_tests.sh`.
+
+A new test needs one line in `tests/native/CMakeLists.txt`:
+`add_terminal_native_test(<target> <source>.cpp)`. CI picks it up from there.
+Everything is built with `-Wall -Wextra -Werror` on GCC/Clang and `/W4 /WX` on
+MSVC, so watch signed/unsigned comparisons.
 
 ## Expectations
 
