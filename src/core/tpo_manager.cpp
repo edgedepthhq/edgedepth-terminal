@@ -43,14 +43,34 @@ void TPOManager::build_sessions(
     // future non-30m profile grain would need it.
     (void)timeframe_sec;
 
-    // Simple hash to avoid redundant rebuilds
-    uint64_t hash = candle_count * 31 +
-        static_cast<uint64_t>(timestamps[0]) +
-        static_cast<uint64_t>(timestamps[candle_count - 1]) +
-        static_cast<uint64_t>(tick_per_row * 1000.0);
-    auto& prev_hash = last_build_hash_[symbol];
-    if (hash == prev_hash) return;
-    prev_hash = hash;
+    // Debounce. The chart calls this on every frame it scrolls, and rebuilding a
+    // whole profile per frame is wasted work, so a build is skipped when nothing
+    // it depends on has moved.
+    //
+    // "Depends on" is the candle window AND the config that shapes the
+    // computation. Leaving the config out made the settings UI look dead:
+    // changing Value Area % or the session period recomputed nothing until the
+    // candles happened to move, so a static chart kept showing a profile built
+    // at the old setting.
+    //
+    // Display-only settings are deliberately NOT in the key. They are read at
+    // render time, so hashing them would rebuild for nothing, and a rebuild
+    // discards each session's expanded flag. ticks_per_row_setting is absent for
+    // the opposite reason: the caller already resolves it into tick_per_row.
+    uint64_t key = 1469598103934665603ULL;          // FNV-1a 64 offset basis
+    const auto mix = [&key](uint64_t value) {
+        key = (key ^ value) * 1099511628211ULL;     // FNV-1a 64 prime
+    };
+    mix(static_cast<uint64_t>(candle_count));
+    mix(static_cast<uint64_t>(static_cast<int64_t>(timestamps[0])));
+    mix(static_cast<uint64_t>(static_cast<int64_t>(timestamps[candle_count - 1])));
+    mix(static_cast<uint64_t>(std::llround(tick_per_row * 1000.0)));
+    mix(static_cast<uint64_t>(session_period_hours));
+    mix(static_cast<uint64_t>(std::llround(value_area_pct * 1000.0)));
+
+    auto& prev_key = last_build_hash_[symbol];
+    if (key == prev_key) return;
+    prev_key = key;
 
     const int64_t session_ms = static_cast<int64_t>(session_period_hours) * 3600LL * 1000LL;
     auto& sessions = data_[symbol];

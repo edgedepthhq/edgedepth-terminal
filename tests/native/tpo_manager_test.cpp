@@ -477,6 +477,99 @@ void test_rebuild_is_debounced_and_state_is_per_symbol() {
     expect_true(mgr.has_data("ethusdt"), "and its neighbour is untouched");
 }
 
+void test_changing_a_setting_rebuilds_the_profile() {
+    // Regression. The rebuild debounce used to key on the candle window and the
+    // row height ONLY, so changing a setting on a chart that was not moving
+    // recomputed nothing and the profile silently stayed at the old setting.
+    // These are the settings that change the COMPUTATION, so each has to be part
+    // of what the debounce compares.
+    TPOManager mgr;
+    const std::vector<Candle> candles = fixture_a();
+
+    const TPOSession* s = build(mgr, "btcusdt", candles, 1.0);
+    if (!s) {
+        std::fprintf(stderr, "FAIL settings fixture produced no session\n");
+        ++failures;
+        return;
+    }
+    // 12 blocks, 70% target = 9, reached by rows 1 to 3.
+    expect_true(!s->rows[0].is_value_area, "the default value area excludes row 0");
+    expect_true(!s->rows[4].is_value_area, "the default value area excludes row 4");
+    expect_double(s->val, 101.0, "the default VAL");
+    expect_double(s->vah, 104.0, "the default VAH");
+
+    // Widening the value area to 100% must take effect on the SAME candles.
+    mgr.value_area_pct = 1.0f;
+    s = build(mgr, "btcusdt", candles, 1.0);
+    if (!s) return;
+    for (const TPORow& row : s->rows) {
+        expect_true(row.is_value_area, "a 100% value area covers every row");
+    }
+    expect_double(s->val, 100.0, "VAL follows the widened value area");
+    expect_double(s->vah, 105.0, "VAH follows the widened value area");
+
+    // Narrowing it must take effect too, in the other direction.
+    mgr.value_area_pct = 0.30f;
+    s = build(mgr, "btcusdt", candles, 1.0);
+    if (!s) return;
+    int inside = 0;
+    for (const TPORow& row : s->rows) {
+        if (row.is_value_area) ++inside;
+    }
+    expect_int(inside, 1, "a 30% value area is satisfied by the POC row alone");
+    expect_true(s->rows[2].is_value_area, "and that row is the POC");
+
+    // The session period is the other computed setting. Switching to weekly
+    // must regroup the candles rather than reuse the daily grouping.
+    //
+    // NOTE: a non-daily period aligns to the EPOCH, not to a weekday the market
+    // cares about, and the epoch was a Thursday. So a weekly TPO session runs
+    // Thursday 00:00 UTC to Thursday 00:00 UTC. The fixture anchors to a real
+    // epoch-week boundary rather than assuming any three days share a week.
+    constexpr int64_t kWeek = 7 * kDay;
+    constexpr int64_t kWeekStart = (kSession / kWeek) * kWeek;
+    TPOManager weekly;
+    std::vector<double> ts, highs, lows;
+    for (int day = 0; day < 3; ++day) {
+        ts.push_back(static_cast<double>(kWeekStart + day * kDay));
+        highs.push_back(101.0 + day);
+        lows.push_back(100.0 + day);
+    }
+    weekly.build_sessions("btcusdt", ts.data(), highs.data(), lows.data(), ts.size(), 1800, 1.0);
+    expect_int(static_cast<int>(weekly.get_sessions("btcusdt")->size()), 3,
+               "three days are three daily sessions");
+
+    weekly.session_period_hours = 168;
+    weekly.build_sessions("btcusdt", ts.data(), highs.data(), lows.data(), ts.size(), 1800, 1.0);
+    const std::vector<TPOSession>* regrouped = weekly.get_sessions("btcusdt");
+    expect_true(regrouped != nullptr, "the weekly rebuild produced sessions");
+    if (regrouped) {
+        expect_int(static_cast<int>(regrouped->size()), 1,
+                   "the same three days regroup into one weekly session");
+        expect_true(regrouped->front().session_start_ms == kWeekStart,
+                    "starting on the epoch-week boundary");
+        expect_true(regrouped->front().session_end_ms - regrouped->front().session_start_ms ==
+                        kWeek,
+                    "and that session spans a week");
+        expect_double(regrouped->front().session_low, 100.0, "spanning every day's low");
+        expect_double(regrouped->front().session_high, 103.0, "and every day's high");
+    }
+
+    // Display-only settings must NOT rebuild: a rebuild discards the per-session
+    // expanded flag, so toggling a ray would collapse the user's open profile.
+    TPOManager display;
+    build(display, "btcusdt", candles, 1.0);
+    display.toggle_expand("btcusdt", 0);
+    expect_true(display.get_sessions("btcusdt")->front().expanded, "the session is expanded");
+    display.show_poc_ray = !display.show_poc_ray;
+    display.show_single_prints = !display.show_single_prints;
+    display.show_initial_balance = !display.show_initial_balance;
+    display.profile_spacing = 7;
+    build(display, "btcusdt", candles, 1.0);
+    expect_true(display.get_sessions("btcusdt")->front().expanded,
+                "toggling a display setting does not rebuild and does not collapse it");
+}
+
 void test_degenerate_inputs_are_refused() {
     TPOManager mgr;
     const double ts[] = {static_cast<double>(kSession)};
@@ -511,6 +604,7 @@ int main() {
     test_candles_are_split_into_utc_day_sessions();
     test_auto_row_height_and_the_grid_sanity_bail();
     test_rebuild_is_debounced_and_state_is_per_symbol();
+    test_changing_a_setting_rebuilds_the_profile();
     test_degenerate_inputs_are_refused();
 
     if (failures != 0) {
