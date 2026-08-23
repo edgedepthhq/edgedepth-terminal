@@ -133,7 +133,7 @@ void OrderbookManager::apply_book_update_from_pb(
         prune_orderbook(orderbook);
         orderbook.update_count_since_prune = 0;
     }
-    db.dirty.store(true, std::memory_order_relaxed);
+    db.mark_dirty();
 }
 
 void OrderbookManager::apply_orderbook_snapshot_from_pb(
@@ -185,7 +185,7 @@ void OrderbookManager::apply_orderbook_snapshot_from_pb(
     // cause spurious DESYNC resets. The OB self-heals as deltas overwrite
     // stale levels. INT32_MAX = permanent (never decrements to 0).
     orderbook.replay_grace_remaining = INT32_MAX;
-    db.dirty.store(true, std::memory_order_relaxed);
+    db.mark_dirty();
 }
 
 void OrderbookManager::apply_book_ticker_from_pb(
@@ -207,7 +207,7 @@ void OrderbookManager::apply_book_ticker_from_pb(
         orderbook.asks.insert_or_assign(ticker_pb.best_ask(), ticker_pb.best_ask_qty());
     }
     orderbook.timestamp_ms = ticker_pb.timestamp_ms();
-    db.dirty.store(true, std::memory_order_relaxed);
+    db.mark_dirty();
 }
 
 void OrderbookManager::note_trade_price(const Terminal::Pair& pair, double price) {
@@ -232,7 +232,7 @@ void OrderbookManager::note_trade_price(const Terminal::Pair& pair, double price
     // The mid fallback in the update paths remains, covering the frames between
     // the seed landing and the first trade.
     orderbook.last_price = price;
-    db.dirty.store(true, std::memory_order_relaxed);
+    db.mark_dirty();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -240,14 +240,11 @@ void OrderbookManager::note_trade_price(const Terminal::Pair& pair, double price
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void OrderbookManager::swap_buffers() {
+    // Copy write → read for every book that moved. FlatMap is a vector, so a
+    // publish is a fast memcpy: ~16KB and <50μs for a 1000-level book. Clean
+    // books are skipped without taking their lock. See core/double_buffer.h.
     for (auto& [key, db] : orderbooks_) {
-        if (db.dirty.load(std::memory_order_relaxed)) {
-            std::lock_guard<std::mutex> lock(db.write_mutex);
-            // Copy write → read. FlatMap is a vector so this is a fast memcpy.
-            // For a 1000-level orderbook: ~16KB of data, <50μs on modern hardware.
-            db.read_buf = db.write_buf;
-            db.dirty.store(false, std::memory_order_relaxed);
-        }
+        db.publish();
     }
 }
 

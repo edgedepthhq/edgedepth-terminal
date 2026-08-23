@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "core/data_thread.h"
+#include "core/dispatch_drain.h"
 #include "core/message_handler.h"
 #include <cstdio>
 #include <chrono>
@@ -81,37 +82,22 @@ void DataThread::run() {
 // ─── Main-thread drain ───────────────────────────────────────────────────────
 
 size_t DataThread::drain_dispatches(StreamManager& stream_mgr, double budget_ms) {
-    // Refill the carry buffer only when the previous batch is fully executed -
-    // dispatch order must be preserved across budget boundaries.
-    if (carry_pos_ >= carry_.size()) {
-        carry_.clear();
-        carry_pos_ = 0;
-        dispatches_.drain(carry_);
-        backlog_counters_.set(BacklogQueue::Carry, carry_.size());
-    }
-    if (carry_pos_ >= carry_.size()) {
-        backlog_counters_.set(BacklogQueue::Carry, 0);
-        return 0;
-    }
+    // The refill/budget/order rule lives in dispatch_drain.h so it can be tested
+    // against an injected clock (tests/native/dispatch_drain_test.cpp). Only the
+    // wiring is here: where the batch comes from, what running one means, and
+    // which clock is real.
+    const size_t executed = dispatch_drain::run(
+        carry_, carry_pos_, budget_ms,
+        [this](std::vector<PendingDispatch>& out) {
+            dispatches_.drain(out);
+            backlog_counters_.set(BacklogQueue::Carry, out.size());
+        },
+        [&stream_mgr](PendingDispatch& dispatch) { dispatch.execute(stream_mgr); },
+        [] {
+            return std::chrono::duration<double, std::milli>(
+                       std::chrono::steady_clock::now().time_since_epoch()).count();
+        });
 
-    const auto t0 = std::chrono::steady_clock::now();
-    size_t executed = 0;
-
-    while (carry_pos_ < carry_.size()) {
-        carry_[carry_pos_++].execute(stream_mgr);
-        ++executed;
-        // Amortize the clock read - check the budget every 16 dispatches.
-        if (budget_ms > 0.0 && (executed & 15u) == 0) {
-            const double spent = std::chrono::duration<double, std::milli>(
-                std::chrono::steady_clock::now() - t0).count();
-            if (spent >= budget_ms) break;
-        }
-    }
-
-    if (carry_pos_ >= carry_.size()) {
-        carry_.clear();
-        carry_pos_ = 0;
-    }
     backlog_counters_.set(BacklogQueue::Carry, carry_.size() - carry_pos_);
     return executed;
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include "types/types.h"
 #include "pb/messages.pb.h"
+#include "core/double_buffer.h"
 #include <unordered_map>
 #include <string>
 #include <mutex>
@@ -38,12 +39,9 @@ struct std::hash<OrderbookKey> {
 // FlatMap memcpy) - well within frame budget.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-struct DoubleBufferedOrderbook {
-    Terminal::Orderbook write_buf;   // Mutated by data thread (mutex-protected)
-    Terminal::Orderbook read_buf;    // Read by widgets on main thread (stable per frame)
-    std::atomic<bool> dirty{false};  // Set on any write, cleared on swap
-    mutable std::mutex write_mutex;  // Protects write_buf access
-};
+// The mechanism itself lives in core/double_buffer.h so it can be tested on its
+// own (tests/native/double_buffer_test.cpp) without protobuf in the way.
+using DoubleBufferedOrderbook = DoubleBuffered<Terminal::Orderbook>;
 
 class OrderbookManager {
 public:
