@@ -146,7 +146,7 @@ inline std::string parse_exchange_query(const std::string& search) {
             search.compare(pos, eq - pos, key) == 0) {
             std::string ex = search.substr(eq + 1, end - eq - 1);
             std::transform(ex.begin(), ex.end(), ex.begin(),
-                           [](unsigned char c) { return std::tolower(c); });
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
             return ex;
         }
         pos = end + 1;
@@ -176,7 +176,7 @@ inline Route parse_route(const std::string& path, const std::string& search = ""
 
     if (r.exchange == "binancef") {
         std::transform(r.symbol.begin(), r.symbol.end(), r.symbol.begin(),
-                       [](unsigned char c) { return std::tolower(c); });
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     }
 
     return r;
