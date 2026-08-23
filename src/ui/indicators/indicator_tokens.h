@@ -51,9 +51,14 @@ namespace IndiTokens {
     // ── Toxicity pane (SPEC §2) ──
     constexpr ImU32 CFTI_LINE          = rgba(0x7C8BA18Cu);  // --indi-cfti (slate @0.55)
     constexpr ImU32 TOX_THRESHOLDS     = rgba(0x6F7F9317u);  // --indi-tox-thresholds
-    constexpr float TOX_THRESHOLD_1    = 0.30f;              // --indi-tox-threshold-1-val
-    constexpr float TOX_THRESHOLD_2    = 0.45f;
-    constexpr float TOX_THRESHOLD_3    = 0.60f;
+    // Recalibrated 2026-08-22 to MIRROR the backend's fitted-reality VPIN
+    // fallback bands: elevated 0.22 / high 0.30 / critical 0.40. The old
+    // 0.30/0.45/0.60 marks disagreed with every band the backend actually
+    // uses, so the pane drew thresholds no regime label ever crossed. These
+    // three must stay in step with the backend's bands.
+    constexpr float TOX_THRESHOLD_1    = 0.22f;              // --indi-tox-threshold-1-val
+    constexpr float TOX_THRESHOLD_2    = 0.30f;
+    constexpr float TOX_THRESHOLD_3    = 0.40f;
     constexpr float TOX_THRESH_DASH_ON  = 1.0f;              // dash "1 4"
     constexpr float TOX_THRESH_DASH_OFF = 4.0f;
     constexpr float TOX_STRIP_H_PX     = 2.0f;               // --indi-tox-strip-h-px

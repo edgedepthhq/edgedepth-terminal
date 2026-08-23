@@ -101,7 +101,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
     const float px_right = plot_pos.x + plot_size.x;
     const float px_bot   = plot_pos.y + plot_size.y;
 
-    // ── Dotted threshold landmarks (.30/.45/.60) - drawn always, named.
+    // ── Dotted threshold landmarks (.22/.30/.40) - drawn always, named.
     //    At the old 9% alpha the line floated in an unlabeled 0-1 void. ──
     {
         const float ys[3] = {
@@ -115,7 +115,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
             dotted_hline(dl, px_left, px_right, y, rule_col,
                          IndiTokens::TOX_THRESH_DASH_ON, IndiTokens::TOX_THRESH_DASH_OFF);
         }
-        static const char* const kLbl[3] = {"0.30", "0.45", "0.60"};
+        static const char* const kLbl[3] = {"0.22", "0.30", "0.40"};
         ImGui::PushFont(Theme::Fonts::label());
         const float fh = ImGui::GetFontSize();
         for (int t = 0; t < 3; ++t) {
