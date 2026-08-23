@@ -4,6 +4,16 @@
 #include <utility>
 #include <functional>
 #include <cstddef>
+#include <stdexcept>  // at() throws std::out_of_range; do not rely on a transitive include
+
+// __builtin_prefetch is a GCC/Clang extension. The terminal itself only ever
+// builds under Emscripten's clang, but this header is also compiled by the
+// native test project, which MSVC builds on Windows CI.
+#if defined(__GNUC__) || defined(__clang__)
+#define FLATMAP_PREFETCH(addr) __builtin_prefetch((addr), 0, 1)
+#else
+#define FLATMAP_PREFETCH(addr) ((void)(addr))
+#endif
 
 template<typename K, typename V, typename Compare = std::less<K>>
 class FlatMap {
@@ -29,8 +39,8 @@ public:
             size_t mid = first + step;
             // Tell CPU to prefetch the next elements we'll check
             if (step > 8) {  // Only worth it for large searches
-                __builtin_prefetch(&data_[first + step/2], 0, 1);
-                __builtin_prefetch(&data_[mid + step/2], 0, 1);
+                FLATMAP_PREFETCH(&data_[first + step/2]);
+                FLATMAP_PREFETCH(&data_[mid + step/2]);
             }
             if (comp_(data_[mid].first, key)) {
                 first = mid + 1;

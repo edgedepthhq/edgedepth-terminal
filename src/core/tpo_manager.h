@@ -130,15 +130,11 @@ private:
                               size_t start_idx, size_t end_idx,
                               int64_t session_start_ms,
                               int64_t session_end_ms,
-                              int64_t timeframe_sec,
                               double tick_per_row);
 
     void compute_poc(TPOSession& session);
     void compute_value_area(TPOSession& session);
     void detect_single_prints(TPOSession& session);
     void detect_poor_high_low(TPOSession& session);
-    void compute_initial_balance(TPOSession& session,
-                                 const double* highs,
-                                 const double* lows,
-                                 size_t start_idx, size_t end_idx);
+    void compute_initial_balance(TPOSession& session);
 };

@@ -36,6 +36,13 @@ void TPOManager::build_sessions(
 {
     if (!timestamps || !highs || !lows || candle_count == 0) return;
 
+    // Deliberately unused. A TPO period is 30 minutes whatever the chart is
+    // showing - that is what makes two traders' profiles of the same session
+    // comparable - so the caller's timeframe does not size the periods. The
+    // parameter stays in the signature because the caller has it to hand and a
+    // future non-30m profile grain would need it.
+    (void)timeframe_sec;
+
     // Simple hash to avoid redundant rebuilds
     uint64_t hash = candle_count * 31 +
         static_cast<uint64_t>(timestamps[0]) +
@@ -69,8 +76,7 @@ void TPOManager::build_sessions(
         TPOSession session;
         build_single_session(session, timestamps, highs, lows,
                              sess_first, sess_last,
-                             sess_start, sess_end,
-                             timeframe_sec, tick_per_row);
+                             sess_start, sess_end, tick_per_row);
         sessions.push_back(std::move(session));
     }
 }
@@ -87,7 +93,6 @@ void TPOManager::build_single_session(
     size_t start_idx, size_t end_idx,
     int64_t session_start_ms,
     int64_t session_end_ms,
-    int64_t timeframe_sec,
     double tick_per_row)
 {
     session.session_start_ms = session_start_ms;
@@ -172,7 +177,7 @@ void TPOManager::build_single_session(
     compute_value_area(session);
     detect_single_prints(session);
     detect_poor_high_low(session);
-    compute_initial_balance(session, highs, lows, start_idx, end_idx);
+    compute_initial_balance(session);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -288,23 +293,15 @@ void TPOManager::detect_poor_high_low(TPOSession& session) {
 // Initial Balance - range of first 2 periods (00:00-01:00 UTC)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-void TPOManager::compute_initial_balance(
-    TPOSession& session,
-    const double* highs,
-    const double* lows,
-    size_t start_idx, size_t end_idx)
+void TPOManager::compute_initial_balance(TPOSession& session)
 {
     session.ib_high = -1e18;
     session.ib_low = 1e18;
     bool found = false;
 
-    for (size_t i = start_idx; i < end_idx; ++i) {
-        // Check if this candle is in the first 2 periods
-        // (period 0 or period 1, based on block assignment logic)
-        // We use row blocks to tag IB rows, but for the range we use candle data
-    }
-
-    // Mark IB rows - rows touched by periods 0 and 1
+    // The IB range comes off the ROW GRID, not off the raw candles: it is the
+    // span of the rows that periods 0 and 1 printed into, so it lines up with
+    // the profile the user is looking at rather than with the underlying wicks.
     for (auto& row : session.rows) {
         for (const auto& blk : row.blocks) {
             if (blk.period_idx < 2) {
