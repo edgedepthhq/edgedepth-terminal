@@ -79,6 +79,8 @@ inline void url_push(const std::string& path) {
             window.history.pushState({}, "", url);
         }
     }, path.c_str());
+#else
+    (void)path;  // native builds (the unit tests) have no history to push
 #endif
 }
 
@@ -103,6 +105,8 @@ inline void url_navigate(const std::string& path) {
         var q = params.toString();
         window.location.href = q ? p + '?' + q : p;
     }, path.c_str());
+#else
+    (void)path;  // native builds (the unit tests) have nowhere to navigate
 #endif
 }
 
@@ -120,17 +124,34 @@ inline void url_register_popstate() {
 
 // Extract a lowercased ?exchange=<ex> value from a query string (e.g.
 // "?exchange=hl&foo=1"); returns "" when absent.
+//
+// This walks the key=value pairs instead of searching for the literal
+// "exchange=". A bare find() also matches a key that merely ENDS in exchange
+// ("?myexchange=hl") and the same text sitting inside some other param's VALUE
+// ("?note=exchange=hl"), and either one would silently route the terminal at a
+// venue the user never asked for. Keys are matched whole, against a boundary.
 inline std::string parse_exchange_query(const std::string& search) {
-    const std::string key = "exchange=";
-    auto pos = search.find(key);
-    if (pos == std::string::npos) return "";
-    pos += key.size();
-    auto end = search.find('&', pos);
-    std::string ex = (end == std::string::npos) ? search.substr(pos)
-                                                : search.substr(pos, end - pos);
-    std::transform(ex.begin(), ex.end(), ex.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    return ex;
+    using size_type = std::string::size_type;
+    static const std::string key = "exchange";
+
+    size_type pos = 0;
+    while (pos < search.size()) {
+        if (search[pos] == '?' || search[pos] == '&') { ++pos; continue; }
+
+        const size_type amp = search.find('&', pos);
+        const size_type end = (amp == std::string::npos) ? search.size() : amp;
+        const size_type eq  = search.find('=', pos);
+
+        if (eq != std::string::npos && eq < end &&
+            search.compare(pos, eq - pos, key) == 0) {
+            std::string ex = search.substr(eq + 1, end - eq - 1);
+            std::transform(ex.begin(), ex.end(), ex.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+            return ex;
+        }
+        pos = end + 1;
+    }
+    return "";
 }
 
 // parse_route reads the symbol from /terminal/<symbol> and the venue from an
