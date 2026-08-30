@@ -2,6 +2,7 @@
 
 #include "types/types.h"
 #include "stream_handler.h"
+#include <algorithm>
 #include <deque>
 #include <vector>
 #include <chrono>
@@ -132,7 +133,11 @@ private:
     void unsubscribe();
     void build_candle_from_trade(const Terminal::Trade& trade);
     void finalize_current_candle();
+    void adopt_replay_building_candle();
     int64_t get_candle_timestamp(int64_t trade_timestamp_ms) const;
+    int64_t replay_playhead_ms() const {
+        return std::max(replay_start_time_ms_, replay_latest_time_ms_);
+    }
 
     bool should_load_more(double visible_x_min) const;
     void check_and_load_more(double visible_x_min);
@@ -149,6 +154,14 @@ private:
     Terminal::Candle current_candle_{};
     bool has_current_candle_ = false;
     double last_close_price_ = 0.0;
+
+    // Replay TF switch: the already-played slice of the playhead's new-TF
+    // period, re-aggregated from the OLD timeframe's candles before they are
+    // cleared. Consumed once by adopt_replay_building_candle() when the
+    // historical batch lands, so the building candle keeps the H/L/close/volume
+    // that genuinely played instead of restarting flat at the period open.
+    Terminal::Candle carried_candle_{};
+    bool carried_candle_valid_ = false;
 
     bool is_loading_ = false;
     bool initial_load_complete_ = false;

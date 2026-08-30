@@ -97,6 +97,46 @@ void CandleManager::change_timeframe(const int64_t new_timeframe_seconds) {
     // Unsubscribe old
     stream_mgr_.unsubscribe_candles(candle_stream_key_, this);
     stream_mgr_.unsubscribe_trades(trade_stream_key_, this);
+    // Replay, coarsening the timeframe (e.g. 1s -> 15m): the playhead's new-TF
+    // period has PARTLY played, and the server batch can only deliver that
+    // period's FULL candle (future included), which adopt_replay_building_candle
+    // resets to its open. Re-aggregate the played slice from the finer candles
+    // we are about to clear so the building candle keeps its real H/L/close/
+    // volume across the switch. Refining (5m -> 1m) cannot be reconstructed
+    // from coarser candles; there the flat-from-open reset loses at most one
+    // new-TF period and self-heals at the period roll.
+    carried_candle_valid_ = false;
+    if (replay_start_time_ms_ > 0 && new_timeframe_seconds > timeframe_seconds_ &&
+        new_timeframe_seconds >= 60) {
+        const int64_t new_tf_ms = new_timeframe_seconds * 1000;
+        const int64_t period_start = (replay_playhead_ms() / new_tf_ms) * new_tf_ms;
+        Terminal::Candle agg{};
+        bool have = false;
+        auto fold = [&](const Terminal::Candle& c) {
+            if (c.timestamp_ms < period_start) return;
+            if (!have) {
+                agg = c;
+                agg.timestamp_ms = period_start;
+                agg.timeframe = new_timeframe_seconds;
+                have = true;
+                return;
+            }
+            agg.high = std::max(agg.high, c.high);
+            agg.low = std::min(agg.low, c.low);
+            agg.close = c.close;
+            agg.volume += c.volume;
+            agg.vbuy += c.vbuy;
+            agg.vsell += c.vsell;
+            agg.tbuy += c.tbuy;
+            agg.tsell += c.tsell;
+        };
+        for (const auto& c : candles_) fold(c);
+        if (has_current_candle_) fold(current_candle_);
+        if (have) {
+            carried_candle_ = agg;
+            carried_candle_valid_ = true;
+        }
+    }
     // Clear all state
     candles_.clear();
     has_current_candle_ = false;
@@ -139,18 +179,19 @@ void CandleManager::change_timeframe(const int64_t new_timeframe_seconds) {
     stream_mgr_.subscribe_trades(trade_stream_key_, trade_handler);
     stream_mgr_.subscribe_candles_batch(candle_stream_key_, batch_handler);
     stream_mgr_.subscribe_candles(candle_stream_key_, live_handler);
-    // Trigger reload - replay mode requests candles ending at replay start time
+    // Trigger reload - replay mode requests candles ending at the playhead
     is_loading_ = true;
     if (replay_start_time_ms_ > 0) {
-        // Use the latest replay position, not the start time. Otherwise
-        // candles built during the replay session are lost on TF switch.
-        // Add one period buffer to cover alignment rounding from the old TF
-        // (e.g., replay_latest_time_ms_ may be 5m-aligned while actual
-        // playback is mid-period at the new TF).
-        int64_t end_time = (replay_latest_time_ms_ > replay_start_time_ms_)
-            ? replay_latest_time_ms_ + (new_timeframe_seconds * 1000)
-            : replay_start_time_ms_;
-        stream_mgr_.request_candles_before(pair_, timeframe_seconds_, end_time, preload_count_);
+        // End the batch AT the playhead. The server (and the pack engine)
+        // answer with `bucket < end`, so end = playhead + 1 includes the
+        // period the playhead is inside and nothing after it. The previous
+        // `latest + one new-TF period` buffer overshot into the future: the
+        // NEXT period's full candle came back, was popped as the building
+        // candle, and rendered as a flat ghost candle one period AHEAD of the
+        // playhead with the live-price tag pinned to its open until playback
+        // reached it (the TF-switch artifact).
+        stream_mgr_.request_candles_before(
+            pair_, timeframe_seconds_, replay_playhead_ms() + 1, preload_count_);
     } else {
         stream_mgr_.request_historical_candles(pair_, timeframe_seconds_, preload_count_);
     }
@@ -160,6 +201,8 @@ void CandleManager::reset_for_seek(int64_t seek_time_ms) {
     // Clear all candle data
     candles_.clear();
     has_current_candle_ = false;
+    // A seek discards any TF-switch continuation that was still in flight.
+    carried_candle_valid_ = false;
     // Drop the recent-tick ring buffer: a seek jumps to a new time, so the old
     // ticks are stale for the Line chart (candle-close fallback covers the gap
     // until fresh replay trades refill it).
@@ -669,6 +712,7 @@ void CandleManager::handle_candle(const Terminal::Candle& candle) {
 void CandleManager::handle_candle_batch(std::span<const Terminal::Candle> batch) {
     if (batch.empty()) {
         is_loading_ = false;
+        carried_candle_valid_ = false;
         return;
     }
     // Backend sends oldest → newest. Historical requests can race a TF
@@ -690,6 +734,7 @@ void CandleManager::handle_candle_batch(std::span<const Terminal::Candle> batch)
     }
     if (inserted == 0) {
         is_loading_ = false;
+        carried_candle_valid_ = false;
         return;
     }
     // Trim excess from FRONT (oldest prepended data), not back (newest live data).
@@ -702,35 +747,27 @@ void CandleManager::handle_candle_batch(std::span<const Terminal::Candle> batch)
     if (!had_candles) {
         last_close_price_ = batch.back().close;
     }
-    if (!initial_load_complete_) {
+    if (replay_start_time_ms_ > 0) {
+        // REPLAY: runs for the initial load, TF switches AND seek batches
+        // (reset_for_seek keeps initial_load_complete_ true, but its batch
+        // rebuilds the series from empty and needs the same treatment).
+        initial_load_complete_ = true;
+        adopt_replay_building_candle();
+    } else if (!initial_load_complete_) {
         initial_load_complete_ = true;
 
         // The last candle in the batch may be the current (incomplete) period.
         // Pop it out and make it the building candle so trades/ticks merge into
         // it instead of creating a duplicate.
         //
-        // REPLAY MODE: Always pop unconditionally. The batch loads candles up to
-        // the current replay position; 15s ticks will arrive for that period or
-        // later. If we leave the last batch candle finalized, the first 15s tick
-        // creates a building candle with open = candles_.back().close (the SAME
-        // period's historical close, not the PREVIOUS period's close) - wrong.
-        //
         // LIVE MODE: Only pop if wall clock is still within the candle's period
         // (the candle hasn't finished yet).
         if (!candles_.empty()) {
-            bool should_pop = false;
-            if (replay_start_time_ms_ > 0) {
-                // Replay: always pop the last batch candle
-                should_pop = true;
-            } else {
-                // Live: check if the period is still open
-                const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()
-                ).count();
-                const int64_t candle_end_ms = candles_.back().timestamp_ms + (timeframe_seconds_ * 1000);
-                should_pop = (now_ms < candle_end_ms);
-            }
-            if (should_pop) {
+            const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+            ).count();
+            const int64_t candle_end_ms = candles_.back().timestamp_ms + (timeframe_seconds_ * 1000);
+            if (now_ms < candle_end_ms) {
                 const auto& last = candles_.back();
                 if (has_current_candle_ &&
                     current_candle_.timestamp_ms == last.timestamp_ms) {
@@ -744,21 +781,6 @@ void CandleManager::handle_candle_batch(std::span<const Terminal::Candle> batch)
                     current_candle_ = last;
                     has_current_candle_ = true;
                 }
-                // During replay, the batch candle has FULL historical H/L/close
-                // for the entire period - data that hasn't been replayed yet.
-                // Reset to just the open so ticks progressively fill in H/L/close.
-                // Without this, the building candle renders with the full period's
-                // range immediately (giant candle covering the entire 5m/1m move).
-                if (replay_start_time_ms_ > 0) {
-                    current_candle_.high   = current_candle_.open;
-                    current_candle_.low    = current_candle_.open;
-                    current_candle_.close  = current_candle_.open;
-                    current_candle_.volume = 0;
-                    current_candle_.vbuy   = 0;
-                    current_candle_.vsell  = 0;
-                    current_candle_.tbuy   = 0;
-                    current_candle_.tsell  = 0;
-                }
                 candles_.pop_back();
                 mark_dirty();
             }
@@ -766,6 +788,68 @@ void CandleManager::handle_candle_batch(std::span<const Terminal::Candle> batch)
     }
 
     is_loading_ = false;
+    mark_dirty();
+}
+
+// Replay batches end at the playhead (`bucket < playhead + 1`), so the LAST
+// batch candle is the playhead's own period whenever the playhead sits
+// mid-period - and from the DB (or a pack seed) that candle carries the FULL
+// period's OHLCV, including data that has not been replayed yet. Leaving it
+// finalized leaks the future (the giant active candle with a wick playback
+// hasn't reached). Popping a candle from a period the playhead has ALREADY
+// LEFT is just as wrong: it flattens real, fully-played history (boundary-
+// aligned deep-link anchors and boundary-snapped scrubber seeks hit exactly
+// that case). So: pop as the building candle ONLY when the last candle's
+// period contains the playhead.
+void CandleManager::adopt_replay_building_candle() {
+    if (candles_.empty()) {
+        carried_candle_valid_ = false;
+        return;
+    }
+    const int64_t tf_ms = timeframe_seconds_ * 1000;
+    const int64_t playhead = replay_playhead_ms();
+    const auto& last = candles_.back();
+    if (playhead < last.timestamp_ms || playhead >= last.timestamp_ms + tf_ms) {
+        carried_candle_valid_ = false;
+        return;
+    }
+    if (has_current_candle_ && current_candle_.timestamp_ms == last.timestamp_ms) {
+        current_candle_.open = last.open;
+    } else {
+        current_candle_ = last;
+        has_current_candle_ = true;
+    }
+    if (timeframe_seconds_ >= 60) {
+        // The aggregate tables serve full-period candles - reset to the open so
+        // replayed ticks/trades rebuild only what has actually played.
+        current_candle_.high   = current_candle_.open;
+        current_candle_.low    = current_candle_.open;
+        current_candle_.close  = current_candle_.open;
+        current_candle_.volume = 0;
+        current_candle_.vbuy   = 0;
+        current_candle_.vsell  = 0;
+        current_candle_.tbuy   = 0;
+        current_candle_.tsell  = 0;
+        // TF switch carried the played slice of this period from the old
+        // (finer) timeframe's candles: restore it so the building candle does
+        // not restart flat mid-period. The batch open stays authoritative (the
+        // old TF's coverage may begin after the period start).
+        if (carried_candle_valid_ &&
+            carried_candle_.timestamp_ms == current_candle_.timestamp_ms) {
+            current_candle_.high   = std::max(carried_candle_.high, current_candle_.open);
+            current_candle_.low    = std::min(carried_candle_.low,  current_candle_.open);
+            current_candle_.close  = carried_candle_.close;
+            current_candle_.volume = carried_candle_.volume;
+            current_candle_.vbuy   = carried_candle_.vbuy;
+            current_candle_.vsell  = carried_candle_.vsell;
+            current_candle_.tbuy   = carried_candle_.tbuy;
+            current_candle_.tsell  = carried_candle_.tsell;
+        }
+    }
+    // Sub-minute batches aggregate trades strictly before the request end, so
+    // they are already exact to the playhead - keep their OHLCV as-is.
+    carried_candle_valid_ = false;
+    candles_.pop_back();
     mark_dirty();
 }
 

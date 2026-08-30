@@ -147,6 +147,22 @@ public:
     void resume_live_subscriptions();
 
 private:
+    // The keys this client currently holds a SERVER-SIDE subscription for, each
+    // visited exactly once. Pause, resume and reconnect all walk the same set, so
+    // a stream can no longer be live on the box but missing from one of them.
+    //
+    // It exists because they used to hand-list the maps and disagreed. Every list
+    // tested `!handlers.empty()`, but subscribe_orderbook stores an EMPTY vector
+    // as a refcount marker, so depth - the highest-bandwidth stream there is - was
+    // silently skipped by all three. Measured on hub session b325c765 during the
+    // 2026-08-26 01:49 research replay: streams 1/4/5/35 unsubscribed, stream 3
+    // (Orderbook) subscribed at 01:49:32.198, "starting depth updates" at .294,
+    // and never unsubscribed. reconnect also omitted candles entirely and volumes
+    // were unsubscribed despite never having been subscribed.
+    template <typename Fn>
+    void for_each_server_subscription(Fn&& fn) const;
+
+private:
     EMSCRIPTEN_WEBSOCKET_T ws_;
     DispatchQueue* dispatch_queue_ = nullptr;
     bool replay_mode_ = false;  // When true, no server-side subscribe/unsubscribe

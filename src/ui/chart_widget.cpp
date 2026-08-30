@@ -72,7 +72,10 @@ static void render_investigate_menu_item(const Terminal::Pair& pair, int64_t min
     const bool enabled = on_record && minute_ms > 0;
     std::string shortcut;
     if (enabled) shortcut = research_url::minute_label_utc(minute_ms);
-    if (ImGui::MenuItem("Investigate this minute",
+    // "Find moments like this" (renamed 2026-08-24, James): the flagship
+    // journey is see something -> right-click -> find similar -> replay,
+    // and the menu item names the outcome, not the mechanism.
+    if (ImGui::MenuItem("Find moments like this",
                         shortcut.empty() ? nullptr : shortcut.c_str(), false, enabled)) {
         ui::ResearchMomentPanel::instance().open(pair.symbol, minute_ms);
         ImGui::CloseCurrentPopup();
@@ -2819,11 +2822,19 @@ void ChartWidget::render_controls() {
         // Modelled levels are a hosted stream. Once enabled on a feed that
         // never delivers it, the layer stays invisible; say why on hover
         // and point at the layers that do work here (see stream_presence.h).
-        if (ImGui::IsItemHovered() && StreamPresence::instance().absent(
-                static_cast<uint32_t>(Terminal::Stream::LiquidationHeatmap))) {
-            Theme::tooltip("Modelled levels ride EdgeDepth's hosted feed, which this\n"
-                           "feed has not delivered. The liquidation heatmap and\n"
-                           "profile are computed client-side and still work.");
+        // In replay the layer is deliberately suppressed for live parity
+        // (render_liquidation_heatmap) - say that instead.
+        if (ImGui::IsItemHovered()) {
+            if (ctx_.candle_mgr().replay_start_time_ms() > 0) {
+                Theme::tooltip("Modelled levels are hidden during replay while their\n"
+                               "live feed is offline. The liquidation heatmap and\n"
+                               "profile are computed client-side and still work.");
+            } else if (StreamPresence::instance().absent(
+                    static_cast<uint32_t>(Terminal::Stream::LiquidationHeatmap))) {
+                Theme::tooltip("Modelled levels ride EdgeDepth's hosted feed, which this\n"
+                               "feed has not delivered. The liquidation heatmap and\n"
+                               "profile are computed client-side and still work.");
+            }
         }
         if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) open_liq_settings_ = true;
         // Liq Levels HL = REAL predictive levels from the HL census (Pro, P2e) -
@@ -5326,6 +5337,15 @@ static double tiered_band_usd(const Terminal::LiquidationBand& band, uint8_t mas
 void ChartWidget::render_liquidation_heatmap(double visible_x_min, double visible_x_max) {
     (void)visible_x_min;
     (void)visible_x_max;
+    // Live/replay display parity: the LIVE broadcast for this layer
+    // (liquidation_heatmap.> - LiquidationHeatmapActor's NATS publish) was
+    // removed backend-side on 2026-07-22, so live sessions never receive a
+    // snapshot and this layer draws nothing there. The replay recompute driver
+    // still synthesizes rail-bearing updates, which made the rails appear ONLY
+    // in replay. Until the live publish returns, suppress the layer in replay
+    // too - a layer the live terminal cannot show must not show in replay.
+    // Remove this gate when the live producer is restored.
+    if (ctx_.candle_mgr().replay_start_time_ms() > 0) return;
     const auto* snapshot = ctx_.liq_heatmap_mgr().get_snapshot(pair_);
     if (!snapshot || snapshot->bands.empty()) {
         static int no_snap_count = 0;

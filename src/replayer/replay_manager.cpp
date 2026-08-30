@@ -100,6 +100,54 @@ static std::string current_replay_token() {
     return token;
 }
 
+// The HTTP origin that serves POST /replay/session and /replay/session/archive.
+//
+// Derived from the same window global that picks the replay WEBSOCKET origin
+// (main.cpp resolve_replay_ws_url), because session creation and the socket
+// that joins the session MUST land on the same process: the session row is
+// written to that box's replay_sessions and join_replay looks it up locally.
+// Creating on hub and joining on server 2 would produce a session id the
+// joining box has never heard of.
+//
+// wss://replay-api.edgedepth.com/ws  ->  https://replay-api.edgedepth.com
+// Unset (the default) -> https://api.edgedepth.com, i.e. exactly today's
+// behaviour, so this is inert until the host page opts in.
+// The box that serves live, archives and symbol metadata. Also the fallback
+// replay origin when no separate one is configured.
+static constexpr const char* kHubHttpBase = "https://api.edgedepth.com";
+
+static std::string replay_http_base() {
+    static const char* kDefaultBase = kHubHttpBase;
+#ifdef __EMSCRIPTEN__
+    char* raw = reinterpret_cast<char*>(EM_ASM_PTR({
+        try {
+            var url = new URLSearchParams(window.location.search).get('replay_ws') ||
+                      window.__EDGEDEPTH_REPLAY_WS_URL__ || "";
+            url = String(url);
+            if (url.indexOf('ws://') !== 0 && url.indexOf('wss://') !== 0) return 0;
+            // Scheme swap, then drop the path: ws->http, wss->https.
+            var http = url.indexOf('wss://') === 0
+                ? 'https://' + url.slice(6)
+                : 'http://' + url.slice(5);
+            var slash = http.indexOf('/', http.indexOf('://') + 3);
+            if (slash !== -1) http = http.slice(0, slash);
+            var len = lengthBytesUTF8(http);
+            var buf = _malloc(len + 1);
+            stringToUTF8(http, buf, len + 1);
+            return buf;
+        } catch (e) {
+            return 0;
+        }
+    }));
+    if (raw) {
+        std::string base(raw);
+        std::free(raw);
+        return base;
+    }
+#endif
+    return kDefaultBase;
+}
+
 extern "C" {
     EMSCRIPTEN_KEEPALIVE
     void _replay_session_created(const char* json_str, int len) {
@@ -121,8 +169,8 @@ extern "C" {
 // Construction
 // ═══════════════════════════════════════════════════════════════════════════════
 
-ReplayManager::ReplayManager(WebSocketClient* ws_client)
-    : ws_client_(ws_client)
+ReplayManager::ReplayManager(WebSocketClient* nats_lane, WebSocketClient* archive_lane)
+    : nats_lane_(nats_lane), archive_lane_(archive_lane)
 {
     g_replay_instance = this;
 }
@@ -138,7 +186,8 @@ void ReplayManager::request_replay(
     int64_t start_time_ms,
     int64_t end_time_ms,
     float speed,
-    int64_t timeframe_seconds)
+    int64_t timeframe_seconds,
+    int64_t anchor_ms)
 {
     // ── Free-tier pre-gate (UX funnel; the Go backend is the real enforcer) ──
     // Runs BEFORE tearing down any active replay, so a blocked attempt never kills
@@ -181,10 +230,19 @@ void ReplayManager::request_replay(
     speed = static_cast<float>(Entitlements::clamp_speed_for_tier(speed));
     speed = std::clamp(speed, MIN_SPEED, MAX_SPEED);
 
+    // Clamp the anchor into the window. Out of range means a stale deep link,
+    // and dropping the anchor (replay the window) beats refusing to replay.
+    if (anchor_ms > 0) {
+        if (anchor_ms < start_time_ms) anchor_ms = start_time_ms;
+        if (anchor_ms > end_time_ms)   anchor_ms = end_time_ms;
+        if (anchor_ms == start_time_ms) anchor_ms = 0;   // nothing to carry
+    }
+
     // Store pending request
     pending_.symbols = symbols;
     pending_.start_time_ms = start_time_ms;
     pending_.end_time_ms = end_time_ms;
+    pending_.anchor_ms = anchor_ms;
     pending_.speed = speed;
     pending_.timeframe_seconds = timeframe_seconds;
     pending_.is_archive = false;
@@ -193,7 +251,10 @@ void ReplayManager::request_replay(
     info_.symbols = symbols;
     info_.start_time_ms = start_time_ms;
     info_.end_time_ms = end_time_ms;
-    info_.current_time_ms = start_time_ms;
+    // Park the playhead at the anchor immediately: the box opens there, and the
+    // first replay_status would otherwise arrive a beat after a scrubber drawn
+    // at the window start.
+    info_.current_time_ms = (anchor_ms > 0) ? anchor_ms : start_time_ms;
     info_.speed = speed;
     info_.timeframe_ms = timeframe_seconds * 1000;  // Use caller's timeframe
     info_.session_created_at = now_ms();
@@ -215,6 +276,7 @@ void ReplayManager::request_replay(
     // The backend accepts both unix timestamps and ISO strings
     payload["start_timestamp"] = start_time_ms;
     payload["end_timestamp"] = end_time_ms;
+    if (anchor_ms > 0) payload["anchor_timestamp"] = anchor_ms;
     payload["speed"] = speed;
 
     std::string body = payload.dump();
@@ -224,19 +286,41 @@ void ReplayManager::request_replay(
     format_timestamp(end_time_ms, end_buf, sizeof(end_buf));
 
 #ifdef __EMSCRIPTEN__
+    const std::string base = replay_http_base();
     // Fire async XHR to create replay session
     EM_ASM({
         var body = UTF8ToString($0);
         var xhr = new XMLHttpRequest();
-        xhr.open('POST', 'https://api.edgedepth.com/replay/session', true);
+        xhr.open('POST', UTF8ToString($1) + '/replay/session', true);
         xhr.setRequestHeader('Content-Type', 'application/json');
         // Entitlement token (design §5.1): read the window global FRESH on each POST
         // (TerminalEmbed refreshes it on a ~9-min timer). resolveClaims() on the Go
         // side requires `Authorization: Bearer <token>` (default-deny).
-        try {
-            var __edx_tok = (window.__EDGEDEPTH_REPLAY_TOKEN__ || "").toString();
+        //
+        // AND WAIT FOR IT RATHER THAN RACING IT. The host page publishes the global:
+        // SSR sets it before the glue loads for tier tokens, and an async mint fills
+        // it for the lesson/event GRANT tokens, which cannot be pre-rendered.
+        // Posting without it returns AUTH_REQUIRED, which the UI renders as "Replay
+        // unavailable" with nothing to suggest the only problem was arrival order.
+        //
+        // This used to be safe by accident: the mint is a round trip to the box and
+        // the wasm boot was multi-second, so the mint always won. On 2026-08-26 the
+        // bundle became immutable-cached and preloaded, a warm boot started coming
+        // off DISK, and the wasm began beating it. Bounded at ~2s so a genuinely
+        // tokenless boot still reaches the backend and gets a real coded error
+        // instead of a spinner that never resolves.
+        var __edx_began = Date.now();
+        var __edx_send = function() {
+            var __edx_tok = "";
+            try { __edx_tok = (window.__EDGEDEPTH_REPLAY_TOKEN__ || "").toString(); } catch (e) {}
+            if (!__edx_tok && Date.now() - __edx_began < 2000) {
+                setTimeout(__edx_send, 25);
+                return;
+            }
+            // Still OPENED, never SENT, so setting the header here is legal.
             if (__edx_tok) xhr.setRequestHeader('Authorization', 'Bearer ' + __edx_tok);
-        } catch (e) {}
+            xhr.send(body);
+        };
 
         xhr.onload = function() {
             if (xhr.status === 200 || xhr.status === 201) {
@@ -267,8 +351,8 @@ void ReplayManager::request_replay(
             _free(buf);
         };
 
-        xhr.send(body);
-    }, body.c_str());
+        __edx_send();
+    }, body.c_str(), base.c_str());
 #else
     // Non-WASM fallback (for testing)
     info_.error_message = "Replay requires WASM build";
@@ -306,6 +390,7 @@ void ReplayManager::request_archive_replay(
                                             : std::vector<std::string>{symbol};
     pending_.start_time_ms = 0;
     pending_.end_time_ms   = 0;
+    pending_.anchor_ms     = 0;  // archive windows open at their start
     pending_.speed         = speed;
     pending_.is_archive    = true;
     pending_.event_id      = event_id;
@@ -338,20 +423,51 @@ void ReplayManager::request_archive_replay(
     // Same async XHR + callback pair as request_replay, but the archive endpoint.
     // The session-created/-error callbacks are session-type-agnostic (they read
     // only session_id + status), so on_session_created → join_session() just works.
-    // NOTE: no withCredentials - mirrors request_replay (cross-origin api.edgedepth.com;
-    // the SSR /terminal?event= gate already authorizes the user before this runs).
+    // NOTE: no withCredentials - mirrors request_replay (cross-origin; the SSR
+    // /terminal?event= gate already authorizes the user before this runs).
+    //
+    // HUB, NOT THE REPLAY ORIGIN, AND THIS IS LOAD BEARING. Archive replay
+    // streams the absolute market_events.archive_path, i.e. /data/archives,
+    // which is 232 GB across ~1,570 events on hub and DOES NOT EXIST on
+    // server 2. Creating the session on server 2 succeeds (its standby has
+    // market_events, so the path resolves) and then the replayer opens
+    // metadata.json off a directory that is not there. Only move this when the
+    // archive tree itself moves, and note that event-enricher writes new events
+    // to hub nightly, so that is an ongoing sync, not a one-off copy.
+    const std::string base = kHubHttpBase;
     EM_ASM({
         var body = UTF8ToString($0);
         var xhr = new XMLHttpRequest();
-        xhr.open('POST', 'https://api.edgedepth.com/replay/session/archive', true);
+        xhr.open('POST', UTF8ToString($1) + '/replay/session/archive', true);
         xhr.setRequestHeader('Content-Type', 'application/json');
         // Entitlement token (design §5.1): read the window global FRESH on each POST
         // (TerminalEmbed refreshes it on a ~9-min timer). resolveClaims() on the Go
         // side requires `Authorization: Bearer <token>` (default-deny).
-        try {
-            var __edx_tok = (window.__EDGEDEPTH_REPLAY_TOKEN__ || "").toString();
+        //
+        // AND WAIT FOR IT RATHER THAN RACING IT. The host page publishes the global:
+        // SSR sets it before the glue loads for tier tokens, and an async mint fills
+        // it for the lesson/event GRANT tokens, which cannot be pre-rendered.
+        // Posting without it returns AUTH_REQUIRED, which the UI renders as "Replay
+        // unavailable" with nothing to suggest the only problem was arrival order.
+        //
+        // This used to be safe by accident: the mint is a round trip to the box and
+        // the wasm boot was multi-second, so the mint always won. On 2026-08-26 the
+        // bundle became immutable-cached and preloaded, a warm boot started coming
+        // off DISK, and the wasm began beating it. Bounded at ~2s so a genuinely
+        // tokenless boot still reaches the backend and gets a real coded error
+        // instead of a spinner that never resolves.
+        var __edx_began = Date.now();
+        var __edx_send = function() {
+            var __edx_tok = "";
+            try { __edx_tok = (window.__EDGEDEPTH_REPLAY_TOKEN__ || "").toString(); } catch (e) {}
+            if (!__edx_tok && Date.now() - __edx_began < 2000) {
+                setTimeout(__edx_send, 25);
+                return;
+            }
+            // Still OPENED, never SENT, so setting the header here is legal.
             if (__edx_tok) xhr.setRequestHeader('Authorization', 'Bearer ' + __edx_tok);
-        } catch (e) {}
+            xhr.send(body);
+        };
 
         xhr.onload = function() {
             if (xhr.status === 200 || xhr.status === 201) {
@@ -382,8 +498,8 @@ void ReplayManager::request_archive_replay(
             _free(buf);
         };
 
-        xhr.send(body);
-    }, body.c_str());
+        __edx_send();
+    }, body.c_str(), base.c_str());
 #else
     info_.error_message = "Replay requires WASM build";
     transition(State::Error);
@@ -556,7 +672,7 @@ void ReplayManager::join_session() {
         return;
     }
 
-    if (!ws_client_ || !ws_client_->is_connected()) {
+    if (!ws() || !ws()->is_connected()) {
         // WS not up yet? Don't error - the studio path fires request_replay as
         // soon as the wasm runtime is ready (calledRun), which is earlier than
         // the WS handshake to wss://api.edgedepth.com/ws. Latch and let
@@ -581,7 +697,7 @@ void ReplayManager::join_session() {
 #endif
     json msg = {{"method", "join_replay"}, {"data", std::move(data)}};
 
-    if (!ws_client_->send_text(msg.dump())) {
+    if (!ws()->send_text(msg.dump())) {
         info_.error_message = "Failed to send join_replay";
         transition(State::Error);
         return;
@@ -601,7 +717,7 @@ void ReplayManager::flush_pending_join() {
         return;
     }
 
-    if (ws_client_ && ws_client_->is_connected()) {
+    if (ws() && ws()->is_connected()) {
         pending_join_ = false;
         join_session();  // now takes the connected path
         return;
@@ -1142,9 +1258,14 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
         if (data.contains("end_time")) {
             info_.end_time_ms = data["end_time"].get<int64_t>();
         }
-        // Anchor the clock at the window start so the held (Buffering) clock
-        // shows the start, not 0, while priming.
-        info_.current_time_ms = info_.start_time_ms;
+        // Anchor the clock where playback opens so the held (Buffering) clock
+        // shows the real position, not 0, while priming. An anchored session
+        // opens at the anchor; snapping back to the window start here undid the
+        // park from request_replay and left the clock a full pre-roll behind
+        // the dripped data.
+        info_.current_time_ms = (pending_.anchor_ms > 0)
+            ? std::clamp(pending_.anchor_ms, info_.start_time_ms, info_.end_time_ms)
+            : info_.start_time_ms;
         transition(State::Buffering);
         return true;
     }
@@ -1177,14 +1298,23 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
             // (e.g., after backward skip, old status has higher time).
             // Backward jump guard: prevents stale status from jumping back
             // (e.g., after forward skip, old status has lower time).
-            int64_t max_forward_jump_ms = static_cast<int64_t>(10000.0 * std::max(1.0f, info_.speed));
-            int64_t max_backward_jump_ms = static_cast<int64_t>(5000.0 * std::max(1.0f, info_.speed));
-            int64_t diff = server_time - info_.current_time_ms;
-            if (diff > max_forward_jump_ms) {
-                return true;
-            }
-            if (diff < -max_backward_jump_ms) {
-                return true;
+            //
+            // While still BUFFERING no skip has happened yet, so no stale
+            // post-skip status can exist - accept the server clock as-is.
+            // The first status of an anchored session sits a whole pre-roll
+            // away from a clock an old box (that ignores anchor_timestamp)
+            // parked at the window start; guarding it here pinned the clock
+            // there forever (every subsequent status was "too far" too).
+            if (info_.state != State::Buffering) {
+                int64_t max_forward_jump_ms = static_cast<int64_t>(10000.0 * std::max(1.0f, info_.speed));
+                int64_t max_backward_jump_ms = static_cast<int64_t>(5000.0 * std::max(1.0f, info_.speed));
+                int64_t diff = server_time - info_.current_time_ms;
+                if (diff > max_forward_jump_ms) {
+                    return true;
+                }
+                if (diff < -max_backward_jump_ms) {
+                    return true;
+                }
             }
 
             info_.current_time_ms = server_time;
@@ -1343,7 +1473,7 @@ void ReplayManager::send_control(const char* action) {
         else if (std::strcmp(action, "stop") == 0)   pack_engine_->stop();
         return;
     }
-    if (!ws_client_ || !ws_client_->is_connected()) return;
+    if (!ws() || !ws()->is_connected()) return;
 
     json msg = {
         {"method", "control_replay"},
@@ -1351,7 +1481,7 @@ void ReplayManager::send_control(const char* action) {
             {"action", action}
         }}
     };
-    ws_client_->send_text(msg.dump());
+    ws()->send_text(msg.dump());
 }
 
 void ReplayManager::send_control_with_value(
@@ -1361,7 +1491,7 @@ void ReplayManager::send_control_with_value(
         if (std::strcmp(action, "set_speed") == 0) pack_engine_->control_set_speed(value);
         return;
     }
-    if (!ws_client_ || !ws_client_->is_connected()) return;
+    if (!ws() || !ws()->is_connected()) return;
 
     json msg = {
         {"method", "control_replay"},
@@ -1370,7 +1500,7 @@ void ReplayManager::send_control_with_value(
             {key, value}
         }}
     };
-    ws_client_->send_text(msg.dump());
+    ws()->send_text(msg.dump());
 }
 
 void ReplayManager::send_control_with_int64(
@@ -1384,7 +1514,7 @@ void ReplayManager::send_control_with_int64(
         }
         return;
     }
-    if (!ws_client_ || !ws_client_->is_connected()) return;
+    if (!ws() || !ws()->is_connected()) return;
 
     json msg = {
         {"method", "control_replay"},
@@ -1393,7 +1523,7 @@ void ReplayManager::send_control_with_int64(
             {key, value}
         }}
     };
-    ws_client_->send_text(msg.dump());
+    ws()->send_text(msg.dump());
 }
 
 void ReplayManager::transition(State new_state) {
@@ -1499,16 +1629,26 @@ void ReplayManager::create_replay_data_context() {
     // Pack mode: NO handle - historical requests are served from the pack via
     // the StreamManager hook; nothing may reach the box from a pack session.
     int ws_handle = 0;
-    if (!pack_mode_ && ws_client_ && ws_client_->is_connected()) {
-        ws_handle = ws_client_->get_handle();
+    if (!pack_mode_ && ws() && ws()->is_connected()) {
+        ws_handle = ws()->get_handle();
     }
+
+    // The candle backfill must end where PLAYBACK starts, not where the window
+    // starts. An anchored session (deep link ?t=, research marker, "replay from
+    // here") opens at the anchor with the window as scrub-back pre-roll;
+    // backfilling only to the window start left a hole of (anchor - start)
+    // between the history and the first dripped candle (the "massive gap on
+    // load" bug). Non-anchored sessions are unchanged (anchor_ms == 0).
+    const int64_t playback_start_ms = (pending_.anchor_ms > 0)
+        ? std::clamp(pending_.anchor_ms, info_.start_time_ms, info_.end_time_ms)
+        : info_.start_time_ms;
 
     auto ctx = std::make_unique<DataContext>(
         DataContext::create_replay_context(
             info_.session_id,
             info_.symbols,
             ws_handle,
-            info_.start_time_ms,
+            playback_start_ms,
             info_.timeframe_ms / 1000  // Use the chart's timeframe, not hardcoded 5m
         ));
     replay_ctx_ = std::move(ctx);
@@ -2155,6 +2295,22 @@ bool ReplayManager::process_keyboard_shortcuts() {
 // Chart Context Menu Integration
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Can this chrome navigate to a focused research replay?
+//
+// The bare terminal can: that is the original path. The research replay viewer
+// can TOO, and must, because re-anchoring is the same route with a different
+// from/to/t and there is nowhere else to do it from. Lesson, Course Studio,
+// event and pack cannot: navigating away abandons the lesson/authoring/event
+// the user is in, which is what the old is_embedded() guard was protecting.
+//
+// Exposed so render_chart_context_menu can DISABLE the item where the action
+// cannot run. A menu item that renders enabled and then does nothing is a bug
+// independent of which chromes are allowed.
+static bool focused_replay_nav_allowed() {
+    const auto& boot = EducationBoot::instance();
+    return !boot.is_embedded() || boot.is_research_replay();
+}
+
 // Navigate the host browser to the focused research-replay viewer for an
 // explicit window (see header). Full-document nav via EM_ASM (the WASM canvas
 // is a non-remountable singleton, so it can't soft-nav); the destination page
@@ -2162,7 +2318,7 @@ bool ReplayManager::process_keyboard_shortcuts() {
 void ReplayManager::open_focused_replay(const std::string& symbol, int64_t from_ms,
                                         int64_t to_ms, int64_t seek_ms) {
 #ifdef __EMSCRIPTEN__
-    if (EducationBoot::instance().is_embedded()) return;  // already a focused chrome
+    if (!focused_replay_nav_allowed()) return;
     char url[224];
     if (seek_ms > 0)
         snprintf(url, sizeof(url), "/terminal?replay=%s&from=%lld&to=%lld&t=%lld",
@@ -2227,12 +2383,18 @@ bool ReplayManager::render_chart_context_menu(
             // Replay from the clicked bar → the FOCUSED research-replay viewer
             // (the web app's /terminal?replay=): a distraction-free chrome (marker
             // rail + scrubber, NO watchlist) over a 4h window around the bar,
-            // seeked to it. Native dev build falls back to in-place; an embedded
-            // chrome is a no-op (see open_focused_replay).
-            if (ImGui::MenuItem("Replay from here", time_buf)) {
+            // seeked to it. Native dev build falls back to in-place.
+            //
+            // Where the navigation is refused (lesson, Course Studio, event, pack)
+            // the item is DISABLED rather than inert: it used to render enabled,
+            // gated only on entitlement, and silently do nothing.
+            const bool nav_ok = focused_replay_nav_allowed();
+            if (ImGui::MenuItem("Replay from here", time_buf, false, nav_ok)) {
                 open_focused_replay_at(symbol, hovered_time_ms);
                 initiated = true;
             }
+            if (!nav_ok && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                Theme::tooltip("Finish or leave this view to start a new replay.");
         } else if (!sym_ok) {
             // Symbol isn't one of the free majors, so the free day can't rescue
             // this (wrong symbol). Explain + route to upgrade. The Go backend
@@ -2269,7 +2431,8 @@ bool ReplayManager::render_chart_context_menu(
             snprintf(offer, sizeof(offer), "Replay %s: your free day",
                      Entitlements::free_window_short_label().c_str());
             ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::BRAND_TX);
-            if (ImGui::MenuItem(offer, "24H")) {
+            // Same navigation, same refusal: disable rather than render a dead row.
+            if (ImGui::MenuItem(offer, "24H", false, focused_replay_nav_allowed())) {
                 int64_t fw_s = 0, fw_e = 0;
                 Entitlements::free_window_range(now_ms(), fw_s, fw_e);
                 open_focused_replay(symbol, fw_s, fw_e, fw_s);

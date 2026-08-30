@@ -179,6 +179,12 @@ void StudioRuntime::update(const AppContext& ctx) {
                    [](unsigned char c) { return std::tolower(c); });
     const int64_t startMs = doc.value("startMs", int64_t{0});
     const int64_t endMs   = doc.value("endMs",   int64_t{0});
+    // Optional playback anchor inside the window (the ?t= deep link). Carried
+    // into session creation so the box opens there; without it the session opens
+    // at startMs and the shell has to seek, which costs the parquet OB seed
+    // twice plus the box's 1s consumer-exit wait.
+    int64_t anchorMs = doc.value("anchorMs", int64_t{0});
+    if (anchorMs > 0 && (anchorMs <= startMs || anchorMs > endMs)) anchorMs = 0;
 
     if (sym.empty() || startMs <= 0 || endMs <= startMs) {
         return;
@@ -187,13 +193,14 @@ void StudioRuntime::update(const AppContext& ctx) {
     // Dedup: re-picking the SAME window shouldn't re-request a replay (the picker
     // can re-emit on a no-op confirm, and React re-pushes on a cadence until the
     // state emit confirms it). Only act when the window actually changes.
-    const std::string key = sym + "|" + std::to_string(startMs) + "|" + std::to_string(endMs);
+    const std::string key = sym + "|" + std::to_string(startMs) + "|" + std::to_string(endMs)
+                          + "|" + std::to_string(anchorMs);
     if (key == applied_key_) return;
     applied_key_ = key;
 
     // Same entry point the lesson player uses; free scrub (no gate) is simply the
     // absence of LessonRuntime driving the playhead in studio mode.
-    ctx.replay_mgr().request_replay(std::vector<std::string>{sym}, startMs, endMs, 1.0f);
+    ctx.replay_mgr().request_replay(std::vector<std::string>{sym}, startMs, endMs, 1.0f, 300, anchorMs);
     // Stash for emit_state (so it can report the window during buffering, before
     // SessionInfo is populated).
     src_symbol_   = sym;

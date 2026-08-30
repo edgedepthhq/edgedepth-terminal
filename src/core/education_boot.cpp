@@ -33,9 +33,16 @@ void EducationBoot::detect() {
             var mode = String(cfg.mode || (cfg.docUrl ? "lesson" : ""));
             var url = String(cfg.docUrl || "");
             var sym = String(cfg.symbol || "");   // studio: the picked symbol
+            // WHICH studio chrome. The ad-hoc research replay viewer
+            // (/terminal?replay=) boots mode "studio" because that is the one
+            // embedded mode that accepts an arbitrary symbol+window on a plain
+            // tier token, but it is NOT the Course Studio and the two want
+            // different answers about re-anchoring a replay. The host page says
+            // which it is instead of the client guessing.
+            var chrome = String(cfg.chrome || "");
             if (!mode && !url) return 0;
-            // Three newline-separated fields: mode \n docUrl \n studioSymbol
-            var s = mode + '\n' + url + '\n' + sym;
+            // Four newline-separated fields: mode \n docUrl \n studioSymbol \n chrome
+            var s = mode + '\n' + url + '\n' + sym + '\n' + chrome;
             var len = lengthBytesUTF8(s);
             var buf = _malloc(len + 1);
             stringToUTF8(s, buf, len + 1);
@@ -49,13 +56,24 @@ void EducationBoot::detect() {
     if (raw) {
         std::string blob(raw);
         free(raw);
-        // Split on newlines into [mode, docUrl, studioSymbol].
-        const auto nl1 = blob.find('\n');
-        const std::string mode = (nl1 == std::string::npos) ? blob : blob.substr(0, nl1);
-        std::string rest = (nl1 == std::string::npos) ? "" : blob.substr(nl1 + 1);
-        const auto nl2 = rest.find('\n');
-        doc_url_ = (nl2 == std::string::npos) ? rest : rest.substr(0, nl2);
-        studio_symbol_ = (nl2 == std::string::npos) ? "" : rest.substr(nl2 + 1);
+        // Split on newlines into [mode, docUrl, studioSymbol, chrome]. A field
+        // the host did not send is simply absent, so an older page that still
+        // sends three fields parses exactly as it did before.
+        std::string fields[4];
+        {
+            size_t start = 0;
+            for (int i = 0; i < 4 && start <= blob.size(); i++) {
+                const auto nl = blob.find('\n', start);
+                fields[i] = blob.substr(start, nl == std::string::npos ? std::string::npos
+                                                                       : nl - start);
+                if (nl == std::string::npos) break;
+                start = nl + 1;
+            }
+        }
+        const std::string mode = fields[0];
+        doc_url_ = fields[1];
+        studio_symbol_ = fields[2];
+        studio_chrome_ = fields[3];
         // Normalize the studio symbol to lowercase (the rest of the client expects it).
         std::transform(studio_symbol_.begin(), studio_symbol_.end(), studio_symbol_.begin(),
                        [](unsigned char c) { return std::tolower(c); });

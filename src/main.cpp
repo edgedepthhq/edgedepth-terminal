@@ -92,6 +92,12 @@ struct AppState {
     SDL_GLContext gl_context = nullptr;
     // Owned managers (RAII via unique_ptr)
     std::unique_ptr<WebSocketClient> ws_client;
+    // The replay lane's socket, non-null ONLY when a separate replay origin is
+    // configured (see resolve_replay_ws_url). Live and replay share one /ws
+    // handler on the box and the lane is chosen after the handshake, so the
+    // split has to happen at the socket, not at a path. When it is null the
+    // replay lane rides ws_client exactly as it always has.
+    std::unique_ptr<WebSocketClient> replay_ws_client;
     std::unique_ptr<StreamManager> stream_mgr;
     std::unique_ptr<HeatmapManager> heatmap_mgr;
     std::unique_ptr<LiquidationHeatmapManager> liq_heatmap_mgr;
@@ -162,8 +168,47 @@ void init_main_chart();
 // Extracted from connect_websocket() for clarity. Handles JSON control messages
 // on the main thread, routes binary protobuf to the data thread.
 
-static void on_ws_message(const uint8_t* data, size_t len) {
+// Which socket a frame arrived on. Only meaningful once the replay lane has its
+// own socket; with a single socket everything is Live and the guard below is
+// inert.
+enum class WsLane : uint8_t { Live, Replay };
+
+static void on_ws_message(const uint8_t* data, size_t len, WsLane lane) {
     if (len == 0) return;
+
+    // ── THE LANE INVARIANT ──────────────────────────────────────────────────
+    // A frame that arrived on the LIVE socket must never be written into replay
+    // state. While a replay context is active the AppContext managers ARE the
+    // replay managers, so a live depth update lands in the replay orderbook and
+    // the DOM renders today's book against a 2026-08-19 chart.
+    //
+    // This regressed on 2026-08-26 when replay moved to its own socket. Before
+    // that, join_replay landed on the SAME box session that held the live
+    // subscriptions, and the server paused those consumers ("Paused live
+    // consumers for replay"). That server-side pause was doing the real work.
+    // Splitting the socket split the session, so hub is never told, and the
+    // client-side pause_live_subscriptions() alone did not stop it.
+    //
+    // Guarded on replay_ws_client so it CANNOT fire in the single-socket
+    // configuration, where replay frames legitimately arrive on the live lane.
+    // Only binary market data is dropped; JSON control frames (errors, auth,
+    // status) still need to reach their handlers on both lanes.
+    //
+    // The `active_socket` test is what keeps ARCHIVE replay working: those
+    // sessions ride hub's LIVE socket by design, because only hub has
+    // /data/archives. Dropping live-lane frames during one would throw away the
+    // replay's own data. Drop only when the replay is demonstrably NOT on this
+    // lane.
+    if (lane == WsLane::Live && g_app.replay_ws_client && data[0] != '{' &&
+        g_app.replay_mgr && g_app.replay_mgr->replay_context() != nullptr &&
+        g_app.replay_mgr->active_socket() != g_app.ws_client.get()) {
+        static uint64_t dropped = 0;
+        if (++dropped % 2000 == 1) {
+            SDL_Log("Dropped %llu live-lane frames during replay (lane invariant)",
+                    static_cast<unsigned long long>(dropped));
+        }
+        return;
+    }
 
     // JSON text frames start with '{', binary protobuf never does
     if (data[0] == '{') {
@@ -377,10 +422,106 @@ void connect_websocket() {
         g_app.ws_client.reset();
     }
     g_app.ws_client = std::make_unique<WebSocketClient>();
-    g_app.ws_client->set_message_callback(on_ws_message);
+    g_app.ws_client->set_message_callback(
+        [](const uint8_t* d, size_t n) { on_ws_message(d, n, WsLane::Live); });
     g_app.ws_client->set_status_callback(on_ws_status);
 
     if (!g_app.ws_client->connect(resolve_ws_url())) {
+    }
+}
+
+// Replay-lane endpoint resolution, first match wins:
+//   1. ?replay_ws=<url> query param   (dev / pointing at a local replay-server)
+//   2. window.__EDGEDEPTH_REPLAY_WS_URL__  (host page, before the glue loads)
+//   3. "" = no separate replay origin, so the replay lane rides the live socket
+//
+// Returning "" by default is the whole safety property: shipping this build
+// changes nothing until the host page sets the variable, exactly like
+// RESEARCH_STORE_ENGINE_URL did for the research offload.
+//
+// WHY A SECOND SOCKET AT ALL. The box mounts ONE /ws handler and the client
+// picks its lane after the handshake, so no path-based proxy rule can separate
+// live from replay. Splitting them means a second hostname in front of a second
+// process, which means a second socket here.
+static std::string resolve_replay_ws_url() {
+#ifdef __EMSCRIPTEN__
+    char* raw = reinterpret_cast<char*>(EM_ASM_PTR({
+        try {
+            var url = new URLSearchParams(window.location.search).get('replay_ws') ||
+                      window.__EDGEDEPTH_REPLAY_WS_URL__ || "";
+            url = String(url);
+            if (url.indexOf('ws://') !== 0 && url.indexOf('wss://') !== 0) return 0;
+            var len = lengthBytesUTF8(url);
+            var buf = _malloc(len + 1);
+            stringToUTF8(url, buf, len + 1);
+            return buf;
+        } catch (e) {
+            return 0;
+        }
+    }));
+    if (raw) {
+        std::string url(raw);
+        free(raw);
+        return url;
+    }
+#endif
+    return std::string();
+}
+
+// The socket for NATS/cold-parquet replay: the dedicated one when it exists,
+// otherwise the live one. Every such call site goes through this so there is
+// exactly one place that knows the lane split exists.
+WebSocketClient* replay_lane_socket() {
+    return g_app.replay_ws_client ? g_app.replay_ws_client.get() : g_app.ws_client.get();
+}
+
+// The socket for ARCHIVE replay of curated events, which is always hub. Those
+// sessions stream the absolute market_events.archive_path under /data/archives,
+// a 232 GB tree that exists ONLY on hub; server 2 has no such directory. The
+// session would create there and then fail opening metadata.json.
+WebSocketClient* archive_lane_socket() {
+    return g_app.ws_client.get();
+}
+
+// Status callback for the REPLAY socket only. Deliberately does almost nothing:
+// it must not touch stream_mgr's websocket handle and must not fire the live
+// auto-subscribes, or a replay connection would start paying for ticker24h and
+// paper-trading traffic on a socket that serves neither.
+static void on_replay_ws_status(const std::string& status) {
+    if (status == "Connected") {
+        SDL_Log("Replay lane socket connected");
+    }
+}
+
+// Opens the replay lane's own socket, but ONLY when a separate origin is
+// configured. With no origin set this is a no-op and nothing about the app
+// changes, so the split is inert until the host page opts in.
+void connect_replay_websocket() {
+    const std::string replay_url = resolve_replay_ws_url();
+    if (replay_url.empty() || replay_url == resolve_ws_url()) {
+        // Same endpoint as live: opening a second socket to it would double
+        // every user's connection count for no benefit.
+        g_app.replay_ws_client.reset();
+        return;
+    }
+
+    if (g_app.replay_ws_client) {
+        g_app.replay_ws_client->disconnect();
+        g_app.replay_ws_client.reset();
+    }
+    g_app.replay_ws_client = std::make_unique<WebSocketClient>();
+    // Same handler as live, but TAGGED, so the lane invariant at the top of
+    // on_ws_message can tell replay frames from live ones. The routing inside
+    // is content-based and shared; only the source needs distinguishing.
+    g_app.replay_ws_client->set_message_callback(
+        [](const uint8_t* d, size_t n) { on_ws_message(d, n, WsLane::Replay); });
+    g_app.replay_ws_client->set_status_callback(on_replay_ws_status);
+
+    // Connected eagerly rather than on first replay request. The join path
+    // already has a pending_join_ latch for "socket not up yet", but the
+    // replay DataContext grabs get_handle() during context creation, and a
+    // lazily-opened socket can still be mid-handshake at that moment.
+    if (!g_app.replay_ws_client->connect(replay_url)) {
     }
 }
 
@@ -415,6 +556,11 @@ void render_debug() {
     ImGui::Separator();
     if (ImGui::Button("Reconnect WebSocket")) {
         connect_websocket();
+        // connect_websocket() destroys and recreates g_app.ws_client, so any
+        // replay lane riding the live socket is now holding a freed pointer.
+        if (g_app.replay_mgr) {
+            g_app.replay_mgr->set_lanes(replay_lane_socket(), archive_lane_socket());
+        }
     }
     ImGui::Separator();
     ImGui::Text("WebSocket: %s",
@@ -1491,8 +1637,11 @@ int main(int, char**) {
     // network I/O, so N viewers cost the box zero streaming sessions.
     if (!EducationBoot::instance().is_pack()) {
         connect_websocket();
+        // Pack mode is excluded for the same reason live is: a pack session
+        // does zero network I/O, so it must not open a replay socket either.
+        connect_replay_websocket();
     }
-    g_app.replay_mgr = std::make_unique<ReplayManager>(g_app.ws_client.get());
+    g_app.replay_mgr = std::make_unique<ReplayManager>(replay_lane_socket(), archive_lane_socket());
     if (EducationBoot::instance().is_event() || EducationBoot::instance().is_lesson()) {
         // Arm the persistent pause before the socket-open callback can replay
         // subscriptions and before a lesson document finishes loading.
@@ -1719,6 +1868,9 @@ SDL_GL_MakeCurrent(g_app.window, g_app.gl_context);
     if (g_app.ws_client) {
         g_app.ws_client->disconnect();
     }
+    if (g_app.replay_ws_client) {
+        g_app.replay_ws_client->disconnect();
+    }
     // Stop data thread before destroying managers it references
     if (g_app.data_thread) {
         g_app.data_thread->stop();
@@ -1734,6 +1886,9 @@ SDL_GL_MakeCurrent(g_app.window, g_app.gl_context);
     g_app.msg_handler.reset();
     g_app.ob_mgr.reset();
     g_app.stream_mgr.reset();
+    // replay_mgr holds a raw pointer to whichever socket is the replay lane, so
+    // it is already reset above; drop both sockets after it, never before.
+    g_app.replay_ws_client.reset();
     g_app.ws_client.reset();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL3_Shutdown();

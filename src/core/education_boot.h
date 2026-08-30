@@ -62,6 +62,26 @@ public:
     bool is_lesson() const { return mode_ == Mode::Lesson; }
     bool is_studio() const { return mode_ == Mode::Studio; }
 
+    // The ad-hoc RESEARCH replay viewer (/terminal?replay=<sym>&from=&to=), which
+    // boots as Mode::Studio because studio is the one embedded mode that accepts an
+    // arbitrary symbol+window on a plain tier token. It is not the Course Studio,
+    // and the difference matters for exactly one thing today: re-anchoring.
+    //
+    // "Replay from here" navigates to a fresh focused viewer. From a LESSON, the
+    // Course Studio, an event or a pack that would abandon the thing the user is
+    // in, which is what the is_embedded() guard in open_focused_replay was really
+    // protecting. From the research viewer the destination is the SAME route with a
+    // different from/to/t, so the navigation is not redundant, it is the point of
+    // the click. is_embedded() could not tell those apart, so the guard fired on
+    // the one case it should have allowed and the menu item was a dead click.
+    //
+    // The host page states which chrome it is (window.__EDGEDEPTH_LESSON__.chrome)
+    // rather than the client inferring it; absent means Course Studio, so nothing
+    // that predates this changes.
+    bool is_research_replay() const {
+        return mode_ == Mode::Studio && studio_chrome_ == "research";
+    }
+
     // Event = an archived market-event replay (public /events → /terminal?event=<id>).
     // Set from window.__EDGEDEPTH_EVENT__ = {sessionType:'archive', eventId, symbol,
     // seekToStart, startMs, endMs}. is_embedded() (above) is now TRUE for event, so
@@ -140,6 +160,9 @@ private:
     std::string doc_url_;
     std::string lesson_json_;
     std::string studio_symbol_;
+    // Which studio chrome the host embedded us in: "research" for the ad-hoc
+    // research replay viewer, empty for the Course Studio. See is_research_replay.
+    std::string studio_chrome_;
     std::string event_id_;
     std::string event_symbol_;
     std::string pack_url_;

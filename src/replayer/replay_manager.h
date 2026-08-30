@@ -94,8 +94,34 @@ public:
     static constexpr int64_t SKIP_LARGE  = 300;    // 5 minutes
 
     // ─── Construction ────────────────────────────────────────────────────
-    explicit ReplayManager(WebSocketClient* ws_client);
+    // TWO LANES, because the two replay kinds read different data off
+    // different boxes and neither box has the other's:
+    //
+    //   nats_lane    NATS/cold-parquet replay (research deep links, free
+    //                replay, lessons). Reads /data/data-product, which since
+    //                the 2026-08-24 archiver cutover exists ONLY on server 2.
+    //   archive_lane ARCHIVE replay of curated events. Reads the absolute
+    //                market_events.archive_path, i.e. /data/archives, which is
+    //                232 GB on HUB and does not exist on server 2 at all.
+    //
+    // Passing the same pointer for both is the pre-split configuration.
+    ReplayManager(WebSocketClient* nats_lane, WebSocketClient* archive_lane);
     ~ReplayManager();  // Defined in .cpp - DataContext has unique_ptr members
+
+    // Re-point both lanes. The pointers are NOT owned here, and
+    // connect_websocket() destroys and recreates the client they came from (the
+    // debug panel's Reconnect button does exactly that), which would otherwise
+    // leave these dangling. Call after any reconnect.
+    void set_lanes(WebSocketClient* nats_lane, WebSocketClient* archive_lane) {
+        nats_lane_ = nats_lane;
+        archive_lane_ = archive_lane;
+    }
+
+    // Which socket the CURRENT session's frames arrive on. Callers use this to
+    // tell a replay frame from a live one when both share a socket, which is
+    // exactly the archive case: those sessions ride hub's live socket because
+    // only hub has /data/archives.
+    const WebSocketClient* active_socket() const { return ws(); }
 
     // ─── Context Swap Callback ───────────────────────────────────────────
     // AppState provides this callback so ReplayManager can trigger
@@ -127,12 +153,19 @@ public:
     // symbols: e.g. {"dogeusdt"}, or {"btcusdt", "ethusdt"}
     // start/end: unix ms. If end==0, defaults to start + 2 hours.
     // speed: initial playback speed (0.1 to 10.0)
+    // anchor_ms: optional playback start INSIDE [start,end]. Deep links (a
+    // research marker, ?t=) know it up front, so the session is created at the
+    // anchor and opens there. Zero = open at start_time_ms. The window is
+    // unchanged, so the scrubber still spans it and scrubbing back to the
+    // pre-roll still works; what disappears is the boot-then-seek, which built
+    // the box's orderbook seed twice and cost about 1.7s on every deep link.
     void request_replay(
         const std::vector<std::string>& symbols,
         int64_t start_time_ms,
         int64_t end_time_ms = 0,
         float speed = 1.0f,
-        int64_t timeframe_seconds = 300
+        int64_t timeframe_seconds = 300,
+        int64_t anchor_ms = 0
     );
 
     // Convenience: single symbol replay from a specific time
@@ -356,7 +389,15 @@ public:
     void on_session_error(int status_code, const char* error_msg);
 
 private:
-    WebSocketClient* ws_client_;
+    WebSocketClient* nats_lane_;
+    WebSocketClient* archive_lane_;
+    // The socket for the CURRENT session. session_type is set before the
+    // session POST in both request paths (archive at request_archive_replay,
+    // nats by default), so this is already correct by the time join_session
+    // runs. Archive replay MUST stay on hub: server 2 has no /data/archives.
+    WebSocketClient* ws() const {
+        return info_.session_type == "archive" ? archive_lane_ : nats_lane_;
+    }
     SessionInfo info_;
 
     // ─── Internal State ──────────────────────────────────────────────────
@@ -399,6 +440,7 @@ private:
         std::vector<std::string> symbols;
         int64_t start_time_ms = 0;
         int64_t end_time_ms = 0;
+        int64_t anchor_ms = 0;      // 0 = open at start_time_ms
         float speed = 1.0f;
         int64_t timeframe_seconds = 300;
         bool is_archive = false;

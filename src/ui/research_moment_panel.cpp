@@ -38,9 +38,12 @@ constexpr const char* kZeroStandouts =
 constexpr const char* kLead = "%d of %d readings stood out at this minute.";
 constexpr const char* kFiredOne = "1 rulebook condition was firing at this minute.";
 constexpr const char* kFiredMany = "%d rulebook conditions were firing at this minute.";
+// Round-2 tightening (2026-08-24, James: "hard to read, verbose"): one
+// claim, one pointer. The Pro/Research look-back detail moved out of the
+// body; the paywall states it where it gates.
 constexpr const char* kHonesty =
-    "These readings describe this minute, not what followed. A record search counts matching "
-    "minutes and shows what followed. Pro looks back 30 days; Research looks back 90.";
+    "These readings describe this minute, not what followed. Searching counts every minute "
+    "that looked like this, and what followed each one.";
 constexpr const char* kLiveNote =
     "Live read: the newest closed minute, not the minute you pointed at.";
 constexpr const char* kProvisionalNote = "Some readings cover a candle that is still forming.";
@@ -51,7 +54,7 @@ constexpr const char* kMsgNoBridge =
     "This read needs the EdgeDepth page around the terminal. Open Research directly instead.";
 constexpr const char* kMsgTimeout = "The page did not answer. Open Research directly instead.";
 constexpr const char* kMsgBadResult = "The read came back malformed. Open Research directly instead.";
-constexpr const char* kCtaSearch = "Count moments like this";
+constexpr const char* kCtaSearch = "Find moments like this";
 constexpr const char* kCtaLive = "Get a live read";
 constexpr const char* kCtaOpen = "Open in Research";
 constexpr const char* kCtaRetry = "Retry";
@@ -91,7 +94,7 @@ std::string iso_to_header(const std::string& iso) {
     return out + " UTC";
 }
 
-bool primary_button(const char* label, float w) {
+bool primary_button(const char* label, float w, float h = 34.0f) {
     using namespace Theme;
     ImGui::PushStyleColor(ImGuiCol_Button, Tokens::BRAND);
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::BRAND_TX);
@@ -99,7 +102,7 @@ bool primary_button(const char* label, float w) {
     ImGui::PushStyleColor(ImGuiCol_Text, Tokens::BRAND_INK);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Radius::R2);
     ImGui::PushFont(Fonts::ui_semibold());
-    const bool hit = ImGui::Button(label, ImVec2(w, 34.0f));
+    const bool hit = ImGui::Button(label, ImVec2(w, h));
     ImGui::PopFont();
     ImGui::PopStyleVar();
     ImGui::PopStyleColor(4);
@@ -567,7 +570,10 @@ void ResearchMomentPanel::render_body() {
     ImGui::PopStyleColor();
 
     ImGui::Dummy(ImVec2(0.0f, 12.0f));
-    if (primary_button(kCtaSearch, w)) open_handoff(live_read_);
+    // The flagship CTA (2026-08-24): the tallest button in the terminal on
+    // purpose - "find similar" is the whole journey, so it reads as the
+    // panel's one obvious next step.
+    if (primary_button(kCtaSearch, w, 44.0f)) open_handoff(live_read_);
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
     if (ghost_button(kCtaClose, w)) close();
 }

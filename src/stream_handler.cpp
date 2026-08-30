@@ -479,74 +479,70 @@ void StreamManager::send_subscribe(const StreamKey& key) const {
     emscripten_websocket_send_utf8_text(ws_, msg.c_str());
 }
 
+// The one definition of "this client holds a server-side subscription for key".
+// It must agree with the subscribe_* functions above, which are the only callers
+// of send_subscribe:
+//
+//   trades / stats / liquidations / patterns  subscribe on the first handler, so
+//                                             a non-empty vector means subscribed
+//   orderbook                                 subscribes on first use and stores an
+//                                             EMPTY vector purely as a refcount, so
+//                                             PRESENCE is the predicate, not size
+//   candles                                   one subscribe covers candle_subs_ and
+//                                             candle_batch_subs_, so the two are
+//                                             unioned and visited once
+//   volumes                                   subscribe_volume deliberately never
+//                                             sends one ("already subscribed by
+//                                             default"), so it is NOT in this set.
+//                                             Unsubscribing it was a no-op on the
+//                                             box; re-subscribing it on resume
+//                                             would have created a consumer the
+//                                             client never asked for.
+template <typename Fn>
+void StreamManager::for_each_server_subscription(Fn&& fn) const {
+    auto visit_handlers = [&](const auto& subs) {
+        for (const auto& [key, handlers] : subs) {
+            if (!handlers.empty()) fn(key);
+        }
+    };
+    visit_handlers(trade_subs_);
+    visit_handlers(stats_subs_);
+    visit_handlers(liquidation_subs_);
+    visit_handlers(pattern_subs_);
+    // Presence, not size: the vector is always empty here by design.
+    for (const auto& [key, handlers] : orderbook_subs_) {
+        (void)handlers;
+        fn(key);
+    }
+    // One subscribe covers both candle maps, so emit each key once.
+    for (const auto& [key, handlers] : candle_subs_) {
+        if (!handlers.empty()) fn(key);
+    }
+    for (const auto& [key, handlers] : candle_batch_subs_) {
+        if (handlers.empty()) continue;
+        const auto it = candle_subs_.find(key);
+        if (it != candle_subs_.end() && !it->second.empty()) continue;  // already emitted
+        fn(key);
+    }
+}
+
 void StreamManager::update_websocket_handle(EMSCRIPTEN_WEBSOCKET_T ws) {
     ws_ = ws;
     if (live_subscriptions_paused_) return;
-    for (const auto& [key, handlers]: trade_subs_) {
-        if (!handlers.empty()) {
-            send_subscribe(key);
-        }
-    }
-    for (const auto& [key, handlers] : orderbook_subs_) {
-        if (!handlers.empty()) {
-            send_subscribe(key);
-        }
-    }
-    for (const auto& [key, handlers] : stats_subs_) {
-        if (!handlers.empty()) {
-            send_subscribe(key);
-        }
-    }
-    for (const auto& [key, handlers] : liquidation_subs_) {
-        if (!handlers.empty()) {
-            send_subscribe(key);
-        }
-    }
-    for (const auto& [key, handlers] : pattern_subs_) {
-        if (!handlers.empty()) {
-            send_subscribe(key);
-        }
-    }
+    // Re-establish everything the box knew about on the OLD socket. Same set as
+    // pause/resume: the hand-written list this replaced omitted candles entirely,
+    // so a reconnect used to leave the chart with no live candle feed.
+    for_each_server_subscription([this](const StreamKey& key) { send_subscribe(key); });
 }
 
 void StreamManager::pause_live_subscriptions() {
     live_subscriptions_paused_ = true;
-    int count = 0;
-    auto unsub_map = [&](const auto& subs) {
-        for (const auto& [key, handlers] : subs) {
-            if (!handlers.empty()) {
-                send_unsubscribe(key);
-                count++;
-            }
-        }
-    };
-    unsub_map(trade_subs_);
-    unsub_map(orderbook_subs_);
-    unsub_map(candle_subs_);
-    unsub_map(volume_subs_);
-    unsub_map(stats_subs_);
-    unsub_map(liquidation_subs_);
-    unsub_map(pattern_subs_);
+    for_each_server_subscription([this](const StreamKey& key) { send_unsubscribe(key); });
 }
 
 void StreamManager::resume_live_subscriptions() {
     live_subscriptions_paused_ = false;
-    int count = 0;
-    auto resub_map = [&](const auto& subs) {
-        for (const auto& [key, handlers] : subs) {
-            if (!handlers.empty()) {
-                send_subscribe(key);
-                count++;
-            }
-        }
-    };
-    resub_map(trade_subs_);
-    resub_map(orderbook_subs_);
-    resub_map(candle_subs_);
-    resub_map(volume_subs_);
-    resub_map(stats_subs_);
-    resub_map(liquidation_subs_);
-    resub_map(pattern_subs_);
+    for_each_server_subscription([this](const StreamKey& key) { send_subscribe(key); });
 }
 
 void StreamManager::send_unsubscribe(const StreamKey& key) const {
