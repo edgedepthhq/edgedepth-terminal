@@ -82,7 +82,7 @@ Open-source trade aggregators and charting components exist, but complete browse
 - **Orderbook heatmap**: GPU-rendered depth history via a shader-based renderer
 - **Volume profile (VPVR), TPO / Market Profile, footprint**: built client-side from per-price tick volume, so they need a feed that carries it. Every `.edpack` does, which means the Replay Library packs below light all of them up with no account and no backend. A plain live feed does not: the bundled community gateway forwards trades, book and candles, not per-price volume history, so these panels stay empty on it
 - **Liquidation heatmap layers**: the dense liquidation Field, leverage-tier levels, and profile rendering. The Field is computed client-side from candles, so it works on any feed
-- **Market replay**: deterministic replay engine with scrubbing, and self-contained `.edpack` files that play entirely client-side with no server
+- **Market replay**: deterministic replay engine with scrubbing, and self-contained [`.edpack`](docs/EDPACK.md) files that play entirely client-side with no server
 - **Replay Library**: a manifest-driven browser of free, curated `.edpack` recordings for local replay and regression testing
 - **Paper trading**: simulated positions against live data
 - **Docking layout**: drag, split, and persist panel arrangements (ImGui docking)
@@ -132,6 +132,11 @@ recordings; additional picks can be published without rebuilding the terminal.
 The terminal can play a self-contained `.edpack` recording entirely
 client-side: orderbook, tape, liquidations, footprint and volume profile
 included, with nothing but static file hosting behind it.
+
+`.edpack` is EdgeDepth's own deterministic replay container. The format is
+documented in [`docs/EDPACK.md`](docs/EDPACK.md): magic and version gating,
+the protobuf header, the block index, framing, compression, what determinism
+does and does not guarantee, and how a truncated pack fails.
 
 ```
 ?pack=<url-encoded pack URL>&packsym=<symbol>
