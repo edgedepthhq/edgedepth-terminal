@@ -88,6 +88,12 @@ inline constexpr std::array<const char*, 6> FREE_REPLAY_SYMBOLS = {
     "btcusdt", "ethusdt", "solusdt", "xrpusdt", "bnbusdt", "dogeusdt"
 };
 
+// Sanity bound on the host-supplied replay reach. MIRRORS the backend SAFETY
+// ceiling (handler.go defaultMaxReplayLookbackDays, env REPLAY_MAX_LOOKBACK_DAYS),
+// not any tier's product limit. Its only job is to reject an absurd value from a
+// malformed host global; the server enforces the real window.
+inline constexpr int kMaxLookbackDaysSanity = 730;
+
 // Current tier - read once at boot via detect(). Pro by default (dev/standalone).
 inline Tier& current() { static Tier t = Tier::Pro; return t; }
 inline bool  is_pro()  {
@@ -196,9 +202,19 @@ inline void detect() {
     renews_label() = rbuf;
 
     // Backend-authoritative replay reach (window.__EDGEDEPTH_REPLAY_LOOKBACK_DAYS__),
-    // set by the host from the SAME number it mints into the replay token. Clamped
-    // to [1, 90] to mirror handler.go maxReplayLookback; anything absent or absurd
-    // leaves the 30d default rather than advertising reach the backend will refuse.
+    // set by the host from the SAME number it mints into the replay token.
+    // Clamped to [1, kMaxLookbackDaysSanity]; anything absent or absurd leaves
+    // the 30d default rather than advertising reach the backend will refuse.
+    //
+    // The bound used to be 90, mirroring handler.go's old maxReplayLookback.
+    // That constant was doing two jobs, safety bound AND the research tier's
+    // product limit, and backend 8fd0495 split them: the ceiling is now a
+    // 730-day guard against a bad or leaked token, and the web signs a claim
+    // that TRACKS THE CORPUS. Mirroring 90 here silently truncated that claim,
+    // so the terminal offered 90 days while the backend would have served the
+    // whole record. Mirror the SAFETY bound, never the product limit: the
+    // server is the enforcer and a claim it rejects costs one refused request,
+    // while a claim we truncate is reach the user paid for and never sees.
     {
         const int d = EM_ASM_INT({
             try {
@@ -207,7 +223,7 @@ inline void detect() {
             } catch (e) { return 0; }
         });
         if (d > 0) {
-            const int clamped = d > 90 ? 90 : d;
+            const int clamped = d > kMaxLookbackDaysSanity ? kMaxLookbackDaysSanity : d;
             pro_lookback_ms() = static_cast<int64_t>(clamped) * 24LL * 3600LL * 1000LL;
         }
     }
