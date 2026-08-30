@@ -787,8 +787,18 @@ void WatchlistWidget::render_rows() {
                         ImGui::PopFont();
                     }
                 } else {
+                    // Ellipsize on a CHARACTER boundary, not a byte one. The
+                    // Chinese-named perps (龙虾USDT, 牛来USDT) are three bytes
+                    // per glyph, and they are also the widest names here now
+                    // that they render, so they are the ones that reach this
+                    // branch. Cutting mid-sequence hands ImGui half a code
+                    // point to draw. Walk k back off any continuation byte.
                     int k = static_cast<int>(strlen(base));
-                    while (k > 1 && ImGui::CalcTextSize(base, base + k).x + ell_w > avail) --k;
+                    while (k > 0 && ImGui::CalcTextSize(base, base + k).x + ell_w > avail) {
+                        --k;
+                        while (k > 0 &&
+                               (static_cast<unsigned char>(base[k]) & 0xC0) == 0x80) --k;
+                    }
                     dl->AddText(ImVec2(sxl, by), Theme::u32(Theme::Tokens::TX1), base, base + k);
                     dl->AddText(ImVec2(sxl + ImGui::CalcTextSize(base, base + k).x, by),
                                 Theme::u32(Theme::Tokens::TX1), ell);

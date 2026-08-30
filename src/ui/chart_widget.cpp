@@ -599,6 +599,32 @@ void ChartWidget::render() {
         return;
     }
 
+    // Two ChartWidgets on one pair resolve to ONE ImGui window: the docking
+    // identity is "###chart_<ex>_<sym>", so a collision means the pair matches
+    // and the first submission of the frame loses nothing by owning it. Drawing
+    // twice does not stack, it corrupts: the second BeginChild sees BeginCount
+    // != 1, so it neither seeds the parent cursor from the child's position nor
+    // reports the child's size back through ItemSize. That is what leaves the
+    // toolbar painted at the window's bottom edge over a body with no height,
+    // and what strands DC.IsSetPos long enough for End() to fire the
+    // SetCursorPos/SetCursorScreenPos boundary error. Same BeginCount > 1 guard
+    // ImGui uses for its own re-entrant debug windows.
+    //
+    // The duplicate itself is a widget-lifetime defect one layer up, in
+    // whoever pushed the second widget. This guard keeps the frame honest; it
+    // does not excuse creating the second widget, so it says so once.
+    if (ImGui::GetCurrentWindow()->BeginCount > 1) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            std::printf("[chart] duplicate ChartWidget for %s: '%s' begun twice "
+                        "in one frame, second submission skipped\n",
+                        pair_.symbol.c_str(), title_.c_str());
+        }
+        ImGui::End();
+        return;
+    }
+
     render_controls();
     crosshair_state_ = CrosshairState();
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
@@ -3413,6 +3439,19 @@ void ChartWidget::render_controls() {
     // the bar's bottom so the chart begins directly below the 44px band.
     dl->AddLine(ImVec2(bp.x, bp.y + bar_h - 0.5f), ImVec2(bp.x + ww, bp.y + bar_h - 0.5f),
                 Theme::u32(Theme::Tokens::BD1), 1.0f);
+    // Claim the band as a real item BEFORE dropping the cursor to its bottom.
+    // The bar is painted straight to the window draw list, so nothing has grown
+    // the window's content extent over it, and the cursor move below is then a
+    // bare SetCursorScreenPos past CursorMaxPos. ImGui only tolerates that while
+    // some LATER item grows the boundary; when none does, End() fires "Code uses
+    // SetCursorPos()/SetCursorScreenPos() to extend window/parent boundaries".
+    // That happens whenever this window is begun twice in one frame (two chart
+    // widgets sharing "###chart_<ex>_<sym>"): the second BeginChild/EndChild
+    // pair sees BeginCount != 1 and skips the ItemSize() that would have cleared
+    // DC.IsSetPos. The Dummy makes the extent honest, so the cursor move is a
+    // move inside known bounds rather than a request to extend them.
+    ImGui::SetCursorScreenPos(bp);
+    ImGui::Dummy(ImVec2(ww, bar_h));
     ImGui::SetCursorScreenPos(ImVec2(bp.x, bp.y + bar_h));
 
     ImGui::PopStyleVar(2);

@@ -269,9 +269,35 @@ namespace Theme {
         // raster multiply, so atlas crispness is unaffected.
         constexpr float ui_scale = 1.15f;
 
+        // CJK fallback. Binance lists meme perps whose ticker is Chinese
+        // (today 龙虾USDT and 牛来USDT). Neither Hanken Grotesk nor JetBrains
+        // Mono carries a CJK glyph, so those names drew as ImGui's "?" fallback
+        // wherever a symbol is written: watchlist rows, the symbol picker, the
+        // pair pill. Merged as a SECOND SOURCE on every face rather than kept
+        // as a separate font, so callers that already picked a face get the
+        // glyph without having to know they needed one. The atlas is dynamic
+        // (the GL backend sets ImGuiBackendFlags_RendererHasTextures), so an
+        // unused source costs nothing until a glyph from it is drawn.
+        //
+        // The file is subset to the codepoints the live universe actually
+        // lists - 4 of them, 2 KB - because this is preloaded into index.data
+        // on every cold boot and a general Chinese font is ~780 KB even cut
+        // down to GB2312 level 1. scripts/gen-cjk-subset.sh regenerates it; a
+        // ticker listed after that run reverts to "?" until it is rerun.
+        static const ImWchar cjk_ranges[] = {
+            0x2E80, 0x9FFF,  // CJK radicals through unified ideographs
+            0,
+        };
+        ImFontConfig cjk_cfg = cfg;
+        cjk_cfg.MergeMode = true;
+
         auto add = [&](const char* path, float logical_px) -> ImFont* {
-            ImFont* f = io.Fonts->AddFontFromFileTTF(
-                path, logical_px * ui_scale * raster_scale, &cfg, glyph_ranges);
+            const float px = logical_px * ui_scale * raster_scale;
+            ImFont* f = io.Fonts->AddFontFromFileTTF(path, px, &cfg, glyph_ranges);
+            if (f) {
+                io.Fonts->AddFontFromFileTTF("/fonts/NotoSansCJK-Subset.ttf", px,
+                                             &cjk_cfg, cjk_ranges);
+            }
             return f;
         };
 
