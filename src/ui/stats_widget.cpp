@@ -63,11 +63,12 @@ StatsWidget::StatsWidget(const Terminal::Pair& pair, const AppContext& ctx, cons
             static_cast<StatsWidget*>(ptr)->handle_stat(s);
         }
     };
-    ctx_.stream_mgr().subscribe_stats(stream_key_, handler);
+    subscribed_streams_ = &ctx_.stream_mgr();
+    subscribed_streams_->subscribe_stats(stream_key_, handler);
 }
 
 StatsWidget::~StatsWidget() {
-    ctx_.stream_mgr().unsubscribe_stats(stream_key_, this);
+    if (subscribed_streams_) subscribed_streams_->unsubscribe_stats(stream_key_, this);
 }
 
 void StatsWidget::handle_stat(const Terminal::Stat& stat) {

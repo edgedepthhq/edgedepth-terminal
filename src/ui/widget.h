@@ -83,6 +83,23 @@ public:
 
 protected:
     Widget() = default;
+
+    // The StreamManager this widget SUBSCRIBED to.
+    //
+    // AppContext is one shared struct, and a replay swaps its manager pointers
+    // IN PLACE (main.cpp: app_ctx.streams = replay_ctx->streams on the way in,
+    // build_app_context() on the way out). A destructor that re-resolves
+    // ctx_.stream_mgr() therefore asks a DIFFERENT manager to forget a handler
+    // it never held: the subscription stays behind in the first manager with a
+    // widget_ptr that is about to dangle, and the second manager loses nothing.
+    // Pin the manager at subscribe time and unsubscribe through this pointer.
+    //
+    // It stays valid because ReplayManager retires a replay context for a frame
+    // instead of freeing it inside the swap callback, so no widget is ever
+    // erased after the manager it subscribed to has gone. See
+    // ReplayManager::release_retired_context.
+    StreamManager* subscribed_streams_ = nullptr;
+
     // Track visibility for optimization
     bool was_visible_last_frame_ = false;
     std::string title_suffix_;  // Optional suffix for ImGui ID uniqueness

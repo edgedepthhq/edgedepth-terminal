@@ -109,12 +109,13 @@ DOMWidget::DOMWidget(const Terminal::Pair& pair, const AppContext& ctx,
     , levels_per_side_(levels_per_side)
     , fmt_(SymbolRegistry::instance().get_formatter(pair.exchange, pair.symbol))
 {
-    ctx_.stream_mgr().subscribe_orderbook(stream_key_);
+    subscribed_streams_ = &ctx_.stream_mgr();
+    subscribed_streams_->subscribe_orderbook(stream_key_);
     trade_accumulator_.init(pair, ctx_.stream_mgr(), tick_size);
 }
 
 DOMWidget::~DOMWidget() {
-    ctx_.stream_mgr().unsubscribe_orderbook(stream_key_, this);
+    if (subscribed_streams_) subscribed_streams_->unsubscribe_orderbook(stream_key_, this);
 }
 
 void DOMWidget::update() {

@@ -1667,7 +1667,26 @@ void ReplayManager::destroy_replay_data_context() {
         on_context_swap_(nullptr);
     }
 
-    replay_ctx_.reset();  // RAII destroys all replay managers
+    // NOT reset() here. The callback above only MARKS the replay widgets
+    // closed; the frame loop erases them at the end of the frame, and their
+    // destructors unsubscribe through the manager they subscribed to. Freeing
+    // that manager now makes every one of those destructors a use-after-free.
+    // Park the context and let release_retired_context() free it a frame later,
+    // once the sweep has run. Anything already retired is safe to drop: a
+    // second exit cannot happen inside the same frame as the first.
+    retired_ctx_   = std::move(replay_ctx_);
+    retired_frame_ = ImGui::GetFrameCount();
+}
+
+void ReplayManager::release_retired_context() {
+    if (!retired_ctx_) return;
+    // Strictly LATER frame, never the same one. The exit can be triggered
+    // before the widget pass (the topbar Live button), after it (Escape in
+    // process_keyboard_shortcuts) or from inside it (the replay control bar),
+    // and only a frame boundary is after the sweep in all three cases.
+    if (ImGui::GetFrameCount() <= retired_frame_) return;
+    retired_ctx_.reset();  // RAII destroys all replay managers
+    retired_frame_ = -1;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

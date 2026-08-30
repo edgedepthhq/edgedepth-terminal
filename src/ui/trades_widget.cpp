@@ -21,11 +21,12 @@ TradesWidget::TradesWidget(const Terminal::Pair& pair, const AppContext& ctx, co
             static_cast<TradesWidget*>(ptr)->handle_trade(t);
         }
     };
-    ctx_.stream_mgr().subscribe_trades(stream_key_, handler);
+    subscribed_streams_ = &ctx_.stream_mgr();
+    subscribed_streams_->subscribe_trades(stream_key_, handler);
 }
 
 TradesWidget::~TradesWidget() {
-    ctx_.stream_mgr().unsubscribe_trades(stream_key_, this);
+    if (subscribed_streams_) subscribed_streams_->unsubscribe_trades(stream_key_, this);
 }
 
 // For data-driven events.

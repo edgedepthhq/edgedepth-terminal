@@ -16,11 +16,12 @@ OrderbookWidget::OrderbookWidget(const Terminal::Pair &pair, const AppContext& c
     , price_went_up_(true)
     , previous_price_(0.0)
 {
-    ctx_.stream_mgr().subscribe_orderbook(stream_key_);
+    subscribed_streams_ = &ctx_.stream_mgr();
+    subscribed_streams_->subscribe_orderbook(stream_key_);
 }
 
 OrderbookWidget::~OrderbookWidget() {
-    ctx_.stream_mgr().unsubscribe_orderbook(stream_key_, this);
+    if (subscribed_streams_) subscribed_streams_->unsubscribe_orderbook(stream_key_, this);
 }
 
 

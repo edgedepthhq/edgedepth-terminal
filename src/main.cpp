@@ -667,6 +667,61 @@ void check_initialization() {
     }
 }
 
+// ─── Live order-flow widgets torn down by a replay ───────────────────────────
+// Entering a replay DESTROYS the live DOM and tape. They are not hidden: the
+// swap sets is_open = false and update_and_render_widgets ends every frame with
+// erase_if(!is_open), so the object is gone. The exit side used to "restore"
+// them by setting is_open = true on widgets that no longer existed, which is
+// why leaving a replay left the chart and watchlist sitting over empty space.
+//
+// Rebuilding is the only thing that can work, and it cannot happen inside the
+// context-swap callback: constructing a widget subscribes through a stream
+// manager and pushes into g_app.widgets, and stop() is reachable from ImGui
+// item handlers. It is drained at the same safe point as the +widget queue.
+namespace {
+struct LiveFlowRebuild {
+    bool armed = false;
+    bool want_dom = false;
+    bool want_trades = false;
+    Terminal::Pair pair{};
+};
+LiveFlowRebuild g_live_flow_rebuild;
+}  // namespace
+
+void resolve_live_flow_widget_rebuild() {
+    if (!g_live_flow_rebuild.armed) return;
+    // Wait for the sweep to actually retire the replay-owned pair. Building now
+    // would put two widgets on one ImGui docking identity, and that does not
+    // stack, it corrupts the frame (see the BeginCount guard in
+    // ChartWidget::render).
+    const bool replay_widgets_gone = std::none_of(
+        g_app.widgets.begin(), g_app.widgets.end(),
+        [](const auto& w) { return w && w->is_replay_widget; });
+    if (!replay_widgets_gone) return;
+
+    g_live_flow_rebuild.armed = false;
+    const Terminal::Pair pair = g_live_flow_rebuild.pair;
+    if (pair.symbol.empty()) return;
+
+    const auto* meta = SymbolRegistry::instance().get(pair.exchange, pair.symbol);
+    const double dom_tick = meta ? meta->tick_size : 0.1;
+    auto fmt = SymbolRegistry::instance().get_formatter(pair.exchange, pair.symbol);
+
+    // Same order and constructor arguments as the boot layout, so the rebuilt
+    // pair inherits the dock nodes the originals held (ImGui keys them by the
+    // window title, which is derived from the pair).
+    if (g_live_flow_rebuild.want_dom) {
+        g_app.widgets.push_back(
+            std::make_unique<DOMWidget>(pair, g_app.app_ctx, dom_tick, 20));
+    }
+    if (g_live_flow_rebuild.want_trades) {
+        g_app.widgets.push_back(
+            std::make_unique<TradesWidget>(pair, g_app.app_ctx, fmt));
+    }
+    g_live_flow_rebuild.want_dom = false;
+    g_live_flow_rebuild.want_trades = false;
+}
+
 // Embedded lesson mode: start the replay for the lesson's window exactly once,
 // as soon as BOTH the terminal is initialized AND the lesson doc has parsed.
 // These race - the lesson arrives via async XHR that can land before or after
@@ -1288,6 +1343,7 @@ void main_loop() {
     // host mode; no-op when nothing is queued. Must be OUTSIDE the widget render
     // loop below (it mutates g_app.widgets).
     Menu::resolve_widget_add_request(g_app.widgets, g_app.app_ctx);
+    resolve_live_flow_widget_rebuild();  // same safety requirement
     LayoutManager::render_dockspace(nullptr,
         g_initial_route.exchange, g_initial_route.symbol);
     g_profiler.end("Shell+Dock");
@@ -1320,6 +1376,10 @@ void main_loop() {
             g_app.replay_mgr->render_control_bar();
             g_app.replay_mgr->render_replay_launcher();
         }
+        // LAST in the frame, after every stop() site: the widget sweep above has
+        // run, so a context retired on an earlier frame has no subscribers left
+        // and its managers can go.
+        g_app.replay_mgr->release_retired_context();
         // Clip recorder (CLIP_FACTORY P1): authoritative 3:00 cap, auto-stop when
         // the replay session dies, and the burned-in watermark badge (foreground
         // draw list). No-op unless recording - and v1 recordings can only start
@@ -1685,12 +1745,32 @@ int main(int, char**) {
                 }
             }
 
-            // Hide live widgets that conflict with replay (subscription-based widgets).
-            // They'll be restored on replay exit.
+            // Tear the live order-flow widgets down: they subscribe to the live
+            // managers and would keep drawing live data over a replay. Note this
+            // DESTROYS them (erase_if(!is_open) at the end of the frame), it does
+            // not hide them, so record what went so the exit side can rebuild it.
+            // Their destructors unsubscribe through the manager they subscribed
+            // to, which is the LIVE one, so tearing down after the pointer swap
+            // above is still correct.
+            // A rebuild can still be owed from a previous exit if the user
+            // re-entered a replay within a frame or two of leaving one. Do not
+            // clear that debt: the widgets it owes are exactly the ones this
+            // teardown would otherwise have found and recorded.
+            if (!g_live_flow_rebuild.armed) {
+                g_live_flow_rebuild.want_dom = false;
+                g_live_flow_rebuild.want_trades = false;
+            }
             for (auto& w : g_app.widgets) {
-                if (w && (w->type() == WidgetType::Trades || w->type() == WidgetType::DOM)) {
+                if (w && w->type() == WidgetType::DOM) {
+                    g_live_flow_rebuild.want_dom = true;
+                    g_live_flow_rebuild.pair = static_cast<DOMWidget*>(w.get())->pair();
                     w->is_open = false;
-                    w->is_replay_widget = false;  // Mark as NOT replay (so we know to restore)
+                    w->is_replay_widget = false;  // not replay-owned: it predates the swap
+                } else if (w && w->type() == WidgetType::Trades) {
+                    g_live_flow_rebuild.want_trades = true;
+                    g_live_flow_rebuild.pair = static_cast<TradesWidget*>(w.get())->pair();
+                    w->is_open = false;
+                    w->is_replay_widget = false;
                 }
             }
 
@@ -1728,7 +1808,11 @@ int main(int, char**) {
                 g_app.widgets.push_back(std::move(dom_w));
             }
         } else {
-            // Close replay-created widgets, restore hidden live widgets.
+            // Close replay-created widgets and ARM the live rebuild. There is
+            // nothing here to "restore": the live DOM and tape were destroyed on
+            // the way in, so setting is_open = true on them matched nothing. The
+            // rebuild runs at the safe drain point once this sweep has removed
+            // the replay-owned pair, see resolve_live_flow_widget_rebuild.
             bool closed_replay_chart = false;
             for (auto& w : g_app.widgets) {
                 if (!w) continue;
@@ -1736,11 +1820,10 @@ int main(int, char**) {
                     closed_replay_chart = closed_replay_chart ||
                                           w->type() == WidgetType::Chart;
                     w->is_open = false;  // Will be erased by cleanup loop
-                } else if (!w->is_open &&
-                           (w->type() == WidgetType::Trades || w->type() == WidgetType::DOM)) {
-                    w->is_open = true;  // Restore hidden live widget
                 }
             }
+            g_live_flow_rebuild.armed =
+                g_live_flow_rebuild.want_dom || g_live_flow_rebuild.want_trades;
             if (closed_replay_chart) LayoutManager::reset_layout();
             g_app.build_app_context();
             // Reset chart overlay subscriptions so they re-subscribe on live

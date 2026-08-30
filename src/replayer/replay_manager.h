@@ -461,6 +461,24 @@ private:
     // Owns a complete set of managers for replay data isolation.
     // Created on replay_joined, destroyed on stop/error/reset.
     std::unique_ptr<DataContext> replay_ctx_;
+
+    // A replay context that has been swapped OUT but not yet freed.
+    //
+    // Widgets that subscribed to these managers are still alive when the swap
+    // callback returns: the callback only marks them closed, and the frame loop
+    // erases them at the end of the frame. Their destructors unsubscribe
+    // through a pinned manager pointer, so freeing the managers here is a
+    // use-after-free. Measured, on the plain library-replay exit: erase_if ->
+    // ~DOMWidget -> ~TradeAtPriceAccumulator -> unsubscribe_trades ->
+    // map::erase -> abort inside free(). 2 of 5 exits died that way.
+    //
+    // stop() is reachable from several places, some of them inside ImGui item
+    // handlers, so the callback cannot simply erase the widgets itself. The
+    // context is parked here instead and released once a whole frame has
+    // passed, which is at least one completed widget sweep later whichever
+    // call site triggered the exit.
+    std::unique_ptr<DataContext> retired_ctx_;
+    int                          retired_frame_ = -1;
     ContextSwapFn on_context_swap_;
     RewindFn on_rewind_;
 
@@ -540,6 +558,14 @@ private:
     // Create/destroy the replay DataContext
     void create_replay_data_context();
     void destroy_replay_data_context();
+
+public:
+    // Frees a retired replay context once the widget sweep that destroys its
+    // subscribers has run. Call once per frame from the main loop, AFTER the
+    // widget update/render/erase pass. Cheap no-op when nothing is retired.
+    void release_retired_context();
+
+private:
 
     // True once the replay context has real data: candle history populated and,
     // when the effective session grant includes orderbook, an OB seed received.
