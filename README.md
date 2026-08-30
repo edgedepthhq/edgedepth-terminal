@@ -1,6 +1,6 @@
 # EdgeDepth Terminal
 
-**An open-source orderflow terminal and local market-data replay/testing workbench that runs in your browser at 170+ FPS.**
+**An open-source orderflow terminal and local market-data replay/testing workbench that runs in your browser at 180 FPS.**
 
 C++20 compiled to WebAssembly. Dear ImGui + ImPlot for immediate-mode rendering, SDL3 + WebGL2 underneath, protobuf over WebSocket for data. No Electron, no DOM in the hot path, no garbage collector between you and the tape.
 
@@ -70,7 +70,7 @@ and `:latest` moves whenever a change lands on the default branch.
 
 ## Why this exists
 
-Web trading UIs are usually React apps fighting the DOM for every orderbook tick. This terminal takes the approach used by native trading software, an immediate-mode GUI redrawn every frame on the GPU, and ships it through WebAssembly. A full orderflow stack (chart, DOM ladder, tape, heatmap) renders at 170+ FPS in a browser tab with frame times around 5ms.
+Web trading UIs are usually React apps fighting the DOM for every orderbook tick. This terminal takes the approach used by native trading software, an immediate-mode GUI redrawn every frame on the GPU, and ships it through WebAssembly. A full orderflow stack (chart, DOM ladder, tape, heatmap) renders at 180 FPS in a browser tab with frame times around 5.7ms.
 
 Open-source trade aggregators and charting components exist, but complete browser orderflow terminals in this class are rare. Most mature orderflow tools are closed and paid. This one is open: read it, build it, point it at your own data.
 
