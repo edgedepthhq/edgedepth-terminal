@@ -79,6 +79,10 @@ constexpr bool ct_allows_time_overlays(ChartType t) {
 
 class ChartWidget : public Widget {
 public:
+    // The pair this chart draws. A replay of a different symbol replaces the
+    // chart, and the exit rebuild has to restore the pair that was live.
+    [[nodiscard]] const Terminal::Pair& pair() const { return pair_; }
+
     ChartWidget(const Terminal::Pair& pair,
                 const AppContext& ctx,
                 double tick_size);

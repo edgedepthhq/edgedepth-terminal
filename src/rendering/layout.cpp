@@ -11,6 +11,8 @@ float LayoutManager::status_reserve = 0.0f;
 float LayoutManager::left_reserve = 0.0f;
 std::string LayoutManager::pending_exchange;
 std::string LayoutManager::pending_symbol;
+std::string LayoutManager::layout_exchange;
+std::string LayoutManager::layout_symbol;
 
 void LayoutManager::setup_default_layout(const std::string& exchange, const std::string& symbol) {
     ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
@@ -54,6 +56,8 @@ void LayoutManager::setup_default_layout(const std::string& exchange, const std:
 
         ImGui::DockBuilderFinish(dockspace_id);
         is_initialized = true;
+        layout_exchange = exchange;
+        layout_symbol = symbol;
         return;
     }
 
@@ -83,6 +87,8 @@ void LayoutManager::setup_default_layout(const std::string& exchange, const std:
 
     ImGui::DockBuilderFinish(dockspace_id);
     is_initialized = true;
+    layout_exchange = exchange;
+    layout_symbol = symbol;
 }
 
 void LayoutManager::render_dockspace(const std::function<void()>& menu_callback,
@@ -130,6 +136,11 @@ void LayoutManager::render_dockspace(const std::function<void()>& menu_callback,
     }
 
     ImGui::End();
+}
+
+bool LayoutManager::layout_matches(const std::string& exchange,
+                                   const std::string& symbol) {
+    return is_initialized && layout_exchange == exchange && layout_symbol == symbol;
 }
 
 void LayoutManager::reset_layout() {

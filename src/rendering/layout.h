@@ -12,6 +12,15 @@ public:
     static void reset_layout();
     static void reset_layout_for(const std::string& exchange, const std::string& symbol);
     static bool is_initialized;
+
+    // True when the dock tree currently in place was built for this pair.
+    //
+    // setup_default_layout docks by EXACT title string ("DOM <ex> <sym>",
+    // "T <ex> <sym>", "Chart ...###chart_<ex>_<sym>"), so a layout built for one
+    // symbol has no node for another symbol's windows and they come up floating.
+    // Callers that swap the symbol under a live layout must ask this rather than
+    // whether a chart merely exists, which is symbol-blind.
+    static bool layout_matches(const std::string& exchange, const std::string& symbol);
     static float top_reserve;     // Pixels reserved at top (topbar + statsbar)
     static float bottom_reserve;  // Pixels reserved at bottom (e.g., replay control bar)
     static float status_reserve;  // Pixels reserved for the bottom status bar (telemetry);
@@ -21,4 +30,6 @@ public:
 private:
     static std::string pending_exchange;
     static std::string pending_symbol;
+    static std::string layout_exchange;
+    static std::string layout_symbol;
 };

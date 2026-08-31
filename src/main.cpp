@@ -683,6 +683,7 @@ struct LiveFlowRebuild {
     bool armed = false;
     bool want_dom = false;
     bool want_trades = false;
+    bool want_chart = false;   // set when a replay of another symbol replaced it
     Terminal::Pair pair{};
 };
 LiveFlowRebuild g_live_flow_rebuild;
@@ -706,6 +707,18 @@ void resolve_live_flow_widget_rebuild() {
     const auto* meta = SymbolRegistry::instance().get(pair.exchange, pair.symbol);
     const double dom_tick = meta ? meta->tick_size : 0.1;
     auto fmt = SymbolRegistry::instance().get_formatter(pair.exchange, pair.symbol);
+
+    // A replay of a different symbol replaced the chart, so the dock tree in
+    // place is keyed on the REPLAY pair's titles. Re-key it for the live pair
+    // before the windows are submitted, or they come up floating for the same
+    // reason the library launch used to float its DOM. render_dockspace picks
+    // the queued pair up on the very next call, which is the line after this.
+    if (g_live_flow_rebuild.want_chart) {
+        LayoutManager::reset_layout_for(pair.exchange, pair.symbol);
+        g_app.widgets.push_back(
+            std::make_unique<ChartWidget>(pair, g_app.app_ctx, dom_tick));
+        g_live_flow_rebuild.want_chart = false;
+    }
 
     // Same order and constructor arguments as the boot layout, so the rebuilt
     // pair inherits the dock nodes the originals held (ImGui keys them by the
@@ -1759,6 +1772,7 @@ int main(int, char**) {
             if (!g_live_flow_rebuild.armed) {
                 g_live_flow_rebuild.want_dom = false;
                 g_live_flow_rebuild.want_trades = false;
+                g_live_flow_rebuild.want_chart = false;
             }
             for (auto& w : g_app.widgets) {
                 if (w && w->type() == WidgetType::DOM) {
@@ -1781,15 +1795,35 @@ int main(int, char**) {
                 const auto* meta = SymbolRegistry::instance().get(replay_pair.exchange, replay_pair.symbol);
                 double dom_tick = meta ? meta->tick_size : 0.1;
 
-                // A pack can be the terminal's first data source. In that zero-feed
-                // path there is no live chart to swap onto the replay managers, so
-                // create a replay-owned chart and rebuild the dock for this symbol.
-                const bool has_chart = std::any_of(
-                    g_app.widgets.begin(), g_app.widgets.end(), [](const auto& widget) {
-                        return widget && widget->is_open &&
-                               widget->type() == WidgetType::Chart;
-                    });
-                if (!has_chart) {
+                // The chart has to BELONG to the replay pair, not merely exist.
+                // The old guard asked "is any chart open", which is symbol-blind,
+                // and every library pack is a different symbol from the live boot
+                // symbol. So a library launch kept the live btcusdt chart and drew
+                // TUT into it: the panel title said btcusdt, the on-chart badge
+                // said BTCUSDT, and the dock tree stayed keyed on
+                // "DOM binancef btcusdt" while the swap created
+                // "DOM binancef tutusdt", which is why the DOM came up floating
+                // over the watchlist with no tape at all. The `?pack=` path looked
+                // fine only because main.cpp rewrites the route symbol before any
+                // widget is built, so its layout already matched.
+                //
+                // Ask the layout what pair it was BUILT for.
+                if (!LayoutManager::layout_matches(replay_pair.exchange,
+                                                   replay_pair.symbol)) {
+                    // Retire charts built for another pair. This DESTROYS them
+                    // (erase_if(!is_open) at the end of the frame) rather than
+                    // hiding them, which is what is wanted here: they are being
+                    // replaced. Record the pair so the exit rebuild can restore
+                    // the chart that was live.
+                    for (auto& w : g_app.widgets) {
+                        if (!w || w->type() != WidgetType::Chart) continue;
+                        if (!w->is_replay_widget) {
+                            g_live_flow_rebuild.want_chart = true;
+                            g_live_flow_rebuild.pair =
+                                static_cast<ChartWidget*>(w.get())->pair();
+                        }
+                        w->is_open = false;
+                    }
                     LayoutManager::reset_layout_for(replay_pair.exchange, replay_pair.symbol);
                     auto chart_w = std::make_unique<ChartWidget>(
                         replay_pair, g_app.app_ctx, dom_tick);
@@ -1822,9 +1856,14 @@ int main(int, char**) {
                     w->is_open = false;  // Will be erased by cleanup loop
                 }
             }
-            g_live_flow_rebuild.armed =
-                g_live_flow_rebuild.want_dom || g_live_flow_rebuild.want_trades;
-            if (closed_replay_chart) LayoutManager::reset_layout();
+            g_live_flow_rebuild.armed = g_live_flow_rebuild.want_dom ||
+                                        g_live_flow_rebuild.want_trades ||
+                                        g_live_flow_rebuild.want_chart;
+            // No blind reset_layout() here. It cleared the dock tree without
+            // queueing a pair, so the rebuild had nothing to key on; the chart
+            // arm below re-docks for the pair that was live instead.
+            g_live_flow_rebuild.want_chart =
+                g_live_flow_rebuild.want_chart && closed_replay_chart;
             g_app.build_app_context();
             // Reset chart overlay subscriptions so they re-subscribe on live
             for (auto& w : g_app.widgets) {
