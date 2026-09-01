@@ -83,8 +83,8 @@ public:
     void init(const Terminal::Pair& pair, StreamManager& stream_mgr, double tick_size) {
         pair_ = pair;
         stream_mgr_ = &stream_mgr;
-        tick_size_ = tick_size;
-        levels_ = LevelMap(64, PriceHash(tick_size), PriceEqual(tick_size));
+        tick_size_ = safe_tick(tick_size);
+        levels_ = LevelMap(64, PriceHash(tick_size_), PriceEqual(tick_size_));
         last_reset_ms_ = now_ms();
 
         stream_key_ = {pair, Terminal::Stream::Trades, 0};
@@ -170,6 +170,24 @@ public:
     // (DOM row cache) use it to skip reformatting when nothing changed.
     uint64_t revision() const { return revision_; }
 
+    // Re-key the levels onto a new tick grid. The instrument's tick can land
+    // after the widget is built (metadata fetch, pack header), and every key in
+    // levels_ was hashed on the OLD grid, so the map has to be rebuilt rather
+    // than reinterpreted. Keeps the stream subscription: only the buckets go.
+    void set_tick_size(double tick_size) {
+        const double t = safe_tick(tick_size);
+        if (t == tick_size_) return;
+        tick_size_ = t;
+        levels_ = LevelMap(64, PriceHash(t), PriceEqual(t));
+        max_buy_volume_ = 0.0;
+        max_sell_volume_ = 0.0;
+        max_delta_abs_ = 0.0;
+        total_buy_ = 0.0;
+        total_sell_ = 0.0;
+        total_trades_ = 0;
+        revision_++;
+    }
+
 private:
     using LevelMap = std::unordered_map<double, TradeAtPriceLevel, PriceHash, PriceEqual>;
 
@@ -196,6 +214,12 @@ private:
         return std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
     }
+
+    // An unknown tick (0) must never reach the hasher: price/0 is inf and the
+    // int64 cast in PriceHash is then undefined. Until the real tick binds via
+    // set_tick_size, bucket at a grid finer than any real instrument, which is
+    // the same thing as not bucketing at all.
+    static double safe_tick(double t) { return t > 0.0 ? t : 1e-9; }
 
     double round_to_tick(double price) const {
         return std::round(price / tick_size_) * tick_size_;

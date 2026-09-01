@@ -7,6 +7,7 @@
 #include "replay_manager.h"
 #include "core/education_boot.h"
 #include "core/message_handler.h"
+#include "core/symbol_metadata.h"
 #include "core/message_parser.h"
 #include "stream_handler.h"
 
@@ -304,6 +305,17 @@ bool PackReplayEngine::parse_header_and_join() {
     prefix_buf_.clear();
     prefix_buf_.shrink_to_fit();  // header is parsed; drop the staging buffer
     header_ready_ = true;
+
+    // A pack carries the instrument's own tick (v2 header, field 14), and it
+    // arrives with data the session already had to download. Seed the registry
+    // from it so a /demo session does not depend on winning a race against the
+    // 500 KB symbols/metadata fetch: without this the DOM built its ladder on
+    // a placeholder grid and never repaired it. Never overwrites an API entry,
+    // and the epoch bump rebinds every widget already on screen.
+    if (header_.tick_size() > 0.0) {
+        SymbolRegistry::instance().seed_tick(header_.exchange(), header_.symbol(),
+                                             header_.tick_size());
+    }
 
     // Anchor the clock at the window start - the box's playback loop starts
     // running on join; the client's Buffering gate holds only the DISPLAY.

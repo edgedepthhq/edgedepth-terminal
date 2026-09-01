@@ -130,7 +130,11 @@ ChartWidget::ChartWidget(
     // chart stays docked across TF changes (matches layout.cpp's chart dock id).
     title_ = "Chart " + pair.exchange + " " + pair.symbol + " " + timeframe_label_ +
              "###chart_" + pair.exchange + "_" + pair.symbol;
-    fmt_ = PriceFormatter::from_tick_and_step(tick_size_, 0.001);
+    // tick_size_ == 0 means the registry has not answered for this pair yet.
+    // The axis still has to print something, so it runs on price-magnitude
+    // precision until refresh_instrument() binds the exchange's own.
+    fmt_ = tick_size_ > 0.0 ? PriceFormatter::from_tick_and_step(tick_size_, 0.001)
+                            : PriceFormatter{};
 
     // P2e: the census layer defaults ON for HL-native pairs - there the census IS
     // the ground-truth predictive layer (the modelled heatmap has no HL publisher).
@@ -240,8 +244,27 @@ std::string ChartWidget::timeframe_to_string(int64_t seconds) {
 
 
 // Frame Update
+void ChartWidget::refresh_instrument() {
+    const auto& reg = SymbolRegistry::instance();
+    const double tick = reg.tick_or_zero(pair_.exchange, pair_.symbol);
+    if (tick <= 0.0 || tick == tick_size_) return;
+    tick_size_ = tick;
+    fmt_ = reg.get_formatter(pair_.exchange, pair_.symbol);
+    // Renko bricks are counted in TICKS and frozen once resolved, so a brick
+    // resolved against no grid has to be re-resolved against the real one.
+    renko_resolved_ticks_ = 0;
+    renko_sig_size_ = -1.0;
+}
+
 void ChartWidget::update() {
     ProfileScope _ps("ChartUpd");
+    // Provisional precision while the instrument is unknown: better a chart
+    // axis at price-magnitude precision than one printing 0.24 three rows
+    // running. Replaced wholesale by refresh_instrument().
+    if (!fmt_.resolved) {
+        const double px = ctx_.candle_mgr().last_close_price();
+        if (px > 0.0) fmt_ = PriceFormatter::provisional_for_price(px);
+    }
     if (chart_type_ == ChartType::Renko) {
         // Renko's last_visible_range_.X is a BRICK-INDEX domain - never feed that
         // to CandleManager (its scroll-load thresholds are timestamps). Use the
@@ -1286,7 +1309,7 @@ double ChartWidget::renko_resolved_size() {
     // freezing avoids that). A fixed %-of-price default was ~6x too small on a
     // volatile symbol, which is what produced the wall of tiny, noisy bricks.
     const double atr = renko_atr(14);
-    if (atr > 0.0) {
+    if (atr > 0.0 && tick_size_ > 0.0) {
         renko_resolved_ticks_ = std::max(1, static_cast<int>(std::llround(atr / tick_size_)));
         return static_cast<double>(renko_resolved_ticks_) * tick_size_;
     }

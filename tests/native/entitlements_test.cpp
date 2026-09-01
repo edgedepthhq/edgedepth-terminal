@@ -329,6 +329,15 @@ void test_authentication_is_not_the_same_question_as_tier() {
     reset_state();
 }
 
+void test_pricing_href_preserves_billing_choice() {
+    expect_eq(Entitlements::pricing_href("yearly"),
+              "https://edgedepth.com/pricing?billing=yearly", "annual pricing review");
+    expect_eq(Entitlements::pricing_href("monthly"),
+              "https://edgedepth.com/pricing?billing=monthly", "monthly pricing review");
+    expect_eq(Entitlements::pricing_href("unknown"),
+              "https://edgedepth.com/pricing?billing=yearly", "unknown period defaults yearly");
+}
+
 }  // namespace
 
 int main() {
@@ -339,6 +348,7 @@ int main() {
     test_pro_reach_follows_the_backend_injected_lookback();
     test_symbol_and_speed_gates();
     test_authentication_is_not_the_same_question_as_tier();
+    test_pricing_href_preserves_billing_choice();
 
     if (failures != 0) {
         std::fprintf(stderr, "%d failure(s)\n", failures);

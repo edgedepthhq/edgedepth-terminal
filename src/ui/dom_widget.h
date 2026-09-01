@@ -39,6 +39,11 @@ public:
     WidgetType type() const override { return WidgetType::DOM; }
     const char* title() const override { return title_.c_str(); }
 
+    // The ladder IS the tick grid, so a DOM built before the registry answered
+    // holds no usable grid at all (tick_size_ == 0) and says so on screen until
+    // this binds the real one. See Widget::refresh_instrument.
+    void refresh_instrument() override;
+
     void on_rewind(int64_t /*cutoff_ms*/) override {
         trade_accumulator_.reset();
         max_bid_size_ = 0.0;

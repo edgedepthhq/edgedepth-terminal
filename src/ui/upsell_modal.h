@@ -66,6 +66,7 @@ private:
 
     bool     want_open_ = false;      // latched by open(), consumed by render()
     bool     open_      = false;      // popup currently on screen
+    bool     yearly_billing_ = true;  // annual default; user may choose monthly
     uint32_t full_shown_mask_ = 0;    // bit per Trigger already shown as a full modal
 
     bool        toast_active_ = false;

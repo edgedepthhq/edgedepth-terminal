@@ -43,6 +43,14 @@ public:
     // data with timestamps after cutoff_ms. Default: no-op.
     virtual void on_rewind(int64_t /*cutoff_ms*/) {}
 
+    // Instrument precision (tick size, price/qty formatting) can arrive AFTER a
+    // widget is built: SymbolRegistry answers over the network and a pack header
+    // carries its own tick. Widgets that CACHE either one must re-read them here
+    // instead of living with what the registry happened to know at construction.
+    // Called from the frame loop whenever SymbolRegistry::epoch() moves.
+    // Default: no-op (widgets that look the registry up per draw need nothing).
+    virtual void refresh_instrument() {}
+
     // ═══ Performance Hints ═══
     virtual UpdateFrequency update_frequency() const { return UpdateFrequency::Standard; }
     virtual bool is_fast_update() const {

@@ -188,15 +188,21 @@ void RecorderRuntime::begin_shot(int i, const AppContext& ctx) {
                  tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday);
     }
 
-    // Timeframe first - cheap, and the chart re-request happens against the
-    // shot's landing position rather than the previous one.
-#ifdef __EMSCRIPTEN__
-    if (s.tf_sec > 0) _set_chart_timeframe(s.tf_sec);
-#endif
+    // Position FIRST, timeframe second. Both reposition and change_timeframe
+    // ask the chart for history, and the answer is bounded by wherever the
+    // playhead is when the request goes out. Setting the timeframe first fires
+    // initial_load against the PRE-jump position, and that batch races the
+    // seek's own refill: CandleManager merges prepend-only, so whichever lands
+    // first owns the series front and the other is dropped whole. The stale one
+    // usually wins, the series stops at the old position, and the span up to the
+    // landing point renders as an empty gap - the 18 minute hole in the TUT
+    // clip, between the pack window start and shot 0.
+    // Repositioning first makes the timeframe's reload the only request that
+    // matters, and it is issued against the landed playhead.
 
-    // Position. Forward jump = clock-only skip (instant, keeps formed candles
-    // on the chart - visual continuity between shots). Backward jump = ONE
-    // deliberate seek (full re-prime; well-formed scripts never need it).
+    // Forward jump = clock-only skip (instant, keeps formed candles on the
+    // chart - visual continuity between shots). Backward jump = ONE deliberate
+    // seek (full re-prime; well-formed scripts never need it).
     const int64_t now = rm.interpolated_time_ms();
     const int64_t d   = s.from_ms - now;
     if (d > kJumpTolMs && d <= kSkipMaxMs) {
@@ -204,6 +210,10 @@ void RecorderRuntime::begin_shot(int i, const AppContext& ctx) {
     } else if (d > kSkipMaxMs || d < -kJumpTolMs) {
         rm.seek(s.from_ms, /*deliberate=*/true);  // see kSkipMaxMs above
     }
+
+#ifdef __EMSCRIPTEN__
+    if (s.tf_sec > 0) _set_chart_timeframe(s.tf_sec);
+#endif
 
     // Effective speed = scripted × scale, clamped to the transport's range.
     // The clamped value is what post-production retimes against, so it's the

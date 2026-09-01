@@ -24,6 +24,10 @@ public:
 
     void on_rewind(int64_t /*cutoff_ms*/) override { clear(); }
 
+    // Rows are formatted once at insert, so a late instrument answer has to
+    // reformat the buffer as well as the formatter. See Widget::refresh_instrument.
+    void refresh_instrument() override;
+
     void handle_trade(const Terminal::Trade& trade);
 
     // Clear all trade data (used on replay rewind)

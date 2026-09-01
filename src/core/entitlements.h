@@ -445,16 +445,25 @@ inline void open_upgrade() {
 #endif
 }
 
-// Send the user straight into checkout for a payment rail ("card" | "btc"). The
-// web /pricing gateway turns ?plan&rail into the Stripe/BTCPay redirect (see
-// CheckoutStart.tsx). No-op off-Emscripten.
-inline void open_upgrade_rail(const char* rail) {
+// Build the pricing-review URL. Keep this pure so the native suite pins the
+// billing choice even though the browser navigation only exists in WASM.
+inline std::string pricing_href(const char* period) {
+    const std::string safe_period =
+        period && std::string(period) == "monthly" ? "monthly" : "yearly";
+    return "https://edgedepth.com/pricing?billing=" + safe_period;
+}
+
+// Review Free, Pro and Research before the user chooses a payment rail. The
+// selected interval arrives preselected, so the extra page adds context, not
+// repeated work.
+inline void open_pricing(const char* period = "yearly") {
+    const std::string href = pricing_href(period);
 #ifdef __EMSCRIPTEN__
     EM_ASM({
-        window.location.href = '/pricing?plan=yearly&rail=' + UTF8ToString($0);
-    }, rail);
+        window.location.href = UTF8ToString($0);
+    }, href.c_str());
 #else
-    (void)rail;
+    (void)href;
 #endif
 }
 

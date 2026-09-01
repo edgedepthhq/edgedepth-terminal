@@ -29,6 +29,13 @@ class StatsWidget : public Widget {
 public:
     StatsWidget(const Terminal::Pair& pair, const AppContext& ctx, const PriceFormatter& fmt);
     ~StatsWidget() override;
+
+    // Price precision can land after the widget is built. See Widget::refresh_instrument.
+    void refresh_instrument() override {
+        const PriceFormatter f =
+            SymbolRegistry::instance().get_formatter(pair_.exchange, pair_.symbol);
+        if (f.resolved) fmt_ = f;
+    }
     void render() override;
     void update() override;
     WidgetType type() const override { return WidgetType::Stats; }

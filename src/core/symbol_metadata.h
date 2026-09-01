@@ -20,6 +20,7 @@
 #include <cmath>
 #include <functional>
 #include <algorithm>
+#include <atomic>
 
 // ─── PriceFormatter ──────────────────────────────────────────────────────────
 
@@ -28,6 +29,12 @@ struct PriceFormatter {
     int qty_precision   = 3;
     char price_fmt[12]  = "%.2f";
     char qty_fmt[12]    = "%.3f";
+    // False until a real tick/step built this. A default-constructed formatter
+    // is a PLACEHOLDER, not a 2dp instrument: the metadata fetch can land after
+    // the widgets are built, and rendering a sub-cent perp at 2dp (every price
+    // reading "0.24") is how the demo shipped a broken-looking terminal.
+    // Consumers that hold one must re-read it on Widget::refresh_instrument().
+    bool resolved = false;
 
     static int precision_from_step(double step) {
         if (step <= 0.0) return 8;
@@ -46,6 +53,26 @@ struct PriceFormatter {
         f.qty_precision   = precision_from_step(step_size);
         snprintf(f.price_fmt, sizeof(f.price_fmt), "%%.%df", f.price_precision);
         snprintf(f.qty_fmt,   sizeof(f.qty_fmt),   "%%.%df", f.qty_precision);
+        f.resolved = (tick_size > 0.0);
+        return f;
+    }
+
+    // The ONE stopgap for an instrument the registry has not answered for yet.
+    // Precision comes off the price magnitude, which is never the exchange's
+    // truth but is always the right ORDER of truth, so a chart axis stays
+    // readable for the second or two before the real tick binds. Still
+    // unresolved, so refresh_instrument() replaces it the moment it can.
+    static PriceFormatter provisional_for_price(double px) {
+        const double a = std::abs(px);
+        PriceFormatter f;
+        f.price_precision = (a >= 1000.0) ? 2
+                          : (a >= 1.0)    ? 4
+                          : (a >= 0.01)   ? 5
+                          : (a >= 0.0001) ? 7
+                                          : 8;
+        snprintf(f.price_fmt, sizeof(f.price_fmt), "%%.%df", f.price_precision);
+        snprintf(f.qty_fmt,   sizeof(f.qty_fmt),   "%%.%df", f.qty_precision);
+        f.resolved = false;
         return f;
     }
 
@@ -98,13 +125,46 @@ public:
     PriceFormatter get_formatter(const std::string& exchange, const std::string& symbol) const {
         const auto* meta = get(exchange, symbol);
         if (meta) return meta->fmt;
-        return PriceFormatter::from_tick_and_step(0.01, 0.001);
+        return PriceFormatter{};   // unresolved placeholder, NOT a 2dp instrument
     }
+
+    bool has(const std::string& exchange, const std::string& symbol) const {
+        return get(exchange, symbol) != nullptr;
+    }
+
+    // 0 = unknown. The only tick fallback in the app: there is no sane guess for
+    // an instrument's grid (0.1 on a $0.24 perp draws a ladder with the whole
+    // book in one row), so callers either wait or say so. Widgets rebind through
+    // Widget::refresh_instrument() when the epoch moves.
+    double tick_or_zero(const std::string& exchange, const std::string& symbol) const {
+        const auto* meta = get(exchange, symbol);
+        return meta ? meta->tick_size : 0.0;
+    }
+
+    // Seed one instrument from a source that is not the metadata API. A pack
+    // carries its own tick in the header it already downloads (PackHeader
+    // field 14), which makes a /demo session independent of a 500 KB fetch it
+    // would otherwise be racing. Never overwrites an API entry.
+    void seed_tick(const std::string& exchange, const std::string& symbol, double tick_size) {
+        if (tick_size <= 0.0) return;
+        const std::string key = make_key(exchange, symbol);
+        seeded_.push_back({exchange, symbol, tick_size});
+        if (symbols_.count(key)) return;      // API answer wins
+        apply_seed(seeded_.back());
+        bump_epoch();
+    }
+
+    // Bumped on every load (localStorage read, XHR refresh, pack-header seed).
+    // Widgets rebind from the FRAME LOOP when this moves, never from inside the
+    // fetch callback: that re-enters wasm from a browser event and would mutate
+    // widget state mid-frame, between an ImGui Begin and its End.
+    uint32_t epoch() const { return epoch_.load(std::memory_order_acquire); }
 
     void insert(SymbolMetadata meta) {
         meta.pair_key = make_key(meta.exchange, meta.symbol);
         meta.fmt = PriceFormatter::from_tick_and_step(meta.tick_size, meta.step_size);
         symbols_[meta.pair_key] = std::move(meta);
+        bump_epoch();
     }
 
     bool is_loaded() const { return loaded_; }
@@ -127,10 +187,41 @@ public:
     // Public so the EMSCRIPTEN_KEEPALIVE callback can reach it
     void parse_json(const char* json_data, size_t len);
 
+    // Re-apply pack-header seeds after a metadata payload replaced the map.
+    // parse_json clears and rebuilds symbols_, so a symbol the API does not
+    // carry (a delisted contract a recorded pack still replays) would otherwise
+    // LOSE the tick it already had and send the DOM back to its waiting state.
+    void reapply_seeds() {
+        for (const auto& s : seeded_) {
+            if (!symbols_.count(make_key(s.exchange, s.symbol))) apply_seed(s);
+        }
+    }
+
 private:
+    struct SeededTick {
+        std::string exchange;
+        std::string symbol;
+        double tick_size = 0.0;
+    };
+
     SymbolRegistry() = default;
+    void bump_epoch() { epoch_.fetch_add(1, std::memory_order_release); }
+
+    void apply_seed(const SeededTick& s) {
+        SymbolMetadata meta;
+        meta.exchange  = s.exchange;
+        meta.symbol    = s.symbol;
+        meta.tick_size = s.tick_size;
+        meta.pair_key  = make_key(s.exchange, s.symbol);
+        meta.fmt       = PriceFormatter::from_tick_and_step(meta.tick_size, meta.step_size);
+        symbols_[meta.pair_key] = std::move(meta);
+    }
+
+    std::vector<SeededTick> seeded_;
+
     std::unordered_map<std::string, SymbolMetadata> symbols_;
     bool loaded_ = false;
+    std::atomic<uint32_t> epoch_{0};
 
     // Normalize to lowercase - API returns "XPLUSDT", url_router uses "xplusdt"
     static std::string make_key(const std::string& exchange, const std::string& symbol) {

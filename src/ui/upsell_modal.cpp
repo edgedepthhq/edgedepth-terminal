@@ -84,6 +84,7 @@ static const char* modal_headline(UpsellModal::Trigger t, bool login) {
 void UpsellModal::open(Trigger t, const char* detail) {
     trigger_ = t;
     login_variant_ = (t == Trigger::Auth);
+    yearly_billing_ = true;
     detail_ = detail ? detail : "";
     dismiss_redirect_.clear();  // never inherit an event/lesson-boot redirect
     want_open_ = true;
@@ -93,6 +94,7 @@ void UpsellModal::open(Trigger t, const char* detail) {
 void UpsellModal::open_login(const char* detail) {
     trigger_ = Trigger::Auth;
     login_variant_ = true;
+    yearly_billing_ = true;
     detail_ = detail ? detail : "";
     dismiss_redirect_.clear();  // never inherit an event/lesson-boot redirect
     want_open_ = true;
@@ -250,50 +252,51 @@ void UpsellModal::render_modal_body() {
         ImGui::Unindent(15.0f);
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
     };
-    bullet("30-day tick replay: all 660+ pairs, up to 4\xc3\x97");
-    bullet("Complete event archive + full lesson catalog");
-    bullet("Levels, Observed, LIQ-LEV tiers; footprint, TPO, scanner, alerts, paper trading");
+    bullet("30-day tick replay across all 660+ pairs, up to 4\xc3\x97");
+    bullet("Full archive, replay layers, lessons, scanner and alerts");
 
-    // 30-day timeline (1e): full bar = Pro reach (accent-soft), 3.3% amber slice
-    // at the right = the one free day. Labels underneath.
-    ImGui::Dummy(ImVec2(0.0f, 10.0f));
-    {
-        const ImVec2 bp = ImGui::GetCursorScreenPos();
-        const float bw = ImGui::GetContentRegionAvail().x, bh = 8.0f;
-        dl->AddRectFilled(bp, ImVec2(bp.x + bw, bp.y + bh), u32(Tokens::BRAND_SOFT));
-        dl->AddRect(bp, ImVec2(bp.x + bw, bp.y + bh), u32(Tokens::BD2), 0.0f, 0, 1.0f);
-        const float slice = bw * 0.033f;
-        dl->AddRectFilled(ImVec2(bp.x + bw - slice, bp.y), ImVec2(bp.x + bw, bp.y + bh),
-                          u32(Tokens::WARN));
-        ImGui::Dummy(ImVec2(bw, bh + 5.0f));
+    if (!login_variant_) {
+        ImGui::Dummy(ImVec2(0.0f, 8.0f));
         ImGui::PushFont(Fonts::label());
-        const ImVec2 lp = ImGui::GetCursorScreenPos();
-        const ImU32 lc = u32(Tokens::TX3);
-        dl->AddText(lp, lc, "-30 DAYS");
-        const char* mid = "PRO: THE FULL BAR \xC2\xB7 FREE: THE AMBER DAY";
-        const float mw = ImGui::CalcTextSize(mid).x;
-        dl->AddText(ImVec2(bp.x + (bw - mw) * 0.5f, lp.y), lc, mid);
-        const float nw = ImGui::CalcTextSize("NOW").x;
-        dl->AddText(ImVec2(bp.x + bw - nw, lp.y), lc, "NOW");
+        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX3);
+        ImGui::TextUnformatted("CHOOSE BILLING");
+        ImGui::PopStyleColor();
         ImGui::PopFont();
-        ImGui::Dummy(ImVec2(bw, ImGui::GetTextLineHeight()));
+        ImGui::Dummy(ImVec2(0.0f, 3.0f));
+
+        const float gap = 8.0f;
+        const float choice_w = (ImGui::GetContentRegionAvail().x - gap) * 0.5f;
+        auto billing_option = [&](const char* label, bool yearly) {
+            const bool selected = yearly_billing_ == yearly;
+            ImGui::PushStyleColor(ImGuiCol_Button,
+                                  selected ? Tokens::BRAND_SOFT : ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::HOVER);
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, Tokens::ACTIVE);
+            ImGui::PushStyleColor(ImGuiCol_Text, selected ? Tokens::BRAND_TX : Tokens::TX1);
+            ImGui::PushStyleColor(ImGuiCol_Border, selected ? Tokens::BRAND_LINE : Tokens::BD2);
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Radius::R2);
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+            ImGui::PushFont(Fonts::ui_semibold());
+            if (ImGui::Button(label, ImVec2(choice_w, 50.0f))) yearly_billing_ = yearly;
+            ImGui::PopFont();
+            ImGui::PopStyleVar(2);
+            ImGui::PopStyleColor(5);
+        };
+        billing_option("Annual\n$240/year - save $108##billing_yearly", true);
+        ImGui::SameLine(0.0f, gap);
+        billing_option("Monthly\n$29/month##billing_monthly", false);
+
+        ImGui::Dummy(ImVec2(0.0f, 5.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
+        ImGui::TextUnformatted(yearly_billing_
+            ? "$20/mo effective. $240 billed today, then yearly."
+            : "Lower upfront cost. $29 billed today, then monthly.");
+        ImGui::PopStyleColor();
     }
 
-    // Price (effective monthly first, with the annual charge explicit)
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
-    ImGui::PushFont(Fonts::mono_lg());
-    ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX1);
-    ImGui::TextUnformatted("$20/mo");
-    ImGui::PopStyleColor();
-    ImGui::PopFont();
-    ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
-    ImGui::TextUnformatted("billed yearly at $240  \xc2\xb7  or $29/mo billed monthly");
-    ImGui::PopStyleColor();
-
     // ── CTAs ─────────────────────────────────────────────────────────────────
-    // Upgrade: dual rails (1e) - solid "pay by card" + outline "pay with Bitcoin".
-    // Login: a single solid "Log in". Both rails route through the web checkout
-    // gateway (open_upgrade_rail); card vs BTC is resolved there.
+    // Upgrade: review the three plans with the selected billing period already
+    // applied. Login: a single solid "Log in".
     ImGui::Dummy(ImVec2(0.0f, 12.0f));
     const float w = ImGui::GetContentRegionAvail().x;
 
@@ -314,17 +317,22 @@ void UpsellModal::render_modal_body() {
         ImGui::PopStyleVar();
         ImGui::PopStyleColor(4);
     } else {
-        // Primary solid - pay by card.
+        const char* billing = yearly_billing_ ? "yearly" : "monthly";
+        const char* review_label = yearly_billing_
+            ? "Review plans - Annual selected"
+            : "Review plans - Monthly selected";
+
+        // One next step. Plan and payment rail are chosen on the pricing page.
         ImGui::PushStyleColor(ImGuiCol_Button, Tokens::BRAND);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::BRAND_TX);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, Tokens::BRAND);
         ImGui::PushStyleColor(ImGuiCol_Text, Tokens::BRAND_INK);
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Radius::R2);
         ImGui::PushFont(Fonts::ui_semibold());
-        if (ImGui::Button("Go Pro: pay by card", ImVec2(w, 38.0f))) {
+        if (ImGui::Button(review_label, ImVec2(w, 38.0f))) {
             emit_upsell_usage("upgrade_click", trigger_, false,
-                              {{"plan", "pro"}, {"billing", "yearly"}, {"rail", "card"}});
-            Entitlements::open_upgrade_rail("card");
+                              {{"plan", "unselected"}, {"billing", billing}, {"rail", "pricing"}});
+            Entitlements::open_pricing(billing);
             ImGui::CloseCurrentPopup();
             open_ = false;
         }
@@ -332,33 +340,12 @@ void UpsellModal::render_modal_body() {
         ImGui::PopStyleVar();
         ImGui::PopStyleColor(4);
 
-        // Secondary outline - pay with Bitcoin (10% off list).
-        ImGui::Dummy(ImVec2(0.0f, 8.0f));
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::HOVER);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, Tokens::ACTIVE);
-        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX1);
-        ImGui::PushStyleColor(ImGuiCol_Border, Tokens::BD2);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Radius::R2);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-        ImGui::PushFont(Fonts::ui_semibold());
-        if (ImGui::Button("Pay with Bitcoin: $216/yr (save 10%)", ImVec2(w, 36.0f))) {
-            emit_upsell_usage("upgrade_click", trigger_, false,
-                              {{"plan", "pro"}, {"billing", "yearly"}, {"rail", "btc"}});
-            Entitlements::open_upgrade_rail("btc");
-            ImGui::CloseCurrentPopup();
-            open_ = false;
-        }
-        ImGui::PopFont();
-        ImGui::PopStyleVar(2);
-        ImGui::PopStyleColor(5);
-
-        // Rail micro-note (centered).
+        // Explain why this does not jump straight into a payment form.
         ImGui::Dummy(ImVec2(0.0f, 8.0f));
         ImGui::PushFont(Fonts::label());
         ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX3);
         {
-            const char* note = "CARD AUTO-RENEWS, CANCEL ANYTIME \xC2\xB7 BITCOIN NEVER AUTO-CHARGES";
+            const char* note = "COMPARE FREE, PRO AND RESEARCH BEFORE CHECKOUT";
             const float nw = ImGui::CalcTextSize(note).x;
             if (nw < w) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (w - nw) * 0.5f);
             ImGui::TextUnformatted(note);

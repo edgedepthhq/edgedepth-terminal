@@ -579,7 +579,7 @@ void check_initialization() {
 
     static bool chart_initialized = false;
     static bool widgets_created = false;
-    static int metadata_wait_frames = 0;
+    static double metadata_wait_start_s = 0.0;
 
     const Terminal::Pair pair{g_initial_route.exchange, g_initial_route.symbol};
 
@@ -590,17 +590,25 @@ void check_initialization() {
         (g_app.ws_client && g_app.ws_client->is_connected()) ||
         EducationBoot::instance().is_pack();
     if (!chart_initialized && comms_ready) {
-        // Wait for metadata to load, but don't wait forever.
-        // localStorage cache makes this instant on repeat visits.
-        // On first-ever visit, the fetch() takes ~100-300ms.
-        // 120 frames ≈ 2 seconds at 60fps - generous timeout.
+        // Wait for metadata, but only to avoid a visible placeholder: widgets
+        // built without it rebind through Widget::refresh_instrument() when the
+        // registry lands, so timing out is no longer destructive.
+        //
+        // The budget is WALL CLOCK, not frames. The old "120 frames ≈ 2 seconds
+        // at 60fps" was 0.66s on a 180fps client, and in pack mode the counter
+        // starts at frame one (comms_ready is immediate with no socket) while
+        // the 500 KB metadata fetch races the pack's own range requests: the
+        // /demo terminal lost that race consistently and drew every price at
+        // placeholder precision for the whole session.
+        const double now_s = ImGui::GetTime();
+        if (metadata_wait_start_s == 0.0) metadata_wait_start_s = now_s;
         bool metadata_ready = SymbolRegistry::instance().is_loaded();
-        if (!metadata_ready && metadata_wait_frames < 120) {
-            metadata_wait_frames++;
+        if (!metadata_ready && (now_s - metadata_wait_start_s) < 3.0) {
             return;  // Try again next frame
         }
-        const auto* meta = SymbolRegistry::instance().get(pair.exchange, pair.symbol);
-        double tick_size = meta ? meta->tick_size : 0.01;
+        // 0 = unknown. No invented tick anywhere: ChartWidget draws on
+        // provisional precision and rebinds, the DOM says so and waits.
+        double tick_size = SymbolRegistry::instance().tick_or_zero(pair.exchange, pair.symbol);
         // In embedded lesson mode the replay is the ONLY data source - skip the
         // live initial candle load (otherwise the chart floods with current
         // market data before the replay swaps in). The replay session populates
@@ -629,8 +637,7 @@ void check_initialization() {
         static int frames_waited = 0;
         if (frames_waited++ > 3) {
             auto fmt = SymbolRegistry::instance().get_formatter(pair.exchange, pair.symbol);
-            const auto* meta = SymbolRegistry::instance().get(pair.exchange, pair.symbol);
-            double dom_tick = meta ? meta->tick_size : 0.1;
+            double dom_tick = SymbolRegistry::instance().tick_or_zero(pair.exchange, pair.symbol);
 
             if (EducationBoot::instance().is_embedded() ||
                 EducationBoot::instance().is_pack()) {
@@ -664,6 +671,25 @@ void check_initialization() {
             initialization_complete = true;
             g_init_complete = true;
         }
+    }
+}
+
+// ─── Instrument metadata rebind ──────────────────────────────────────────────
+// Tick size and price precision are not available at a fixed point in the boot:
+// the metadata fetch is ~500 KB over the network, a /demo pack carries its own
+// tick in a header that arrives later still, and widgets are built in between.
+// Every widget that caches either one re-reads it here when the registry moves.
+// Driven from the frame loop rather than from the fetch callback on purpose:
+// the callback re-enters wasm from a browser event and would rebuild widget
+// state mid-frame, between an ImGui Begin and its End. Same safe-point rule as
+// the +widget drain and the live-flow rebuild above.
+void resolve_instrument_metadata_rebind() {
+    static uint32_t seen_epoch = 0;
+    const uint32_t epoch = SymbolRegistry::instance().epoch();
+    if (epoch == seen_epoch) return;
+    seen_epoch = epoch;
+    for (auto& w : g_app.widgets) {
+        if (w) w->refresh_instrument();
     }
 }
 
@@ -704,8 +730,7 @@ void resolve_live_flow_widget_rebuild() {
     const Terminal::Pair pair = g_live_flow_rebuild.pair;
     if (pair.symbol.empty()) return;
 
-    const auto* meta = SymbolRegistry::instance().get(pair.exchange, pair.symbol);
-    const double dom_tick = meta ? meta->tick_size : 0.1;
+    const double dom_tick = SymbolRegistry::instance().tick_or_zero(pair.exchange, pair.symbol);
     auto fmt = SymbolRegistry::instance().get_formatter(pair.exchange, pair.symbol);
 
     // A replay of a different symbol replaced the chart, so the dock tree in
@@ -1357,6 +1382,7 @@ void main_loop() {
     // loop below (it mutates g_app.widgets).
     Menu::resolve_widget_add_request(g_app.widgets, g_app.app_ctx);
     resolve_live_flow_widget_rebuild();  // same safety requirement
+    resolve_instrument_metadata_rebind();
     LayoutManager::render_dockspace(nullptr,
         g_initial_route.exchange, g_initial_route.symbol);
     g_profiler.end("Shell+Dock");
@@ -1792,8 +1818,7 @@ int main(int, char**) {
             if (!replay_ctx->symbols.empty()) {
                 Terminal::Pair replay_pair{"binancef", replay_ctx->symbols[0]};
                 auto fmt = SymbolRegistry::instance().get_formatter(replay_pair.exchange, replay_pair.symbol);
-                const auto* meta = SymbolRegistry::instance().get(replay_pair.exchange, replay_pair.symbol);
-                double dom_tick = meta ? meta->tick_size : 0.1;
+                double dom_tick = SymbolRegistry::instance().tick_or_zero(replay_pair.exchange, replay_pair.symbol);
 
                 // The chart has to BELONG to the replay pair, not merely exist.
                 // The old guard asked "is any chart open", which is symbol-blind,

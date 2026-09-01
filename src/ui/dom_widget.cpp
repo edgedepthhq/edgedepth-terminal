@@ -118,7 +118,37 @@ DOMWidget::~DOMWidget() {
     if (subscribed_streams_) subscribed_streams_->unsubscribe_orderbook(stream_key_, this);
 }
 
+// Late-bind the instrument. A DOM can outlive the moment its tick was unknown:
+// the metadata XHR is ~500 KB and in a /demo session it races the pack's own
+// range fetches, so the widget is routinely built first. Everything the ladder
+// derives from the tick (row grid, trade buckets, price text) is rebuilt here.
+void DOMWidget::refresh_instrument() {
+    const auto& reg = SymbolRegistry::instance();
+    const double tick = reg.tick_or_zero(pair_.exchange, pair_.symbol);
+    if (tick <= 0.0 || tick == tick_size_) return;
+
+    tick_size_ = tick;
+    fmt_       = reg.get_formatter(pair_.exchange, pair_.symbol);
+    trade_accumulator_.set_tick_size(tick);
+
+    // Grid-dependent view state: the old center/scroll were expressed in the
+    // placeholder grid's units, and every cached row string was formatted at
+    // placeholder precision.
+    ladder_center_ = 0.0;
+    scroll_offset_ = 0;
+    group_mult_    = 1;
+    max_bid_size_  = 0.0;
+    max_ask_size_  = 0.0;
+    cache_ob_ts_   = -1;
+    cache_ob_uid_  = -1;
+    cache_center_  = -1.0;
+}
+
 void DOMWidget::update() {
+    // No tick means no ladder: every row price is center + n * tick, so an
+    // invented tick invents the whole grid. render() draws the pending state.
+    if (tick_size_ <= 0.0) return;
+
     const Terminal::Orderbook* ob = ctx_.ob_mgr().get_orderbook(pair_);
     if (!ob || !ob->snapshot) return;
 
@@ -346,6 +376,28 @@ void DOMWidget::render() {
         return;
     }
     ImGui::PopStyleVar();
+
+    if (tick_size_ <= 0.0) {
+        // Deliberately NOT a ladder. A grid drawn on a guessed tick is a lie
+        // that looks like data: at 0.10 on a $0.24 perp the entire book folds
+        // into one row and the DOM reads as empty. refresh_instrument() swaps
+        // this out for the real grid as soon as the tick lands.
+        const auto& reg = SymbolRegistry::instance();
+        // Distinguish "not answered yet" from "answered, and this instrument is
+        // not in it": the second is permanent and a spinner would read as a hang.
+        const bool absent = reg.is_loaded() && !reg.has(pair_.exchange, pair_.symbol);
+        ImGui::PushFont(Theme::Fonts::ui());
+        if (absent) {
+            ImGui::TextColored(Theme::Tokens::TX3, "  No tick size for %s %s",
+                               pair_.symbol.c_str(), pair_.exchange.c_str());
+        } else {
+            ImGui::TextColored(Theme::Tokens::TX3, "  Loading %s tick size...",
+                               pair_.symbol.c_str());
+        }
+        ImGui::PopFont();
+        ImGui::End();
+        return;
+    }
 
     const Terminal::Orderbook* ob = ctx_.ob_mgr().get_orderbook(pair_);
     if (!ob || !ob->snapshot || ob->asks.empty() || ob->bids.empty()) {

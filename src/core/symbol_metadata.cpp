@@ -73,6 +73,10 @@ void SymbolRegistry::parse_json(const char* json_data, size_t len) {
             symbols_[meta.pair_key] = std::move(meta);
         }
         loaded_ = true;
+        reapply_seeds();
+        // Widgets built before this landed are still holding placeholder
+        // precision. The bump is what tells the frame loop to rebind them.
+        bump_epoch();
     } catch (const json::exception& e) {
         (void)e;
     }

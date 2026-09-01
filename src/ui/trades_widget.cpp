@@ -29,8 +29,32 @@ TradesWidget::~TradesWidget() {
     if (subscribed_streams_) subscribed_streams_->unsubscribe_trades(stream_key_, this);
 }
 
+void TradesWidget::refresh_instrument() {
+    const PriceFormatter f =
+        SymbolRegistry::instance().get_formatter(pair_.exchange, pair_.symbol);
+    if (!f.resolved) return;
+    if (f.price_precision == fmt_.price_precision &&
+        f.qty_precision   == fmt_.qty_precision &&
+        fmt_.resolved) return;
+    fmt_ = f;
+    // The tape holds the raw trades, so the visible rows can be re-printed at
+    // the real precision instead of being thrown away.
+    const size_t count = std::min(trade_count_, MAX_TRADES);
+    for (size_t i = 0; i < count; ++i) {
+        RowText& txt = row_text_[i];
+        snprintf(txt.price, sizeof(txt.price), fmt_.price_fmt, trades_[i].price);
+        snprintf(txt.qty,   sizeof(txt.qty),   fmt_.qty_fmt,   trades_[i].qty);
+    }
+}
+
 // For data-driven events.
 void TradesWidget::handle_trade(const Terminal::Trade& trade) {
+    // Provisional precision until the registry answers: the tape is the one
+    // widget that always has a price in hand, and printing every print of a
+    // sub-cent perp as "0.24" is worse than a magnitude-derived guess.
+    if (!fmt_.resolved && trade.price > 0.0) {
+        fmt_ = PriceFormatter::provisional_for_price(trade.price);
+    }
     const size_t slot = trade_count_ % MAX_TRADES;
     trades_[slot] = trade;
     // Format ONCE at insert - trades are immutable (see RowText).

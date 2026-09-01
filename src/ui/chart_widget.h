@@ -83,6 +83,11 @@ public:
     // chart, and the exit rebuild has to restore the pair that was live.
     [[nodiscard]] const Terminal::Pair& pair() const { return pair_; }
 
+    // Bind the real tick + price precision when the registry answers after the
+    // chart was built. Until then the axis runs on provisional precision (see
+    // PriceFormatter::provisional_for_price), never on a guessed tick.
+    void refresh_instrument() override;
+
     ChartWidget(const Terminal::Pair& pair,
                 const AppContext& ctx,
                 double tick_size);
