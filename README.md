@@ -52,10 +52,44 @@ independently of this.
 
 ## Versions and pinning
 
-Both images publish `:latest` only, and `docker-compose.yml` pins that. There
-are no semver tags on the registry yet, so `:v0.2.0` and similar fail with
-`manifest unknown`. Saying so plainly beats letting you discover it: if you
-want a build that cannot change under you, pin the digest instead of a tag.
+Three kinds of tag are published for both images:
+
+- `:latest` moves whenever a change lands on the default branch
+- `:sha-<short>` names one commit, published on every default-branch build
+- `:MAJOR.MINOR.PATCH` and `:MAJOR.MINOR` are published when a release is tagged
+
+One gotcha worth stating plainly, because the failure looks like the tag is
+missing: the leading `v` is not part of the image tag. The git tag `v0.3.0`
+publishes the images `0.3.0` and `0.3`, so `:v0.3.0` fails with
+`manifest unknown` while `:0.3.0` is there.
+
+The two images version independently, so their numbers do not match. Check
+[the releases](https://github.com/edgedepthhq/edgedepth-terminal/releases) and
+[the gateway's](https://github.com/edgedepthhq/edgedepth-gateway/releases) for
+what is current, or ask the registry directly, which needs no login and no
+Docker:
+
+```bash
+curl -s "https://ghcr.io/token?scope=repository:edgedepthhq/edgedepth-terminal:pull&service=ghcr.io" \
+  | sed -n 's/.*"token":"\([^"]*\)".*/\1/p' \
+  | xargs -I{} curl -s -H "Authorization: Bearer {}" \
+      https://ghcr.io/v2/edgedepthhq/edgedepth-terminal/tags/list
+```
+
+`docker-compose.yml` ships pinned to `:latest` deliberately, so the quick start
+is current without editing anything. Pin a version when you want a build that
+does not move under you:
+
+```yaml
+services:
+  gateway:
+    image: ghcr.io/edgedepthhq/edgedepth-gateway:0.1.0
+  terminal:
+    image: ghcr.io/edgedepthhq/edgedepth-terminal:0.3.0
+```
+
+A digest is the strongest pin, because a version tag can in principle be
+repointed while a digest cannot:
 
 ```bash
 docker compose pull
@@ -65,8 +99,6 @@ docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/edgedepthhq/edgedepth
 
 Put the resulting `name@sha256:...` in `docker-compose.yml` and you have both a
 pin and a rollback target: keep the previous digest and you can go back to it.
-Semver tags are planned; until they exist the digest is the only stable handle,
-and `:latest` moves whenever a change lands on the default branch.
 
 ## Why this exists
 
