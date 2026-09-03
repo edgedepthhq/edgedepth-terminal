@@ -29,8 +29,15 @@ public:
 
     static UpsellModal& instance();
 
-    // Open the upsell for a gate. `detail` overrides the default subline if non-null.
-    void open(Trigger t, const char* detail = nullptr);
+    // Open the upsell for a gate.
+    //   `detail` overrides the default subline if non-null - it is PROSE, written
+    //           for the reader, and is free to be reworded at any time.
+    //   `layer`  is a STABLE ANALYTICS SLUG (e.g. "liq_levels"), never prose:
+    //           it is what the funnel GROUPS ON, so it must not track the
+    //           wording. Absent from the props when the call site has none, so
+    //           rows emitted before this existed stay distinguishable from rows
+    //           whose gate genuinely has no layer.
+    void open(Trigger t, const char* detail = nullptr, const char* layer = nullptr);
     // Login variant (AUTH_REQUIRED / GRANT_REQUIRED) - CTA goes to /login.
     void open_login(const char* detail = nullptr);
 
@@ -60,7 +67,8 @@ private:
     void dismiss();  // shared "Maybe later"/Escape path (runs the redirect, if armed)
 
     Trigger     trigger_ = Trigger::Generic;
-    std::string detail_;
+    std::string detail_;               // PROSE subline (human)
+    std::string layer_;                // stable analytics slug (empty = absent)
     std::string dismiss_redirect_;   // full path ("/terminal/<sym>"); empty = just close
     bool        login_variant_ = false;
 

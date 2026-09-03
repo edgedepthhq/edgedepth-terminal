@@ -2866,7 +2866,8 @@ void ChartWidget::render_controls() {
         // Liq Levels = OI rails via the gated liq_heatmaps stream (Pro).
         if (layer_row("Liquidation levels", pro && liq_heatmap_enabled_, !pro)) {
             if (pro) toggle_liquidation_heatmap();
-            else ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Layer);
+            else ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Layer,
+                                                 nullptr, "liq_levels");
         }
         // Modelled levels are a hosted stream. Once enabled on a feed that
         // never delivers it, the layer stays invisible; say why on hover
@@ -2897,7 +2898,8 @@ void ChartWidget::render_controls() {
             const bool hl_missing = !hl_known && TickerManager::instance().has_data();
             if (layer_row(hl_missing ? "Hyperliquid liq levels \xc2\xb7 n/a" : "Hyperliquid liq levels",
                           pro && liq_census_enabled_ && !hl_missing, !pro)) {
-                if (!pro) ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Layer);
+                if (!pro) ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Layer,
+                                                          nullptr, "hl_liq_levels");
                 else if (!hl_missing) toggle_liq_census();
             }
         }
@@ -2907,7 +2909,8 @@ void ChartWidget::render_controls() {
         // Observed = real @forceOrder prints via the liquidations stream (Pro).
         if (layer_row("Observed liquidations", pro && liq_observed_enabled_, !pro)) {
             if (pro) liq_observed_enabled_ = !liq_observed_enabled_;
-            else ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Layer);
+            else ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Layer,
+                                                 nullptr, "liq_observed");
         }
 
         {
@@ -2973,7 +2976,8 @@ void ChartWidget::render_controls() {
                 ImGui::PopFont();
                 if (clicked) { if (pro) { *levs[i].flag = !*levs[i].flag; changed = true; } else lock_hit = true; }
             }
-            if (lock_hit) ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Layer);
+            if (lock_hit) ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Layer,
+                                                          nullptr, "liq_tier_chips");
             if (changed) {
                 uint8_t mask = 0;
                 if (liq_lev_5x_)   mask |= 0x01;

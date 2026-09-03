@@ -36,12 +36,19 @@ const char* trigger_name(UpsellModal::Trigger t) {
     }
 }
 
+// `layer` is passed explicitly at every call site (not defaulted) so a new event
+// cannot quietly ship without deciding whether it carries the slug.
 void emit_upsell_usage(const char* event, UpsellModal::Trigger trigger, bool login,
+                       const std::string& layer,
                        const nlohmann::json& props = nlohmann::json::object()) {
     nlohmann::json merged = props;
     merged["source"] = "terminal";
     merged["trigger"] = trigger_name(trigger);
     merged["variant"] = login ? "login" : "pro";
+    // ABSENT rather than empty: `props->>'layer' is null` then means "this row
+    // predates the slug or its gate has no layer", which an empty string could
+    // not say. Never emit "" here.
+    if (!layer.empty()) merged["layer"] = layer;
     usage::dispatch_detail(nlohmann::json{
         {"event", event},
         {"mode", "terminal"},
@@ -81,14 +88,18 @@ static const char* modal_headline(UpsellModal::Trigger t, bool login) {
     return "Replay any moment of the last 30 days";
 }
 
-void UpsellModal::open(Trigger t, const char* detail) {
+void UpsellModal::open(Trigger t, const char* detail, const char* layer) {
     trigger_ = t;
     login_variant_ = (t == Trigger::Auth);
     yearly_billing_ = true;
     detail_ = detail ? detail : "";
+    // Assigned unconditionally, like detail_: this is a singleton, so a gate that
+    // passes no layer must CLEAR the previous one or a Speed gate would inherit
+    // the slug of the last layer pill that fired.
+    layer_ = layer ? layer : "";
     dismiss_redirect_.clear();  // never inherit an event/lesson-boot redirect
     want_open_ = true;
-    emit_upsell_usage("locked_action", trigger_, login_variant_);
+    emit_upsell_usage("locked_action", trigger_, login_variant_, layer_);
 }
 
 void UpsellModal::open_login(const char* detail) {
@@ -96,9 +107,10 @@ void UpsellModal::open_login(const char* detail) {
     login_variant_ = true;
     yearly_billing_ = true;
     detail_ = detail ? detail : "";
+    layer_.clear();             // an auth gate is not a layer gate
     dismiss_redirect_.clear();  // never inherit an event/lesson-boot redirect
     want_open_ = true;
-    emit_upsell_usage("locked_action", trigger_, login_variant_);
+    emit_upsell_usage("locked_action", trigger_, login_variant_, layer_);
 }
 
 void UpsellModal::set_dismiss_redirect(const char* symbol) {
@@ -142,13 +154,13 @@ void UpsellModal::render() {
             toast_text_   = "Pro unlocks this - see pricing";
             toast_active_ = true;
             toast_until_  = ImGui::GetTime() + 3.2;
-            emit_upsell_usage("upsell_impression", trigger_, login_variant_,
+            emit_upsell_usage("upsell_impression", trigger_, login_variant_, layer_,
                               {{"surface", "toast"}});
         } else {
             full_shown_mask_ |= bit;
             ImGui::OpenPopup("##edx_upsell");
             open_ = true;
-            emit_upsell_usage("upsell_impression", trigger_, login_variant_,
+            emit_upsell_usage("upsell_impression", trigger_, login_variant_, layer_,
                               {{"surface", "modal"}});
         }
     }
@@ -308,7 +320,7 @@ void UpsellModal::render_modal_body() {
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Radius::R2);
         ImGui::PushFont(Fonts::ui_semibold());
         if (ImGui::Button("Log in", ImVec2(w, 38.0f))) {
-            emit_upsell_usage("login_click", trigger_, true);
+            emit_upsell_usage("login_click", trigger_, true, layer_);
             Entitlements::open_login();
             ImGui::CloseCurrentPopup();
             open_ = false;
@@ -330,7 +342,7 @@ void UpsellModal::render_modal_body() {
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Radius::R2);
         ImGui::PushFont(Fonts::ui_semibold());
         if (ImGui::Button(review_label, ImVec2(w, 38.0f))) {
-            emit_upsell_usage("upgrade_click", trigger_, false,
+            emit_upsell_usage("upgrade_click", trigger_, false, layer_,
                               {{"plan", "unselected"}, {"billing", billing}, {"rail", "pricing"}});
             Entitlements::open_pricing(billing);
             ImGui::CloseCurrentPopup();
