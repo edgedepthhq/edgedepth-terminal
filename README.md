@@ -138,6 +138,13 @@ pip install websockets
 python3 examples/synthetic_feed.py
 ```
 
+**Play a file you already have:** [`examples/file_feed.py`](examples/file_feed.py) is that same feed pointed at a CSV or Parquet of trades, so your own capture is on the chart without writing an adapter. It finds the time, price, size and side columns under their usual names, tells epoch seconds, millis, micros, nanos and ISO-8601 apart, inverts `buyer_maker`-style columns, sends the earlier rows as candles and replays the rest as live trades:
+
+```bash
+pip install websockets        # plus pyarrow, for .parquet
+python3 examples/file_feed.py mytrades.csv --speed 10
+```
+
 **Community gateway:** [edgedepth-gateway](https://github.com/edgedepthhq/edgedepth-gateway) is exactly that feed, MIT licensed. It serves trades, candles, orderbook, stats and liquidations from Binance's free public streams, and answers historical candle requests from their REST klines so the chart boots with real history. It also builds **1s, 5s, 15s and 30s candles** trade by trade from the raw stream, updating the building candle as each trade arrives. See the [Quick start](#quick-start) to run both together.
 
 A few layers are driven by EdgeDepth's proprietary analytics streams: VPIN toxicity, positioning and smart-money flow, modelled liquidation estimates, pattern detection, and the scanner's composite scores. With a raw-data feed those panels simply stay empty and the terminal degrades gracefully; [which panels, and why](https://edgedepth.com/open-source?utm_source=github&utm_medium=oss&utm_campaign=terminal#empty-panels) lists them side by side. The [hosted product](https://app.edgedepth.com/terminal?utm_source=github&utm_medium=oss&utm_campaign=terminal) provides them, along with historical replay and structured courses taught inside the terminal.
