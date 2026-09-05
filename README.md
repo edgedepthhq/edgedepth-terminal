@@ -142,13 +142,16 @@ python3 examples/synthetic_feed.py
 
 A few layers are driven by EdgeDepth's proprietary analytics streams: VPIN toxicity, positioning and smart-money flow, modelled liquidation estimates, pattern detection, and the scanner's composite scores. With a raw-data feed those panels simply stay empty and the terminal degrades gracefully; [which panels, and why](https://edgedepth.com/open-source?utm_source=github&utm_medium=oss&utm_campaign=terminal#empty-panels) lists them side by side. The [hosted product](https://app.edgedepth.com/terminal?utm_source=github&utm_medium=oss&utm_campaign=terminal) provides them, along with historical replay and structured courses taught inside the terminal.
 
-The main dividing line is time. Your local terminal starts recording when you
-install it. EdgeDepth has already been recording 660+ markets for months. Pro
-lets you replay an arbitrary moment from the last 30 days.
+Run the terminal yourself with a live feed or a recording you already have.
+The hosted product adds maintained feeds, stored market history and a connected
+research workflow: define a condition, compare historical outcomes with a baseline,
+inspect the available replay evidence, and save a search to revisit.
 
-Research serves a different job: testing how often a defined condition occurred
-and what followed across a 90-day record. It includes a larger search budget plus
-REST API and MCP access. See [plans](https://edgedepth.com/pricing?utm_source=github&utm_medium=oss&utm_campaign=terminal) only when you need stored history or archive-wide evidence.
+Research also provides REST API and MCP access. Searchable research history and
+tick replay have different coverage and access limits; see the current
+[plans](https://edgedepth.com/pricing?utm_source=github&utm_medium=oss&utm_campaign=terminal)
+when you need hosted history or research capacity. Local replay remains part of
+the open-source terminal and requires no hosted subscription.
 
 ## Replay Library and local test packs
 
