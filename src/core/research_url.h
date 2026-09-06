@@ -11,8 +11,10 @@
 // the native unit test (tests/native/research_url_test.cpp) compiles it with
 // a plain host g++.
 //
-// URL contract (verified against the live web surface 2026-08-01):
-//   /research?source=record&study=investigate&entry=terminal&moment={symbol},{iso}
+// URL contract (verified against the live web surface 2026-09-06, when the
+// query workspace moved from /research to /research/workbench; the hub still
+// 308s the old shape, so an older build keeps working):
+//   /research/workbench?source=record&study=investigate&entry=terminal&moment={symbol},{iso}
 // where symbol matches ^[a-z0-9]{2,32}$ ("btcusdt", never "BTC/USDT") and
 // iso is RFC3339 UTC at seconds precision. `moment={symbol},now` is the live
 // variant. Optional &mfields=feature.a,feature.b pre-checks reading rows; the
@@ -95,7 +97,7 @@ inline std::string moment_url(const std::string& symbol_raw, int64_t t_ms,
                               const std::string& mfields = std::string(),
                               const char* base = "https://edgedepth.com") {
     std::string url = std::string(base) +
-                      "/research?source=record&study=investigate&entry=terminal&moment=" +
+                      "/research/workbench?source=record&study=investigate&entry=terminal&moment=" +
                       normalize_symbol(symbol_raw) + "," + iso_utc(floor_minute_ms(t_ms));
     if (!mfields.empty()) url += "&mfields=" + mfields;
     return url;
@@ -106,7 +108,7 @@ inline std::string moment_live_url(const std::string& symbol_raw,
                                    const std::string& mfields = std::string(),
                                    const char* base = "https://edgedepth.com") {
     std::string url = std::string(base) +
-                      "/research?source=record&study=investigate&entry=terminal&moment=" +
+                      "/research/workbench?source=record&study=investigate&entry=terminal&moment=" +
                       normalize_symbol(symbol_raw) + ",now";
     if (!mfields.empty()) url += "&mfields=" + mfields;
     return url;
