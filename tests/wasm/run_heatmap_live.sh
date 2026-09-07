@@ -2,6 +2,8 @@
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 build=${1:-"$repo/build-threaded"}
+# The standalone regression runs before the application build in CI.
+cmake --build "$build" --target generate_proto
 mkdir -p "$build/heatmap-test"
 em++ -std=c++20 -O1 -ffunction-sections -fdata-sections \
   -I"$repo/src" -I"$build" -I"$build/_deps/imgui-src" \
