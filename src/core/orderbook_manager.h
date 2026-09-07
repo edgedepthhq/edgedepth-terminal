@@ -2,6 +2,7 @@
 #include "types/types.h"
 #include "pb/messages.pb.h"
 #include "core/double_buffer.h"
+#include "core/realtime_history.h"
 #include <unordered_map>
 #include <string>
 #include <mutex>
@@ -52,7 +53,7 @@ public:
 
     void apply_orderbook_snapshot_from_pb(
         const Terminal::Pair& pair,
-        const pb::BookUpdate& snapshot_pb
+        const pb::BookUpdate& snapshot_pb, bool observed_source = true
     );
 
     void apply_book_ticker_from_pb(
@@ -80,7 +81,8 @@ public:
     void swap_buffers();
 
     // Clear all orderbook data (used on replay seek)
-    void clear_all() { orderbooks_.clear(); }
+    void clear_all() { orderbooks_.clear(); ++realtime_generation_; }
+    uint64_t realtime_generation() const { return realtime_generation_; }
 
     // Zero last_update_id on all orderbooks (used when the data source changes,
     // e.g., >> forward skip kills a drip-feed - the batch-delivered data has a
@@ -93,11 +95,26 @@ public:
         }
     }
 
-private:
-    bool replay_mode_ = false;
-    DoubleBufferedOrderbook& get_or_create(const OrderbookKey& key);
+    bool copy_realtime_since(const Terminal::Pair& pair, uint64_t serial,
+        std::vector<RealtimeDepthHistory::SamplePtr>& out) const;
+    void interrupt_realtime() { realtime_epoch_.fetch_add(1); }
+    void set_realtime_transport_open(bool open) {
+        realtime_transport_open_.store(open);
+        interrupt_realtime();
+    }
 
-    std::unordered_map<OrderbookKey, DoubleBufferedOrderbook> orderbooks_;
+private:
+    struct ManagedOrderbook : DoubleBufferedOrderbook {
+        RealtimeDepthHistory realtime;
+        uint64_t epoch = 0;
+    };
+    std::atomic<uint64_t> realtime_epoch_{0};
+    std::atomic<bool> realtime_transport_open_{true};
+    uint64_t realtime_generation_ = 0;
+    bool replay_mode_ = false;
+    ManagedOrderbook& get_or_create(const OrderbookKey& key);
+
+    std::unordered_map<OrderbookKey, ManagedOrderbook> orderbooks_;
 
     static void prune_orderbook(Terminal::Orderbook& orderbook);
 };

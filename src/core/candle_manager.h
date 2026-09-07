@@ -1,6 +1,7 @@
 #pragma once
 
 #include "types/types.h"
+#include "core/realtime_history.h"
 #include "stream_handler.h"
 #include <algorithm>
 #include <deque>
@@ -41,6 +42,7 @@ public:
     // ─── Data Input ──────────────────────────────────────────────────────
 
     void handle_trade(const Terminal::Trade& trade);
+    const RealtimeTradeHistory& realtime_trades() const { return realtime_trades_; }
     void handle_candle(const Terminal::Candle& candle);
     void handle_candle_batch(std::span<const Terminal::Candle> batch);
 
@@ -146,6 +148,7 @@ private:
     void ensure_cache() const { if (cache_dirty_) rebuild_cache(); }
     void mark_dirty() { cache_dirty_ = true; }
 
+    RealtimeTradeHistory realtime_trades_;
     Terminal::Pair pair_;
     int64_t timeframe_seconds_;
     StreamManager& stream_mgr_;

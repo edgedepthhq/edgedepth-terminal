@@ -39,7 +39,7 @@ void StreamManager::send_message(const std::string& message) const {
 void StreamManager::subscribe_direct(const StreamKey& key, void* owner) {
     auto& owners = direct_subs_[key];
     if (std::find(owners.begin(), owners.end(), owner) != owners.end()) return;
-    if (owners.empty()) send_subscribe(key);
+    if (owners.empty() && !orderbook_subs_.contains(key)) send_subscribe(key);
     owners.push_back(owner);
 }
 
@@ -49,7 +49,7 @@ void StreamManager::unsubscribe_direct(const StreamKey& key, void* owner) {
     auto& owners = it->second;
     std::erase(owners, owner);
     if (owners.empty()) {
-        send_unsubscribe(key);
+        if (!orderbook_subs_.contains(key)) send_unsubscribe(key);
         direct_subs_.erase(it);
     }
 }
@@ -65,7 +65,7 @@ void StreamManager::subscribe_orderbook(const StreamKey& key) {
     if (const auto it = orderbook_subs_.find(key); it == orderbook_subs_.end()) {
         // Insert empty vector just to track refcount
         orderbook_subs_[key] = {};
-        send_subscribe(key);
+        if (!direct_subs_.contains(key)) send_subscribe(key);
     }
 }
 
@@ -533,7 +533,7 @@ void StreamManager::for_each_server_subscription(Fn&& fn) const {
     // Presence, not size: the vector is always empty here by design.
     for (const auto& [key, handlers] : orderbook_subs_) {
         (void)handlers;
-        fn(key);
+        if (!direct_subs_.contains(key)) fn(key);
     }
     // One subscribe covers both candle maps, so emit each key once.
     for (const auto& [key, handlers] : candle_subs_) {

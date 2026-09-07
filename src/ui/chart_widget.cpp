@@ -205,6 +205,8 @@ ChartWidget::ChartWidget(
 }
 
 ChartWidget::~ChartWidget() {
+    if (rt_subscribed_)
+        ctx_.stream_mgr().unsubscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
     if (heatmap_stream_mgr_)
         heatmap_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Heatmap, 0}, this);
     if (footprint_stream_mgr_)
@@ -465,10 +467,11 @@ void ChartWidget::update() {
             }
         }
     }
+    if (rt_mode_) update_realtime();
     // Heatmap - request once candles are loaded (WS guaranteed connected).
     // Skipped in Renko: the time-keyed overlays do not draw there, and
     // update_heatmap() reads last_visible_range_ as TIME (brick indices in Renko).
-    if (heatmap_enabled_ && ct_allows_time_overlays(chart_type_) &&
+    if (!rt_mode_ && heatmap_enabled_ && ct_allows_time_overlays(chart_type_) &&
         ctx_.candle_mgr().is_initial_load_complete()) {
         request_heatmap_data();  // First-time request, deferred from constructor
 
@@ -516,6 +519,7 @@ void ChartWidget::set_liq_opacity(float v) {
 
 void ChartWidget::change_timeframe(const int new_tf_seconds)
 {
+    if (rt_mode_) set_rt_mode(false);
     ctx_.candle_mgr().change_timeframe(new_tf_seconds);
     // The previous viewport is expressed in the old timeframe's domain. Reusing
     // it for even one frame makes the new timeframe's Y fit sample the wrong
@@ -753,7 +757,7 @@ void ChartWidget::render_chart() {
     if (chart_type_ == ChartType::Renko) { render_chart_renko(); return; }
 
     const auto& timestamps = ctx_.candle_mgr().timestamps();
-    if (timestamps.empty() && !ctx_.candle_mgr().has_building_candle()) {
+    if (!rt_mode_ && timestamps.empty() && !ctx_.candle_mgr().has_building_candle()) {
         ImGui::Text("No candle data available");
         return;
     }
@@ -866,6 +870,14 @@ void ChartWidget::render_chart() {
         ctx_.candle_mgr().set_follow_live(true);
     }
     rt_was_on_ = rt_mode_;
+    if (rt_mode_) {
+        if (!rt_paused_) rt_clock_ms_ = ctx_.replay_mgr().is_active()
+            ? ctx_.replay_mgr().interpolated_time_ms()
+            : std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        x_max = double(rt_clock_ms_) + rt_span_ms_ * 0.12;
+        x_min = x_max - rt_span_ms_;
+    }
     // Drawing tools: the ImPlot input-map override must be in place BEFORE
     // BeginPlot (ImPlot reads the map at setup-lock, i.e. the first plot
     // item - not at EndPlot). Restored by end_frame() after render_chart.
@@ -893,8 +905,8 @@ void ChartWidget::render_chart() {
         if (chart_type_ != ChartType::TPO) {
             ImPlot::SetupAxisZoomConstraints(
                 ImAxis_X1,
-                kMinVisibleCandles * timeframe_ms,
-                kMaxVisibleCandles * timeframe_ms);
+                rt_mode_ ? 5000.0 : kMinVisibleCandles * timeframe_ms,
+                rt_mode_ ? 120000.0 : kMaxVisibleCandles * timeframe_ms);
         }
 
         // TPO mode: override x-axis formatter to show dates only (no scientific notation)
@@ -910,8 +922,8 @@ void ChartWidget::render_chart() {
 
         // Keep the viewport between 8 and 1,440 candles. When it is already
         // outside those bounds, force the repaired range for this frame.
-        const double min_x_span = kMinVisibleCandles * timeframe_ms;
-        const double max_x_span = kMaxVisibleCandles * timeframe_ms;
+        const double min_x_span = rt_mode_ ? 5000.0 : kMinVisibleCandles * timeframe_ms;
+        const double max_x_span = rt_mode_ ? 120000.0 : kMaxVisibleCandles * timeframe_ms;
         bool zoom_clamped = false;
         if (!ctx_.candle_mgr().follow_live() && chart_type_ != ChartType::TPO) {
             const double span = last_visible_range_.X.Max - last_visible_range_.X.Min;
@@ -1009,6 +1021,20 @@ void ChartWidget::render_chart() {
                 }
             }
         }
+        if (rt_mode_) {
+            y_min = std::numeric_limits<double>::infinity();
+            y_max = -std::numeric_limits<double>::infinity();
+            for (const auto& trade : realtime_trades()) {
+                if (trade.timestamp_ms < visible_x_min) continue;
+                if (trade.timestamp_ms > visible_x_max || trade.timestamp_ms > rt_clock_ms_) break;
+                y_min = std::min(y_min, trade.price);
+                y_max = std::max(y_max, trade.price);
+            }
+            if (rt_latest_ && rt_latest_->timestamp_ms <= rt_clock_ms_) {
+                y_min = std::min(y_min, rt_latest_->bid);
+                y_max = std::max(y_max, rt_latest_->ask);
+            }
+        }
         // Fallback
         if (y_min == std::numeric_limits<double>::infinity()) {
             const size_t candle_count = std::min({timestamps.size(), lows.size(), highs.size()});
@@ -1041,12 +1067,18 @@ void ChartWidget::render_chart() {
                 else { y_min = 0; y_max = 1; }
             }
         }
+        if (rt_mode_ && std::isfinite(y_min) && std::isfinite(y_max)) {
+            const double center = (y_min + y_max) * 0.5;
+            const double half = std::max({(y_max - y_min) * 0.5, tick_size_ * 64.0, center * 0.0001});
+            y_min = center - half;
+            y_max = center + half;
+        }
         const double y_span = y_max - y_min;
         const double y_padding = y_span > 0.0
             ? y_span * 0.08
             : std::max(std::abs(y_min) * 0.001, tick_size_ * 4.0);
         ImPlot::SetupAxisLimits(ImAxis_Y1, y_min - y_padding, y_max + y_padding,
-                                ImPlotCond_Always);
+                                rt_mode_ && !ctx_.candle_mgr().follow_live() ? ImPlotCond_Once : ImPlotCond_Always);
         if (!hide_x_labels) {
             // In TPO mode, always use last_visible_range_ for tick generation
             // to avoid stale visible_x_min/max on initial frames
@@ -1081,54 +1113,12 @@ void ChartWidget::render_chart() {
         const int64_t heatmap_replay_cutoff = ctx_.replay_mgr().is_active()
             ? ctx_.replay_mgr().interpolated_time_ms() : 0;
 
-        if (heatmap_enabled_ && ct_allows_time_overlays(chart_type_)) {
+        if (!rt_mode_ && heatmap_enabled_ && ct_allows_time_overlays(chart_type_)) {
             ProfileScope _ps("OBHeat");
             auto* reconstructor = ctx_.heatmap_mgr().get_reconstructor(pair_, heatmap_mode_);
             if (reconstructor && reconstructor->has_data()) {
 
-                // Viewport-adaptive bucket multiplier: ensure each heatmap cell
-                // is at least min_cell_px pixels tall. This adapts to any coin at
-                // any zoom level - BTC on 1m stays at native resolution, LABUSDT
-                // on 4h (300%+ range) aggregates into visible bands automatically.
-                // The UHD/HD/SD combo controls min_cell_px (detail preference).
-                const double native_bucket = reconstructor->get_native_bucket_size();
-                if (native_bucket > 0 && heatmap_adapt_to_zoom_) {
-                    const ImPlotRect limits = ImPlot::GetPlotLimits();
-                    const double visible_range = limits.Y.Max - limits.Y.Min;
-                    const ImVec2 plot_size = ImPlot::GetPlotSize();
-                    const float plot_height_px = plot_size.y;
-
-                    // UHD/HD/SD/LD/ULD → minimum pixels per cell
-                    // bucket_multipliers[] = {1, 2, 5, 10, 20} maps to detail tiers
-                    constexpr float detail_min_px[] = {1.5f, 2.5f, 4.0f, 6.0f, 10.0f};
-                    int detail_idx = 0;
-                    for (int i = 0; i < 5; i++) {
-                        const int bm[] = {1, 2, 5, 10, 20};
-                        if (heatmap_bucket_multiplier_ == bm[i]) { detail_idx = i; break; }
-                    }
-                    const float min_cell_px = detail_min_px[detail_idx];
-
-                    const int native_rows = static_cast<int>(visible_range / native_bucket);
-                    const int max_visible_rows = std::max(1, static_cast<int>(plot_height_px / min_cell_px));
-                    int adaptive_mult = std::max(1, native_rows / max_visible_rows);
-
-                    // Snap to clean values to avoid constant GPU rebuilds
-                    const int snap[] = {1, 2, 3, 5, 8, 10, 15, 20, 30, 50, 75, 100};
-                    int best = 1;
-                    for (int v : snap) {
-                        if (v <= adaptive_mult) best = v;
-                    }
-
-                    best = std::max(best, heatmap_bucket_multiplier_);
-                    // Hysteresis: only update if significantly different
-                    const int current = reconstructor->get_bucket_multiplier();
-                    if (best != current &&
-                        (best > current * 1.3 || best < current * 0.7 || current <= 1)) {
-                        reconstructor->set_bucket_multiplier(best);
-                    }
-                } else {
-                    reconstructor->set_bucket_multiplier(heatmap_bucket_multiplier_);
-                }
+                configure_depth_fidelity(*reconstructor);
 
                 reconstructor->set_replay_cutoff_ms(heatmap_replay_cutoff);
                 const int64_t candle_ms = tf_sec * 1000;
@@ -1155,6 +1145,10 @@ void ChartWidget::render_chart() {
             }
             render_heatmap_tooltip();
         }
+        if (rt_mode_ && rt_renderer_ && heatmap_enabled_) {
+            configure_depth_fidelity(*rt_renderer_);
+            rt_renderer_->render_cells(100, heatmap_sensitivity_, false);
+        }
         // 1.5 Liquidation timeline heatmap (the predictive shader map) -- ENABLED 2026-06-27.
         //     Re-enabled on the L1 footprint-located estimator field (peaky + persistent on the
         //     scoreboard + offline render). Per-level brightness is the per-tier USD with a
@@ -1164,31 +1158,31 @@ void ChartWidget::render_chart() {
         // 1.55 Liq Heatmap = dense candle×leverage projection Field (flow-weighted, MMT-style).
         //      Background layer: drawn BEFORE rails + candles so it's the predictive-map backdrop.
         //      Client-computed from CandleManager → universal + deterministic on every symbol/TF.
-        if (liq_dense_field_ && ct_allows_time_overlays(chart_type_)) {
+        if (!rt_mode_ && liq_dense_field_ && ct_allows_time_overlays(chart_type_)) {
             ProfileScope _ps("LiqField");
             liq_field_.render();
         }
         // 1.6 Liq Levels - discrete OI/positioning liquidation levels (rails), an
         //     independent layer on top of the Field.
-        if (liq_heatmap_enabled_ && ct_allows_time_overlays(chart_type_)) {
+        if (!rt_mode_ && liq_heatmap_enabled_ && ct_allows_time_overlays(chart_type_)) {
             ProfileScope _ps("LiqRails");
             render_liquidation_heatmap(visible_x_min, visible_x_max);
         }
         // 1.62 Liq Levels HL - REAL predictive liq levels (HL census, P2e). Drawn
         //      over the modelled layers: ground truth outranks the model. Underlying-
         //      keyed, so it also overlays non-HL charts of the same underlying.
-        if (liq_census_enabled_ && ct_allows_time_overlays(chart_type_)) {
+        if (!rt_mode_ && liq_census_enabled_ && ct_allows_time_overlays(chart_type_)) {
             ProfileScope _ps("LiqCensus");
             render_liq_census();
         }
         // 1.65 Liq Profile - smoothed price-marginal of the Field; independent
         //      toggle, candle-derived (needs no liq subscription or snapshot).
-        if (liq_profile_enabled_ && ct_allows_time_overlays(chart_type_)) {
+        if (!rt_mode_ && liq_profile_enabled_ && ct_allows_time_overlays(chart_type_)) {
             ProfileScope _ps("LiqProf");
             render_liq_profile();
         }
         // 1.7 VPVR profile overlay (sidebar histogram bars)
-        if (vpvr_enabled_) {
+        if (!rt_mode_ && vpvr_enabled_) {
             // Request profile data when visible range changes
             const int64_t tf_ms = static_cast<int64_t>(tf_sec) * 1000;
             const int64_t start_ms = static_cast<int64_t>(visible_x_min);
@@ -1213,7 +1207,7 @@ void ChartWidget::render_chart() {
                 const auto& bc = ctx_.candle_mgr().building_candle();
                 bld = {bc.open, bc.high, bc.low, bc.close, true};
             }
-            switch (chart_type_) {
+            if (!rt_mode_) switch (chart_type_) {
                 case ChartType::TPO:
                     render_tpo(visible_x_min, visible_x_max);
                     break;
@@ -1258,7 +1252,8 @@ void ChartWidget::render_chart() {
         //      scrub on the transport). Drawn over the real candles, under the
         //      Observed markers; reads ONLY the PreviewCandleStore. Skipped for
         //      Line (polyline ghost is a follow-up) and TPO/Renko (no time axis).
-        if (scrub_preview_ms > 0 && chart_type_ != ChartType::Line &&
+        if (rt_mode_) render_realtime();
+        if (!rt_mode_ && scrub_preview_ms > 0 && chart_type_ != ChartType::Line &&
             ct_allows_time_overlays(chart_type_)) {
             ProfileScope _ps("ScrubPreview");
             render_scrub_preview(visible_x_min, std::max(visible_x_max, x_max));
@@ -1266,11 +1261,11 @@ void ChartWidget::render_chart() {
         // 2.1 Observed - real @forceOrder liquidation markers (WS4). Drawn OVER the
         //     candles: liquidations fire at traded prices, so an under-candle layer
         //     would be occluded by the very candles that consumed them.
-        if (liq_observed_enabled_ && ct_allows_time_overlays(chart_type_)) {
+        if (!rt_mode_ && liq_observed_enabled_ && ct_allows_time_overlays(chart_type_)) {
             ProfileScope _ps("LiqObs");
             render_liq_observed();
         }
-        draw_ohlc_readout();
+        if (!rt_mode_) draw_ohlc_readout();
         // v2 3b: the LIVE status pill is redundant (top-bar Live toggle + status bar).
         // Keep the chip only in replay, where it shows the playback position.
         // No status chip while the clip recorder drives: it would burn the
@@ -1279,7 +1274,7 @@ void ChartWidget::render_chart() {
         if (ctx_.replay_mgr().is_active() && !edu::RecorderRuntime::instance().active())
             draw_status_chip();
         // 2.5 Footprint overlay (per-candle volume grid / profile sidebar)
-        if (ctx_.footprint_mgr().enabled) {
+        if (!rt_mode_ && ctx_.footprint_mgr().enabled) {
             ProfileScope _ps("Footprint");
             if (ctx_.footprint_mgr().mode == FootprintManager::Mode::Profile) {
                 render_footprint_profile(visible_x_min, visible_x_max);
@@ -1288,7 +1283,7 @@ void ChartWidget::render_chart() {
             }
         }
         // 3. Admin pattern context. Live-only and already gated at subscription.
-        if (!ctx_.replay_mgr().is_active() && ct_allows_time_overlays(chart_type_)) {
+        if (!rt_mode_ && !ctx_.replay_mgr().is_active() && ct_allows_time_overlays(chart_type_)) {
             ProfileScope _ps("Patterns");
             render_pattern_overlay(visible_x_min, visible_x_max);
         }
@@ -1309,6 +1304,14 @@ void ChartWidget::render_chart() {
                 cur_price = cl.back();
                 bullish = cl.back() >= op.back();
                 have_price = true;
+            }
+            if (rt_mode_) {
+                have_price = false;
+                for (auto it = realtime_trades().rbegin(); it != realtime_trades().rend(); ++it) {
+                    if (it->timestamp_ms > rt_clock_ms_) continue;
+                    cur_price = it->price; bullish = it->is_buy; have_price = true;
+                    break;
+                }
             }
             if (have_price) {
                 char price_buf[32];
@@ -2733,7 +2736,7 @@ void ChartWidget::render_controls() {
         changed |= ImGui::Checkbox("Adapt to zoom", &heatmap_adapt_to_zoom_);
         if (ImGui::IsItemHovered())
             Theme::tooltip("Group more price rows when zoomed out.\nTurn off for the exact selected grouping.");
-        auto* recon = ctx_.heatmap_mgr().get_reconstructor(pair_, heatmap_mode_);
+        auto* recon = rt_mode_ ? rt_renderer_.get() : ctx_.heatmap_mgr().get_reconstructor(pair_, heatmap_mode_);
         if (recon) {
             if (changed) recon->set_bucket_multiplier(heatmap_bucket_multiplier_);
             ImGui::TextUnformatted("Effective price bucket:");
@@ -2806,6 +2809,7 @@ void ChartWidget::render_controls() {
                            Theme::u32(Theme::Tokens::BRAND_TX));
             if (clicked) {
                 const ChartType prev = chart_type_;
+                if (rt_mode_) set_rt_mode(false);
                 chart_type_ = static_cast<ChartType>(idx);
                 auto& fp = ctx_.footprint_mgr();
                 fp.enabled = (idx == 1 || idx == 2);

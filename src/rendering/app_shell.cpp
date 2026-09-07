@@ -867,7 +867,8 @@ namespace {
                             u32(on ? Tokens::TX1 : (rhov ? Tokens::TX1 : Tokens::TX2)), "RT");
                 ImGui::PopFont();
                 if (rclicked && chart) chart->toggle_rt_mode();
-                if (rhov) Theme::tooltip("Real-time view - follow the live edge (any chart type)");
+                if (rhov) Theme::tooltip("Observed depth, trade bubbles and spread. Hosted live RT is Pro; local replay is available.");
+                if (chart && on) chart->render_realtime_settings();
                 ImGui::Dummy(ImVec2(0, 2));
             }
 
@@ -963,20 +964,21 @@ namespace {
         using namespace Theme;
         const int64_t cur = chart ? chart->timeframe_seconds() : 0;
         const int current_tf = static_cast<int>(cur);
-        const bool compact = ImGui::GetContentRegionAvail().x < 760.0f;
+        const bool realtime = chart && chart->rt_mode();
+        const bool compact = realtime || ImGui::GetContentRegionAvail().x < 760.0f;
         const std::span<const int> visible_favs = compact
             ? std::span<const int>(&current_tf, 1) : std::span<const int>(g_tf_favs);
         ImDrawList* dl = ImGui::GetWindowDrawList();
         ImGui::PushFont(Fonts::ui());
         const float h = 30.0f, padx = 11.0f, caretw = 30.0f;
         float total = caretw + 1.0f;
-        for (int sec : visible_favs) total += ImGui::CalcTextSize(tf_label(sec)).x + padx * 2.0f;
+        for (int sec : visible_favs) total += ImGui::CalcTextSize(realtime ? "RT" : tf_label(sec)).x + padx * 2.0f;
         const ImVec2 p0 = ImGui::GetCursorScreenPos();
         // Flat favourites share the toolbar surface; selection carries the accent.
 
         float x = p0.x;
         for (int sec : visible_favs) {
-            const char* lbl = tf_label(sec);
+            const char* lbl = realtime ? "RT" : tf_label(sec);
             const float w = ImGui::CalcTextSize(lbl).x + padx * 2.0f;
             const bool on = (sec == cur);
             ImGui::SetCursorScreenPos(ImVec2(x, p0.y));
@@ -984,7 +986,10 @@ namespace {
             const bool clk = ImGui::InvisibleButton("##fav", ImVec2(w, h));
             const bool hov = ImGui::IsItemHovered();
             ImGui::PopID();
-            if (clk && chart) chart->change_timeframe(sec);
+            if (clk && chart) {
+                if (realtime) ImGui::OpenPopup("##tf_menu");
+                else chart->change_timeframe(sec);
+            }
             // Selected timeframe uses the shared accent on an inset chip.
             if (on) {
                 dl->AddRectFilled(ImVec2(x + 3, p0.y + 3), ImVec2(x + w - 3, p0.y + h - 3), u32(Tokens::BRAND_SOFT), 2.0f);

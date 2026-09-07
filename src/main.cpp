@@ -346,10 +346,12 @@ static void on_ws_message(const uint8_t* data, size_t len, WsLane lane) {
 
 static void on_ws_status(const std::string& status) {
     if (status == "Reconnecting") {
+        if (g_app.ob_mgr) g_app.ob_mgr->set_realtime_transport_open(false);
         g_app.stream_mgr->update_websocket_handle(0);
         if (g_app.replay_mgr) g_app.replay_mgr->on_transport_interrupted(g_app.ws_client.get());
     }
     if (status == "Connected") {
+        if (g_app.ob_mgr) g_app.ob_mgr->set_realtime_transport_open(true);
         g_app.stream_mgr->update_websocket_handle(g_app.ws_client->get_handle());
 
         // Embedded lesson/studio mode: the socket is still needed (replay frames

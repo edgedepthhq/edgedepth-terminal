@@ -234,6 +234,7 @@ void CandleManager::reset_for_seek(int64_t seek_time_ms) {
 }
 
 void CandleManager::trim_candles_after(int64_t cutoff_ms) {
+    realtime_trades_.clear(); // The replay buffer re-delivers the traversed records.
     // Remove the building candle if it's past the cutoff
     if (has_current_candle_ && current_candle_.timestamp_ms > cutoff_ms) {
         has_current_candle_ = false;
@@ -299,6 +300,7 @@ size_t CandleManager::visible_candles_for_timeframe() const {
 // Trade → Candle Building
 
 void CandleManager::handle_trade(const Terminal::Trade& trade) {
+    realtime_trades_.append(trade);
     if (!initial_load_complete_) return;  // Don't build candles until batch arrives
     // After a seek, suppress trade-based candle building until the historical
     // batch arrives. Without this, trades create a building candle at the seek
@@ -345,6 +347,7 @@ void CandleManager::append_tick(int64_t time_ms, double price) {
 }
 
 void CandleManager::clear_ticks() {
+    realtime_trades_.clear();
     // Keep capacity so a symbol/seek reset does not re-thrash the allocator.
     tick_times_.clear();
     tick_prices_.clear();

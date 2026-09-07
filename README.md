@@ -28,6 +28,30 @@ market data and history access are separate from the open-source license.
 part of the OSS renderer. Hosted analytics and stored history are not bundled
 with the community gateway.*
 
+### Real-time depth
+
+Choose **RT** in the timeframe menu for observed orderbook history, historical
+best bid/ask steps, the current spread and book on the same price axis, and
+volume-sized trade bubbles. The default view has no candles. Optional trade-price
+line and one-second observed candles are available in the RT controls, alongside
+Pause display and the minimum trade value (price times quantity in quote units).
+
+Depth keeps the first actual event in each 100ms display bin, up to 1,200 samples
+and two minutes, with 512 levels per side. Source cadence remains event-driven:
+quiet periods hold the last synchronized book; sequence breaks require a fresh
+seed. This sampling setting does not change upstream collection. Trade history
+keeps up to 20,000 received records/two minutes and draws the newest 1,500 qualifying
+records in view. Exchanges may aggregate fills; identical records are not guessed
+to be duplicates. Bubbles use aggressor side and a capped square-root size scale.
+
+Zoom spans five seconds to two minutes. Depth settings retain the existing price
+fidelity controls. Replay draws only evidence eligible at the playhead; seeking
+clears the previous traversal. An unverified in-buffer book restore waits for a
+fresh seed, and no subsecond history is reconstructed before joining. One-second
+candles are partial observed trades, not complete historical candles. Other
+candle/model overlays are omitted in RT. Standalone feeds and local packs need no
+Pro account; the hosted live view uses the existing Pro UI entitlement.
+
 ### Diagonal and stacked footprints
 
 ![Recorded TUT footprint with diagonal 3:1 imbalances and three-level stacks](assets/terminal-diagonal-stacks.png)

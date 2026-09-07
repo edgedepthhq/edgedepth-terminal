@@ -38,6 +38,7 @@ uniform float u_viewport_price_max; // Top price
 
 // Ring buffer state
 uniform float u_data_time_start;   // Timestamp of oldest valid column (seconds)
+uniform float u_observation_hold_until; // RT held state, seconds from grid origin
 uniform float u_time_step;         // Seconds per column
 uniform int u_ring_start;          // Ring index of oldest valid column
 uniform int u_ring_count;          // Number of valid columns
@@ -73,7 +74,12 @@ void main() {
     int col_offset = int(floor(col_offset_f));
 
     // Bounds check: is this time within our data range?
-    if (col_offset < 0 || col_offset >= u_ring_count) discard;
+    if (col_offset < 0) discard;
+    bool held_tail = col_offset >= u_ring_count;
+    if (held_tail) {
+        if (u_ring_count == 0 || u_observation_hold_until <= 0.0 || time > u_observation_hold_until) discard;
+        col_offset = u_ring_count - 1;
+    }
 
     // Map to ring buffer texture column
     int tex_col = (u_ring_start + col_offset) % u_ring_size;
@@ -81,6 +87,15 @@ void main() {
     // Read per-column metadata:
     // R = price_min, G = num_valid_rows, B = max_value, A = flags
     vec4 meta = texelFetch(u_meta, ivec2(tex_col, 0), 0);
+    // Between adjacent synchronized observations, hold the preceding state
+    // until the new event's original timestamp. No future book paints backward.
+    // A segment boundary or an absent bin stops this hold.
+    if (!held_tail && meta.a >= 3.0 && fract(col_offset_f) < fract(meta.a)) {
+        if (meta.a >= 5.0 || col_offset == 0) discard;
+        tex_col = (tex_col + u_ring_size - 1) % u_ring_size;
+        meta = texelFetch(u_meta, ivec2(tex_col, 0), 0);
+        if (meta.a < 3.0) discard;
+    }
     float col_price_min = meta.r;
     int col_num_rows = int(meta.g);
     // float col_max_value = meta.b;  // Available for per-column normalization
@@ -295,6 +310,7 @@ void ShaderHeatmapResources::cache_uniforms() {
     uniforms_.u_viewport_price_max = loc("u_viewport_price_max");
     uniforms_.u_data_time_start = loc("u_data_time_start");
     uniforms_.u_time_step = loc("u_time_step");
+    uniforms_.u_observation_hold_until = loc("u_observation_hold_until");
     uniforms_.u_ring_start = loc("u_ring_start");
     uniforms_.u_ring_count = loc("u_ring_count");
     uniforms_.u_ring_size = loc("u_ring_size");

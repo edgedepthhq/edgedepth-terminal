@@ -50,6 +50,7 @@ public:
         GLint u_viewport_price_max = -1;
         GLint u_data_time_start = -1;
         GLint u_time_step = -1;
+        GLint u_observation_hold_until = -1;
         GLint u_ring_start = -1;
         GLint u_ring_count = -1;
         GLint u_ring_size = -1;

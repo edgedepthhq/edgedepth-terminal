@@ -1103,7 +1103,7 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
             // in the buffer. Setting to 0 uses the existing sentinel path
             // ("skip continuity check, chain normally from next delta").
             snapshot_pb.set_last_update_id(0);
-            ob_mgr.apply_orderbook_snapshot_from_pb(pair, snapshot_pb);
+            ob_mgr.apply_orderbook_snapshot_from_pb(pair, snapshot_pb, false);
         };
 
         // Message replay callback - dispatch through normal pipeline

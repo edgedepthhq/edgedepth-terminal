@@ -167,5 +167,49 @@ int main() {
     assert(r.get_value_at_price_and_time(100.25, epoch + (r.RING_SIZE + 5LL) * 60000) == 46);
     r.set_bucket_multiplier(1);
     assert(r.get_value_at_price_and_time(100.25, epoch + (r.RING_SIZE + 5LL) * 60000) == 17);
+    r.clear();
+    r.configure_realtime(1);
+    r.set_observation_clock_ms(epoch + 1000);
+    r.finalize_column(epoch + 17, {{100, 2}}, true);
+    r.finalize_column(epoch + 117, {{100, 3}});
+    r.finalize_column(epoch + 417, {{100, 4}}, true);
+    r.sync_gpu_from_timeline();
+    assert(r.time_step_ms_ == 100);
+    assert(r.column_meta_[0].timestamp_ms == epoch + 17);
+    assert(std::abs(metadata[r.meta_texture_][3] - 5.17f) < 0.001f);
+    assert(std::abs(metadata[r.meta_texture_][7] - 3.17f) < 0.001f);
+    assert(metadata[r.meta_texture_][11] == 0); // Missing bin never filled.
+    assert(r.timeline_.size() == 3);
+    r.finalize_column(epoch + 150, {{100, 99}});
+    assert(r.timeline_.size() == 3); // One observed state per temporal bin.
+    r.invalidate_observation(epoch + 417);
+    r.sync_gpu_from_timeline();
+    assert(r.timeline_.size() == 2);
+    // Event-driven source: quiet intervals are holds, not missing events.
+    r.finalize_column(epoch + 617, {{100, 9}});
+    r.sync_gpu_from_timeline();
+    assert(r.timeline_.size() == 3); // Only actual observations retained.
+    assert(metadata[r.meta_texture_][11] == 4); // 200ms uses prior book.
+    assert(r.column_meta_[2].timestamp_ms == epoch + 117);
+    assert(r.get_value_at_price_and_time(100.25, epoch + 350) == 3);
+    r.set_observation_clock_ms(epoch + 2500);
+    r.finalize_column(epoch + 1617, {{100, 12}}); // Once-per-second activity.
+    assert(r.column_meta_[10].timestamp_ms == epoch + 617);
+    r.finalize_column(epoch + 2017, {{100, 14}}, true);
+    r.sync_gpu_from_timeline();
+    assert(metadata[r.meta_texture_][18 * 4 + 3] == 0); // Broken sequence stays absent.
+    r.set_observation_hold(epoch + 2500);
+    assert(r.observation_hold_until_ms_ == epoch + 2500);
+    r.set_observation_hold(0);
+    assert(r.observation_hold_until_ms_ == 0);
+    r.set_observation_clock_ms(epoch + 1000000);
+    for (int i = 5; i < 1400; ++i) r.finalize_column(epoch + i * 100 + 17, {{100, float(i)}});
+    assert(r.timeline_.size() == 1200);
+    r.sync_gpu_from_timeline();
+    assert(r.time_step_ms_ == 100 && r.ring_count_ <= 1200);
+    r.set_replay_cutoff_ms(epoch + 130017);
+    r.sync_gpu_from_timeline();
+    for (const auto& column : r.column_meta_)
+        if (column.num_rows) assert(column.timestamp_ms <= epoch + 130017);
     std::puts("PASS: live depth survives rebuilds, finalization and origin changes; rewind/clear discard it");
 }

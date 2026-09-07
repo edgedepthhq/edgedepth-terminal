@@ -1,4 +1,5 @@
 #pragma once
+#include "core/realtime_history.h"
 
 #include <implot.h>
 #include "ui/widget.h"
@@ -110,8 +111,10 @@ public:
     // the live edge (follow-live streaming) and, for the Line, draws the live-
     // edge dot. Toggled from the TIMEFRAME dropdown (see app_shell render_tf_menu).
     bool rt_mode() const { return rt_mode_; }
-    void set_rt_mode(bool v) { rt_mode_ = v; }
-    void toggle_rt_mode() { rt_mode_ = !rt_mode_; }
+    void set_rt_mode(bool v);
+    void toggle_rt_mode() { set_rt_mode(!rt_mode_); }
+    void render_realtime_settings();
+    void on_rewind(int64_t cutoff_ms) override;
 
     float liq_opacity() const { return liq_opacity_; }   // liq-heatmap opacity (Tweaks panel)
     void  set_liq_opacity(float v);                      // set + push to the reconstructor
@@ -269,6 +272,23 @@ private:
     // re-arms follow-live exactly ONCE on the rising edge (not every frame).
     bool    rt_mode_    = false;
     bool    rt_was_on_  = false;
+    bool rt_candles_ = false, rt_bubbles_ = true, rt_book_valid_ = false;
+    bool rt_paused_ = false, rt_trade_line_ = false;
+    std::deque<RealtimeDepthHistory::SamplePtr> rt_samples_;
+    std::deque<Terminal::Trade> rt_paused_trades_;
+    const std::deque<Terminal::Trade>& realtime_trades() const;
+    bool rt_subscribed_ = false;
+    float rt_min_notional_ = 10000.0f;
+    double rt_span_ms_ = 60000.0;
+    int64_t rt_clock_ms_ = 0;
+    uint64_t rt_serial_ = 0, rt_generation_ = 0;
+    std::unique_ptr<ShaderHeatmapRenderer> rt_renderer_;
+    std::vector<RealtimeDepthHistory::SamplePtr> rt_pending_;
+    RealtimeDepthHistory::SamplePtr rt_latest_;
+    std::unordered_map<double, float> rt_prices_;
+    void update_realtime();
+    void render_realtime();
+    void configure_depth_fidelity(ShaderHeatmapRenderer& renderer);
     // Deferred popup opens (set inside Indicators popup, opened next frame)
     bool open_liq_settings_ = false;
     bool open_vpvr_settings_ = false;

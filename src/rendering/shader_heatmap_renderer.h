@@ -3,6 +3,7 @@
 #include <GLES3/gl3.h>
 #include <array>
 #include <map>
+#include <set>
 #include <unordered_map>
 #include <vector>
 #include <cstdint>
@@ -54,8 +55,21 @@ public:
 
     /// Finalize a column (server-authoritative, prevents live overwrite).
     void finalize_column(int64_t timestamp_ms,
-                         const std::unordered_map<double, float>& price_qty_map);
+                         const std::unordered_map<double, float>& price_qty_map, bool segment_start = false);
 
+    // A separate instance for observed subsecond depth; historical candle
+    // columns never enter this renderer. Original observation clocks are keys.
+    void configure_realtime(double tick_size) {
+        realtime_ = true;
+        column_interval_ms_ = 100;
+        time_step_ms_ = 100;
+        native_bucket_size_ = tick_size;
+    }
+    void invalidate_observation(int64_t timestamp_ms) {
+        if (realtime_ && timeline_.erase(timestamp_ms)) { gpu_dirty_ = true; last_sync_ms_ = 0; }
+    }
+    void set_observation_hold(int64_t until_ms) { observation_hold_until_ms_ = until_ms; }
+    void set_observation_clock_ms(int64_t ms) { if (realtime_) replay_cutoff_ms_ = ms; }
     void clear();
     void mark_dirty();
 
@@ -256,6 +270,13 @@ private:
     int64_t gpu_origin_ms_ = 0;
     double gpu_bucket_size_ = 0.0;
     int64_t time_step_ms_ = 60000; // Interval of the uploaded GPU grid
+    bool realtime_ = false;
+    int64_t observation_hold_until_ms_ = 0;
+    void fill_observation_hold(int previous, int next);
+    std::set<int64_t> observation_boundaries_;
+    float column_flags(int64_t ts) const {
+        return realtime_ ? (observation_boundaries_.contains(ts) ? 5.0f : 3.0f) + float(ts % 100) / 100.0f : 1.0f;
+    }
     int64_t column_interval_ms_ = 60000; // Requested orderbook interval
 
     // ── Render callback data ────────────────────────────────────────
@@ -278,6 +299,7 @@ private:
         float viewport_price_min = 0, viewport_price_max = 0;
         float data_time_start = 0;
         float time_step = 0;
+        float observation_hold_until = 0;
         int ring_start = 0, ring_count = 0;
         int ring_size = RING_SIZE, max_rows = MAX_ROWS;
         float bucket_size = 0;

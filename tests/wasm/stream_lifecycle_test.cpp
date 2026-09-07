@@ -54,4 +54,24 @@ int main() {
         check(sent.size() == 5, "replay never creates live subscriptions");
     }
     std::puts("Stream lifecycle passed for footprints and heatmaps");
+    for (bool chart_first : {false, true}) {
+        sent.clear();
+        StreamManager sm(1);
+        int chart = 0;
+        const StreamKey key{{"binancef", "btcusdt"}, Terminal::Stream::Orderbook, 0};
+        if (chart_first) sm.subscribe_direct(key, &chart);
+        sm.subscribe_orderbook(key);
+        if (!chart_first) sm.subscribe_direct(key, &chart);
+        check(sent.size() == 1, "RT and DOM share the existing orderbook subscription");
+        sm.update_websocket_handle(2);
+        check(sent.size() == 2, "RT and DOM restore once on reconnect");
+        sm.pause_live_subscriptions();
+        check(sent.size() == 3, "shared depth pauses once");
+        sm.update_websocket_handle(3);
+        check(sent.size() == 3, "shared paused depth stays paused");
+        sm.resume_live_subscriptions();
+        check(sent.size() == 4, "shared depth resumes once");
+        sm.unsubscribe_direct(key, &chart);
+        check(sent.size() == 4, "closing RT does not unsubscribe the DOM");
+    }
 }

@@ -1,7 +1,7 @@
 #include "core/orderbook_manager.h"
 #include <cstdio>
 
-DoubleBufferedOrderbook& OrderbookManager::get_or_create(const OrderbookKey& key) {
+OrderbookManager::ManagedOrderbook& OrderbookManager::get_or_create(const OrderbookKey& key) {
     auto [it, inserted] = orderbooks_.try_emplace(key);
     if (inserted) {
     }
@@ -30,6 +30,12 @@ void OrderbookManager::apply_book_update_from_pb(
     if (last_update_id <= orderbook.last_update_id) {
         return;
     }
+    if (db.epoch != realtime_epoch_.load()) {
+        db.realtime.interrupt();
+        db.epoch = realtime_epoch_.load();
+    }
+    db.realtime.check_delta(orderbook.last_update_id, update_pb.first_update_id(),
+        last_update_id, prev_last_update_id);
     // During replay, skip strict LastUpdateId continuity checks entirely.
     // DB-backed replay delivers depth updates from 5-second batches where
     // multiple rows per timestamp can arrive in non-deterministic order.
@@ -129,6 +135,7 @@ void OrderbookManager::apply_book_update_from_pb(
     orderbook.timestamp_ms = update_pb.timestamp_ms();
     orderbook.delta_updates++;  // incremental depth tick (not seed) - see context_primed
 
+    db.realtime.observe(orderbook, update_pb.timestamp_ms());
     if (++orderbook.update_count_since_prune >= 100) {
         prune_orderbook(orderbook);
         orderbook.update_count_since_prune = 0;
@@ -138,7 +145,7 @@ void OrderbookManager::apply_book_update_from_pb(
 
 void OrderbookManager::apply_orderbook_snapshot_from_pb(
     const Terminal::Pair& pair,
-    const pb::BookUpdate& snapshot_pb)
+    const pb::BookUpdate& snapshot_pb, bool observed_source)
 {
     OrderbookKey key{pair.exchange, pair.symbol};
     auto& db = get_or_create(key);
@@ -185,6 +192,13 @@ void OrderbookManager::apply_orderbook_snapshot_from_pb(
     // cause spurious DESYNC resets. The OB self-heals as deltas overwrite
     // stale levels. INT32_MAX = permanent (never decrements to 0).
     orderbook.replay_grace_remaining = INT32_MAX;
+    const auto epoch = realtime_epoch_.load();
+    if (db.epoch != epoch) db.realtime.interrupt();
+    db.epoch = epoch;
+    if (observed_source) {
+        db.realtime.seed();
+        db.realtime.observe(orderbook, snapshot_pb.timestamp_ms());
+    } else db.realtime.interrupt();
     db.mark_dirty();
 }
 
@@ -200,14 +214,10 @@ void OrderbookManager::apply_book_ticker_from_pb(
     if (!orderbook.is_synchronized()) {
         return;
     }
-    if (ticker_pb.best_bid() > 0.0 && ticker_pb.best_bid_qty() > 0.0) {
-        orderbook.bids.insert_or_assign(ticker_pb.best_bid(), ticker_pb.best_bid_qty());
-    }
-    if (ticker_pb.best_ask() > 0.0 && ticker_pb.best_ask_qty() > 0.0) {
-        orderbook.asks.insert_or_assign(ticker_pb.best_ask(), ticker_pb.best_ask_qty());
-    }
-    orderbook.timestamp_ms = ticker_pb.timestamp_ms();
-    db.mark_dirty();
+    // Top-of-book quotes are not depth deltas. Inserting them into the book
+    // can leave ghost levels and falsely advance the full-depth clock.
+    (void)ticker_pb;
+
 }
 
 void OrderbookManager::note_trade_price(const Terminal::Pair& pair, double price) {
@@ -256,6 +266,17 @@ const Terminal::Orderbook* OrderbookManager::get_orderbook(const Terminal::Pair&
     const OrderbookKey key{pair.exchange, pair.symbol};
     const auto it = orderbooks_.find(key);
     return (it != orderbooks_.end()) ? &it->second.read_buf : nullptr;
+}
+
+bool OrderbookManager::copy_realtime_since(const Terminal::Pair& pair, uint64_t serial,
+    std::vector<RealtimeDepthHistory::SamplePtr>& out) const {
+    out.clear();
+    const auto it = orderbooks_.find({pair.exchange, pair.symbol});
+    if (it == orderbooks_.end()) return false;
+    const auto& db = it->second;
+    std::lock_guard lock(db.write_mutex);
+    db.realtime.copy_since(serial, out);
+    return realtime_transport_open_.load() && db.epoch == realtime_epoch_.load() && db.realtime.valid();
 }
 
 void OrderbookManager::prune_orderbook(Terminal::Orderbook& orderbook) {

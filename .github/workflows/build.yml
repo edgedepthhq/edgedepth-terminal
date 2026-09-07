@@ -53,6 +53,9 @@ jobs:
       - name: Heatmap live-column regression
         run: bash tests/wasm/run_heatmap_live.sh "$PWD/build"
 
+      - name: Real-time depth sequence and retention regression
+        run: bash tests/wasm/run_realtime_depth.sh "$PWD/build"
+
       - name: Build
         run: cd build && emmake make -j$(nproc) c_based_trader_client
 

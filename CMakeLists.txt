@@ -388,6 +388,7 @@ set(PROJECT_SRC
         src/ui/replay_library_widget.cpp
         src/ui/chart_widget.h
         src/ui/chart_widget.cpp
+        src/ui/chart_widget_realtime.cpp
         src/ui/chart_widget_scrub_preview.cpp
         src/ui/price_profile_renderer.h
         src/ui/price_profile_renderer.cpp
@@ -523,6 +524,20 @@ add_executable(c_based_trader_client
         ${IMPLOT_SRC}
         ${ZSTD_SRC}
 )
+
+# Standalone production depth regression uses the same pinned wire/runtime.
+if(EMSCRIPTEN)
+    add_executable(realtime_depth_regression EXCLUDE_FROM_ALL
+        tests/wasm/realtime_history_test.cpp src/core/orderbook_manager.cpp
+        ${PROTO_SRCS} ${PROTOBUF_LITE_SRCS})
+    add_dependencies(realtime_depth_regression generate_proto)
+    target_include_directories(realtime_depth_regression PRIVATE
+        ${CMAKE_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}
+        ${CMAKE_CURRENT_BINARY_DIR}/include ${PROTOBUF_SOURCE_DIR}/src)
+    target_compile_options(realtime_depth_regression PRIVATE -O1)
+    target_link_options(realtime_depth_regression PRIVATE -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1)
+    set_target_properties(realtime_depth_regression PROPERTIES SUFFIX ".js")
+endif()
 
 # Ensure protobuf files are generated before compiling
 add_dependencies(c_based_trader_client generate_proto)

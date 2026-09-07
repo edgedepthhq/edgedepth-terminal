@@ -312,12 +312,22 @@ void ShaderHeatmapRenderer::upload_observed_column(int64_t timestamp_ms,
 
 void ShaderHeatmapRenderer::finalize_column(
     int64_t timestamp_ms,
-    const std::unordered_map<double, float>& price_qty_map)
+    const std::unordered_map<double, float>& price_qty_map, bool segment_start)
 {
     if (native_bucket_size_ <= 0 || price_qty_map.empty()) return;
 
     // Store in timeline (CPU-side for tooltips/labels)
     const int64_t old_origin = timeline_.empty() ? timestamp_ms : timeline_.begin()->first;
+    if (realtime_) {
+        const int64_t bin = timestamp_ms / column_interval_ms_ * column_interval_ms_;
+        auto it = timeline_.lower_bound(bin);
+        if (it != timeline_.end() && it->first < bin + column_interval_ms_) return;
+        while (!timeline_.empty() && timeline_.begin()->first <= timestamp_ms - 120000) {
+            observation_boundaries_.erase(timeline_.begin()->first);
+            timeline_.erase(timeline_.begin());
+        }
+        if (segment_start) observation_boundaries_.insert(timestamp_ms);
+    }
     timeline_[timestamp_ms] = price_qty_map;
     evict_oldest_timeline();
     if (timeline_.begin()->first != old_origin) gpu_dirty_ = true;
@@ -330,6 +340,13 @@ void ShaderHeatmapRenderer::finalize_column(
         const int col = static_cast<int>((timestamp_ms - oldest_ts) / time_step_ms_);
         if (timestamp_ms >= oldest_ts && col >= 0 && col < RING_SIZE &&
             (replay_cutoff_ms_ == 0 || timestamp_ms <= replay_cutoff_ms_)) {
+            if (realtime_ && !segment_start) {
+                auto previous = timeline_.lower_bound(timestamp_ms);
+                if (previous != timeline_.begin()) {
+                    --previous;
+                    fill_observation_hold(find_column_for_time(previous->first), col);
+                }
+            }
             if (column_meta_[col].finalized && column_meta_[col].timestamp_ms > timestamp_ms) return;
             // Center this column (same logic as sync_gpu_from_timeline)
             double snap_pmin = std::numeric_limits<double>::max();
@@ -351,7 +368,7 @@ void ShaderHeatmapRenderer::finalize_column(
                     if (av > col_max) col_max = av;
                 }
                 if (col_max > global_max_qty_) global_max_qty_ = col_max;
-                upload_column(col, num_rows, pmin, native_bucket_size_, col_max, 1.0f);
+                upload_column(col, num_rows, pmin, native_bucket_size_, col_max, column_flags(timestamp_ms));
 
                 auto& meta = column_meta_[col];
                 meta.timestamp_ms = timestamp_ms;
@@ -623,6 +640,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
                 (mid_price - half_win) / native_bucket_size_) * native_bucket_size_;
         }
 
+        if (realtime_ && !observation_boundaries_.contains(ts)) fill_observation_hold(highest_col, col);
         // Build float column
         const int num_rows = build_column(price_qty_map, col_price_min,
                                           native_bucket_size_, apply_spread);
@@ -644,7 +662,8 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
         // Direct per-column GL upload from column_build_buf_ (contiguous, cache-friendly).
         // The old staging buffer approach required strided writes (data_staging_[r * RING_SIZE + col])
         // which were cache-hostile - 4M iterations for 4000 columns.
-        upload_column(col, num_rows, col_price_min, native_bucket_size_, col_max, 1.0f);
+        upload_column(col, num_rows, col_price_min, native_bucket_size_, col_max,
+            column_flags(ts));
 
         // Phase 2a: Build + upload reach_prob column at the same ring position.
         // Uses the same col_price_min and native_bucket_size_ as the data column.
@@ -694,7 +713,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
         meta_staging_[meta_offset + 0] = static_cast<float>(col_price_min);
         meta_staging_[meta_offset + 1] = static_cast<float>(num_rows);
         meta_staging_[meta_offset + 2] = col_max;
-        meta_staging_[meta_offset + 3] = 1.0f;  // flags: valid
+        meta_staging_[meta_offset + 3] = column_flags(ts);  // flags: valid
 
         // Store CPU-side metadata
         auto& meta = column_meta_[col];
@@ -754,6 +773,22 @@ void ShaderHeatmapRenderer::evict_oldest_timeline() {
     }
 }
 
+void ShaderHeatmapRenderer::fill_observation_hold(int previous, int next) {
+    if (!realtime_ || previous < 0 || next <= previous + 1 || next >= RING_SIZE) return;
+    const auto& source = column_meta_[previous];
+    if (source.num_rows <= 0 || source.values.empty()) return;
+    std::copy(source.values.begin(), source.values.end(), column_build_buf_.begin());
+    for (int col = previous + 1; col < next; ++col) {
+        upload_column(col, source.num_rows, source.price_min, source.price_step, source.max_value, 4.0f);
+        column_meta_[col] = source; // Retain the original observation clock.
+        const size_t offset = size_t(col) * 4;
+        meta_staging_[offset] = float(source.price_min);
+        meta_staging_[offset + 1] = float(source.num_rows);
+        meta_staging_[offset + 2] = source.max_value;
+        meta_staging_[offset + 3] = 4.0f; // Held state between proven contiguous events.
+    }
+}
+
 void ShaderHeatmapRenderer::set_column_interval_ms(int64_t interval_ms) {
     interval_ms = std::max<int64_t>(1000, interval_ms);
     if (column_interval_ms_ == interval_ms) return;
@@ -763,10 +798,12 @@ void ShaderHeatmapRenderer::set_column_interval_ms(int64_t interval_ms) {
 
 int64_t ShaderHeatmapRenderer::display_time_to_bucket(double time_ms) const {
     return gpu_origin_ms_ + static_cast<int64_t>(std::floor(
-        (time_ms - gpu_origin_ms_) / time_step_ms_ + 0.5)) * time_step_ms_;
+        (time_ms - gpu_origin_ms_) / time_step_ms_ + (realtime_ ? 0.0 : 0.5))) * time_step_ms_;
 }
 
 void ShaderHeatmapRenderer::clear() {
+    observation_boundaries_.clear();
+    observation_hold_until_ms_ = 0;
     ring_count_ = 0;
     time_step_ms_ = column_interval_ms_;
     gpu_origin_ms_ = 0;
@@ -886,12 +923,14 @@ void ShaderHeatmapRenderer::render_cells(
 
     // Sequential ring buffer - column 0 = oldest, column ring_count-1 = newest.
     u.time_step = static_cast<float>(time_step_ms_) / 1000.0f;
+    u.observation_hold_until = realtime_ && observation_hold_until_ms_ > oldest_ts
+        ? float(observation_hold_until_ms_ - oldest_ts) / 1000.0f : 0;
     // Center each column on its bucket timestamp. Candles are center-anchored on T
     // (plot_candles draws timestamps[i] ± half_width); a left-anchored column spanning
     // [T, T+step] sat half a candle to the RIGHT of its candle. Shifting the column
     // origin back half a step makes column i cover [T-step/2, T+step/2], centered on
     // T = oldest_ts + i*step - aligned with the candle.
-    u.data_time_start = -0.5f * u.time_step;
+    u.data_time_start = realtime_ ? 0.0f : -0.5f * u.time_step;
     u.ring_start = 0;
     u.ring_count = ring_count_;
     u.ring_size = RING_SIZE;
@@ -913,8 +952,10 @@ void ShaderHeatmapRenderer::render_cells(
     {
         // Columns are now center-anchored (see data_time_start) → the first/last column
         // extends half a step either side of its bucket time, so widen the scissor to match.
-        const double data_time_min = static_cast<double>(gpu_origin_ms_) - time_step_ms_ * 0.5;
-        const double data_time_max = static_cast<double>(oldest_ts + (ring_count_ - 1) * time_step_ms_) + time_step_ms_ * 0.5;
+        const double data_time_min = static_cast<double>(gpu_origin_ms_) - (realtime_ ? 0.0 : time_step_ms_ * 0.5);
+        double data_time_max = static_cast<double>(oldest_ts + (ring_count_ - 1) * time_step_ms_) + time_step_ms_ * (realtime_ ? 1.0 : 0.5);
+        if (realtime_) data_time_max = std::max(data_time_max, double(observation_hold_until_ms_));
+        if (realtime_ && replay_cutoff_ms_ > 0) data_time_max = std::min(data_time_max, double(replay_cutoff_ms_));
         const double data_price_min = get_min_price();
         const double data_price_max = get_max_price();
 
@@ -1091,6 +1132,7 @@ void ShaderHeatmapRenderer::gl_render_callback(
     glUniform1f(loc.u_viewport_price_max, u->viewport_price_max);
     glUniform1f(loc.u_data_time_start, u->data_time_start);
     glUniform1f(loc.u_time_step, u->time_step);
+    glUniform1f(loc.u_observation_hold_until, u->observation_hold_until);
     glUniform1i(loc.u_ring_start, u->ring_start);
     glUniform1i(loc.u_ring_count, u->ring_count);
     glUniform1i(loc.u_ring_size, u->ring_size);
