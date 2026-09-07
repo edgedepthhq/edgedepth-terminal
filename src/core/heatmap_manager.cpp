@@ -10,9 +10,10 @@ ShaderHeatmapRenderer& HeatmapManager::get_or_create(const HeatmapKey& key) {
 }
 
 // Called for HISTORICAL snapshots - builds the grid
-void HeatmapManager::apply_snapshot(const Terminal::Pair& pair, const pb::HeatmapSnapshot& snapshot_pb) {
+void HeatmapManager::apply_snapshot(const Terminal::Pair& pair, const pb::HeatmapSnapshot& snapshot_pb, int64_t timeframe_seconds) {
     const HeatmapKey key{pair.exchange, pair.symbol, snapshot_pb.mode()};
     auto& reconstructor = get_or_create(key);
+    if (timeframe_seconds > 0 && timeframe_seconds * 1000 != reconstructor.get_column_interval_ms()) return;
     // Use process_snapshot which builds/expands the grid
     // This is the method that initializes native_bucket_size_, bounds, etc.
     reconstructor.process_snapshot(snapshot_pb);
@@ -87,4 +88,7 @@ void HeatmapManager::mark_dirty(const Terminal::Pair& pair) {
             reconstructor->mark_dirty();
         }
     }
+}
+void HeatmapManager::set_timeframe(const Terminal::Pair& pair, const std::string& mode, int64_t timeframe_seconds) {
+    get_or_create({pair.exchange, pair.symbol, mode}).set_column_interval_ms(timeframe_seconds * 1000);
 }

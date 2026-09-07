@@ -280,7 +280,8 @@ private:
     std::string heatmap_mode_ = "UHD";
     HeatmapType heatmap_type_ = HeatmapType::OrderbookDepth;
     bool heatmap_data_requested_ = false;
-    int64_t heatmap_time_offset_ms_ = 0;
+    bool open_heatmap_settings_ = false;
+    bool heatmap_adapt_to_zoom_ = true;
     int heatmap_bucket_multiplier_ = 1;
     int64_t heatmap_loaded_timeframe_ = 0;
     float heatmap_sensitivity_ = 1.0f;

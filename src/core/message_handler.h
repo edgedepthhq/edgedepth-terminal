@@ -186,7 +186,7 @@ private:
    );
 
     static void handle_historical_heatmap_batch(const Terminal::Pair &pair, const void *data, size_t size,
-                                         HeatmapManager *heatmap_mgr);
+                                         HeatmapManager *heatmap_mgr, int64_t timeframe_seconds);
     static void handle_heatmap_snapshot(const Terminal::Pair& pair, const pb::HeatmapSnapshot& snapshot_pb, HeatmapManager* heatmap_mgr);
 
     static void handle_liquidation_heatmap_message(

@@ -326,9 +326,11 @@ void ShaderHeatmapRenderer::finalize_column(
     // ring dirty (which would trigger a full rebuild of all columns).
     // This is critical for FPS: finalize is called every few seconds for live data.
     if (!gpu_dirty_ && ring_count_ > 0 && time_step_ms_ > 0) {
-        const int64_t oldest_ts = timeline_.begin()->first;
+        const int64_t oldest_ts = gpu_origin_ms_;
         const int col = static_cast<int>((timestamp_ms - oldest_ts) / time_step_ms_);
-        if (col >= 0 && col < RING_SIZE) {
+        if (timestamp_ms >= oldest_ts && col >= 0 && col < RING_SIZE &&
+            (replay_cutoff_ms_ == 0 || timestamp_ms <= replay_cutoff_ms_)) {
+            if (column_meta_[col].finalized && column_meta_[col].timestamp_ms > timestamp_ms) return;
             // Center this column (same logic as sync_gpu_from_timeline)
             double snap_pmin = std::numeric_limits<double>::max();
             double snap_pmax = std::numeric_limits<double>::lowest();
@@ -526,8 +528,16 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
     std::fill(prev_column_carry_.begin(), prev_column_carry_.end(), 0.0f);
     column_meta_.fill(ColumnMeta{});
 
-    // Detect time_step from first two entries if not already detected
-    if (timeline_.size() >= 2) {
+    // Liquidation snapshots retain their independent cadence. Orderbook depth
+    // uses the explicit request interval, even with sparse or out-of-order data.
+    if (colormap_type_ == ColormapType::Orderbook) {
+        time_step_ms_ = column_interval_ms_;
+        gpu_origin_ms_ = (gpu_origin_ms_ / time_step_ms_) * time_step_ms_;
+        auto last = replay_cutoff_ms_ > 0 ? timeline_.upper_bound(replay_cutoff_ms_) : timeline_.end();
+        const int64_t newest = last == timeline_.begin() ? gpu_origin_ms_ : std::prev(last)->first;
+        const int64_t newest_bucket = (newest / time_step_ms_) * time_step_ms_;
+        gpu_origin_ms_ = std::max<int64_t>(gpu_origin_ms_, newest_bucket - (RING_SIZE - 1LL) * time_step_ms_);
+    } else if (timeline_.size() >= 2) {
         auto it = timeline_.begin();
         const int64_t t0 = it->first; ++it;
         const int64_t t1 = it->first;
@@ -543,12 +553,13 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
     // Time-indexed placement: each column goes to its computed ring position
     // so the shader's col_offset = time / time_step maps correctly.
     // Gaps in data produce empty columns (zero-initialized, flags=0 → discard).
-    const int64_t oldest_ts = timeline_.begin()->first;
+    const int64_t oldest_ts = gpu_origin_ms_;
     const int64_t newest_ts = timeline_.rbegin()->first;
     int64_t total_span = newest_ts - oldest_ts;
 
     // If data spans more columns than RING_SIZE, increase time_step to fit
-    if (time_step_ms_ > 0 && total_span / time_step_ms_ >= RING_SIZE) {
+    if (colormap_type_ == ColormapType::Liquidation &&
+        time_step_ms_ > 0 && total_span / time_step_ms_ >= RING_SIZE) {
         time_step_ms_ = (total_span / (RING_SIZE - 2)) + 1;
         // Round up to a clean interval
         if (time_step_ms_ > 1800000) time_step_ms_ = 3600000;
@@ -570,6 +581,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
         // Replay cutoff: skip columns past the current playback position
         if (replay_cutoff_ms_ > 0 && ts > replay_cutoff_ms_) break;  // timeline_ is sorted
 
+        if (ts < oldest_ts) continue;
         const int col = static_cast<int>((ts - oldest_ts) / time_step_ms_);
         if (col < 0 || col >= RING_SIZE) continue;
 
@@ -742,8 +754,22 @@ void ShaderHeatmapRenderer::evict_oldest_timeline() {
     }
 }
 
+void ShaderHeatmapRenderer::set_column_interval_ms(int64_t interval_ms) {
+    interval_ms = std::max<int64_t>(1000, interval_ms);
+    if (column_interval_ms_ == interval_ms) return;
+    column_interval_ms_ = interval_ms;
+    clear(); // Old decimated history cannot stand in for the new resolution.
+}
+
+int64_t ShaderHeatmapRenderer::display_time_to_bucket(double time_ms) const {
+    return gpu_origin_ms_ + static_cast<int64_t>(std::floor(
+        (time_ms - gpu_origin_ms_) / time_step_ms_ + 0.5)) * time_step_ms_;
+}
+
 void ShaderHeatmapRenderer::clear() {
     ring_count_ = 0;
+    time_step_ms_ = column_interval_ms_;
+    gpu_origin_ms_ = 0;
     snapshot_count_ = 0;
     first_seen_ts_ = 0;
     live_ring_col_ = -1;
@@ -887,7 +913,7 @@ void ShaderHeatmapRenderer::render_cells(
     {
         // Columns are now center-anchored (see data_time_start) → the first/last column
         // extends half a step either side of its bucket time, so widen the scissor to match.
-        const double data_time_min = static_cast<double>(get_min_time()) - time_step_ms_ * 0.5;
+        const double data_time_min = static_cast<double>(gpu_origin_ms_) - time_step_ms_ * 0.5;
         const double data_time_max = static_cast<double>(oldest_ts + (ring_count_ - 1) * time_step_ms_) + time_step_ms_ * 0.5;
         const double data_price_min = get_min_price();
         const double data_price_max = get_max_price();

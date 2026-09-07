@@ -59,6 +59,11 @@ public:
     void clear();
     void mark_dirty();
 
+    // Orderbook columns follow the requested candle interval, never sample gaps.
+    void set_column_interval_ms(int64_t interval_ms);
+    int64_t get_column_interval_ms() const { return column_interval_ms_; }
+    int64_t display_time_to_bucket(double time_ms) const;
+
     // ── Rendering ───────────────────────────────────────────────────
     /// Main render call - injects shader callback into ImPlot draw list.
     /// Must be called between ImPlot::BeginPlot() and EndPlot().
@@ -250,7 +255,8 @@ private:
 
     int64_t gpu_origin_ms_ = 0;
     double gpu_bucket_size_ = 0.0;
-    int64_t time_step_ms_ = 300000; // Detected snapshot interval (default 5min)
+    int64_t time_step_ms_ = 60000; // Interval of the uploaded GPU grid
+    int64_t column_interval_ms_ = 60000; // Requested orderbook interval
 
     // ── Render callback data ────────────────────────────────────────
     // Must persist until RenderDrawData() - stored as member.

@@ -124,5 +124,48 @@ int main() {
     r.set_replay_cutoff_ms(0);
     for (int i = 1; i <= 30; ++i) r.update_live_column(i * 60000, live);
     assert(r.observed_columns_.size() == 10);
+    r.clear();
+    r.set_replay_cutoff_ms(0);
+    // Server returns the last original observation in each requested interval.
+    // The source clock must survive, but column centers must be UTC candle opens.
+    constexpr int64_t epoch = 1788753600000; // Aligned to 15m.
+    for (int64_t tf : {300000LL, 60000LL, 900000LL, 60000LL}) {
+        r.set_column_interval_ms(tf);
+        r.clear();
+        r.native_bucket_size_ = 1;
+        const int64_t source = epoch + tf - 7000;
+        r.finalize_column(source, history);
+        r.finalize_column(source + 5 * tf, live); // Four missing intervals.
+        r.sync_gpu_from_timeline();
+        assert(r.time_step_ms_ == tf); // Sparse samples never stretch cells.
+        assert(r.gpu_origin_ms_ == epoch);
+        assert(r.ring_count_ == 6);
+        assert(r.column_meta_[0].timestamp_ms == source);
+        assert(r.get_value_at_price_and_time(100.25, epoch) == 2);
+        assert(r.get_value_at_price_and_time(100.25, epoch + tf) == 0);
+        assert(r.get_value_at_price_and_time(100.25, epoch + 5 * tf) == 17);
+        assert(r.display_time_to_bucket(epoch - tf * 0.49) == epoch);
+        assert(r.display_time_to_bucket(epoch + tf * 0.49) == epoch);
+        assert(r.display_time_to_bucket(epoch + tf * 0.51) == epoch + tf);
+        r.finalize_column(source + tf, {{100, 13}}); // Direct upload uses same origin.
+        assert(r.get_value_at_price_and_time(100.25, epoch + tf) == 13);
+        r.set_replay_cutoff_ms(source - 1);
+        r.sync_gpu_from_timeline();
+        assert(r.get_value_at_price_and_time(100.25, epoch) == 0); // No early evidence.
+        r.set_replay_cutoff_ms(0);
+    }
+    r.set_column_interval_ms(60000);
+    r.clear();
+    r.native_bucket_size_ = 1;
+    r.finalize_column(epoch, history);
+    r.finalize_column(epoch + (r.RING_SIZE + 5LL) * 60000, live);
+    r.sync_gpu_from_timeline();
+    assert(r.time_step_ms_ == 60000); // Bounded GPU window never coarsens time.
+    assert(r.ring_count_ == r.RING_SIZE);
+    assert(r.get_value_at_price_and_time(100.25, epoch + (r.RING_SIZE + 5LL) * 60000) == 17);
+    r.set_bucket_multiplier(2);
+    assert(r.get_value_at_price_and_time(100.25, epoch + (r.RING_SIZE + 5LL) * 60000) == 46);
+    r.set_bucket_multiplier(1);
+    assert(r.get_value_at_price_and_time(100.25, epoch + (r.RING_SIZE + 5LL) * 60000) == 17);
     std::puts("PASS: live depth survives rebuilds, finalization and origin changes; rewind/clear discard it");
 }

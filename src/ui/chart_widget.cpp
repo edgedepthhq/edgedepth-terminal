@@ -530,7 +530,7 @@ void ChartWidget::change_timeframe(const int new_tf_seconds)
     if (ctx_.replayer) {
         ctx_.replay_mgr().set_timeframe_ms(static_cast<int64_t>(new_tf_seconds) * 1000);
     }
-    ctx_.heatmap_mgr().clear(pair_, heatmap_mode_);
+    ctx_.heatmap_mgr().set_timeframe(pair_, heatmap_mode_, new_tf_seconds);
     heatmap_data_requested_ = false;
     heatmap_loaded_timeframe_ = 0;
     // Liq map is TIMEFRAME-INDEPENDENT. Snapshots are price-level bands keyed by
@@ -1085,7 +1085,6 @@ void ChartWidget::render_chart() {
             ProfileScope _ps("OBHeat");
             auto* reconstructor = ctx_.heatmap_mgr().get_reconstructor(pair_, heatmap_mode_);
             if (reconstructor && reconstructor->has_data()) {
-                reconstructor->set_time_offset_ms(heatmap_time_offset_ms_);
 
                 // Viewport-adaptive bucket multiplier: ensure each heatmap cell
                 // is at least min_cell_px pixels tall. This adapts to any coin at
@@ -1093,7 +1092,7 @@ void ChartWidget::render_chart() {
                 // on 4h (300%+ range) aggregates into visible bands automatically.
                 // The UHD/HD/SD combo controls min_cell_px (detail preference).
                 const double native_bucket = reconstructor->get_native_bucket_size();
-                if (native_bucket > 0) {
+                if (native_bucket > 0 && heatmap_adapt_to_zoom_) {
                     const ImPlotRect limits = ImPlot::GetPlotLimits();
                     const double visible_range = limits.Y.Max - limits.Y.Min;
                     const ImVec2 plot_size = ImPlot::GetPlotSize();
@@ -1120,6 +1119,7 @@ void ChartWidget::render_chart() {
                         if (v <= adaptive_mult) best = v;
                     }
 
+                    best = std::max(best, heatmap_bucket_multiplier_);
                     // Hysteresis: only update if significantly different
                     const int current = reconstructor->get_bucket_multiplier();
                     if (best != current &&
@@ -2713,46 +2713,37 @@ void ChartWidget::render_controls() {
 
     // Layer toggles + LIQ LEV now live inside the layers menu (defined below).
 
-    // Orderbook-heatmap settings - opened by right-clicking the Heatmap pill.
+    // Open outside the Layers popup so the settings panel shares its ID scope.
+    if (open_heatmap_settings_) {
+        ImGui::OpenPopup("hm_settings");
+        open_heatmap_settings_ = false;
+    }
+    push_menu_style();
     if (ImGui::BeginPopup("hm_settings")) {
-        ImGui::SetNextItemWidth(120);
-        int offset_sec = static_cast<int>(heatmap_time_offset_ms_ / 1000);
-        if (ImGui::SliderInt("##HMOffset", &offset_sec, -120, 60, "Offset: %ds")) {
-            heatmap_time_offset_ms_ = static_cast<int64_t>(offset_sec) * 1000;
+        ImGui::TextUnformatted("Order book depth");
+        ImGui::Separator();
+        const int multipliers[] = {1, 2, 5, 10, 20};
+        const char* labels[] = {"UHD (1x)", "HD (2x)", "SD (5x)", "LD (10x)", "ULD (20x)"};
+        int selected = 0;
+        for (int i = 0; i < 5; ++i)
+            if (heatmap_bucket_multiplier_ == multipliers[i]) selected = i;
+        ImGui::SetNextItemWidth(155.0f);
+        bool changed = ImGui::Combo("Fidelity", &selected, labels, 5);
+        heatmap_bucket_multiplier_ = multipliers[selected];
+        changed |= ImGui::Checkbox("Adapt to zoom", &heatmap_adapt_to_zoom_);
+        if (ImGui::IsItemHovered())
+            Theme::tooltip("Group more price rows when zoomed out.\nTurn off for the exact selected grouping.");
+        auto* recon = ctx_.heatmap_mgr().get_reconstructor(pair_, heatmap_mode_);
+        if (recon) {
+            if (changed) recon->set_bucket_multiplier(heatmap_bucket_multiplier_);
+            ImGui::TextUnformatted("Effective price bucket:");
+            ImGui::SameLine();
+            ImGui::Text(fmt_.price_fmt, recon->get_display_bucket_size());
         }
-        if (ImGui::IsItemHovered()) {
-            Theme::tooltip("Adjust heatmap time alignment.\nNegative = shift left, Positive = shift right");
-        }
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(70);
-        const int bucket_multipliers[] = {1, 2, 5, 10, 20};
-        constexpr int NUM_BUCKETS = 5;
-        const char* bucket_labels[] = {"UHD", "HD", "SD", "LD", "ULD"};
-        int current_bucket_idx = 0;
-        for (int i = 0; i < NUM_BUCKETS; i++) {
-            if (heatmap_bucket_multiplier_ == bucket_multipliers[i]) {
-                current_bucket_idx = i;
-                break;
-            }
-        }
-        if (ImGui::Combo("##HMBucket", &current_bucket_idx, bucket_labels, NUM_BUCKETS)) {
-            heatmap_bucket_multiplier_ = bucket_multipliers[current_bucket_idx];
-        }
-        if (ImGui::IsItemHovered()) {
-            auto* bucket_recon = ctx_.heatmap_mgr().get_reconstructor(pair_, heatmap_mode_);
-            double native_bucket = bucket_recon ? bucket_recon->get_native_bucket_size() : 0;
-            double display_bucket = native_bucket * heatmap_bucket_multiplier_;
-            char tip[128];
-            if (display_bucket >= 1.0)
-                snprintf(tip, sizeof(tip), "Bucket: $%.0f", display_bucket);
-            else if (display_bucket >= 0.01)
-                snprintf(tip, sizeof(tip), "Bucket: $%.2f", display_bucket);
-            else
-                snprintf(tip, sizeof(tip), "Bucket: $%.6f", display_bucket);
-            Theme::tooltip("%s", tip);
-        }
+        ImGui::TextDisabled("Fidelity changes price grouping, not tile duration.");
         ImGui::EndPopup();
     }
+    pop_menu_style();
     // ═══════════════════════════════════════════════════════════════════════
     // Chart View dropdown: one base rendering mode at a time.
     // ═══════════════════════════════════════════════════════════════════════
@@ -2996,8 +2987,15 @@ void ChartWidget::render_controls() {
         // OB Depth = orderbook depth heatmap (free). Right-click opens its settings.
         {
             const bool c = layer_row("Order book depth", heatmap_enabled_, false);
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("hm_settings");
+            if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+                open_heatmap_settings_ = true;
+                ImGui::CloseCurrentPopup();
+            }
             if (c) heatmap_enabled_ = !heatmap_enabled_;
+            if (ImGui::Button("Depth settings...", ImVec2(row_w, 24.0f))) {
+                open_heatmap_settings_ = true;
+                ImGui::CloseCurrentPopup();
+            }
         }
         // VPVR = volume profile visible range (free). Right-click opens its settings.
         {
@@ -4561,6 +4559,7 @@ void ChartWidget::request_heatmap_data() {
         7200LL * 60 * 1000  // Cap at 5 days
     );
     const int64_t start_time_ms = anchor_ms - lookback_ms;
+    ctx_.heatmap_mgr().set_timeframe(pair_, heatmap_mode_, tf_sec);
     ctx_.stream_mgr().request_historical_heatmap(
         pair_, heatmap_mode_, start_time_ms, anchor_ms, tf_sec
     );
@@ -4695,16 +4694,16 @@ void ChartWidget::render_heatmap_tooltip() {
     auto* reconstructor = ctx_.heatmap_mgr().get_reconstructor(pair_, heatmap_mode_);
     if (!reconstructor || !ImPlot::IsPlotHovered()) return;
 
-    const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
     const ImPlotPoint mouse = ImPlot::GetPlotMousePos();
     const double bucket_size = reconstructor->get_display_bucket_size();
-    const int64_t timeframe_ms = tf_sec * 1000;
+    const int64_t timeframe_ms = reconstructor->get_column_interval_ms();
+    if (bucket_size <= 0) return;
 
     const double center_price = std::floor(mouse.y / bucket_size) * bucket_size;
     // +half a step before flooring: heatmap columns are center-anchored on their bucket
     // time (see shader_heatmap_renderer data_time_start), so the cell under the cursor is
     // the bucket whose CENTER is nearest x, not the one whose left edge is left of x.
-    const int64_t center_time = (static_cast<int64_t>(mouse.x + timeframe_ms * 0.5) / timeframe_ms) * timeframe_ms;
+    const int64_t center_time = reconstructor->display_time_to_bucket(mouse.x);
 
     const float center_value = reconstructor->get_value_at_price_and_time(center_price, center_time);
     if (center_value < 0.001f) return;

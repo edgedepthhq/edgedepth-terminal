@@ -129,11 +129,11 @@ void MessageHandler::route_message(const pb::WSPayload& ws_payload, const Messag
         case pb::Stream::STREAM_HISTORICAL_HEATMAPS:
             if (ctx.dispatch_queue) {
                 std::string captured(static_cast<const char*>(inner_data), inner_size);
-                ctx.dispatch_queue->push({[pair, captured, hm = ctx.heatmaps](StreamManager&) {
-                    handle_historical_heatmap_batch(pair, captured.data(), captured.size(), hm);
+                ctx.dispatch_queue->push({[pair, captured, timeframe = ws_payload.timeframe(), hm = ctx.heatmaps](StreamManager&) {
+                    handle_historical_heatmap_batch(pair, captured.data(), captured.size(), hm, timeframe);
                 }});
             } else {
-                handle_historical_heatmap_batch(pair, inner_data, inner_size, ctx.heatmaps);
+                handle_historical_heatmap_batch(pair, inner_data, inner_size, ctx.heatmaps, ws_payload.timeframe());
             }
             break;
         case pb::Stream::STREAM_HEATMAP: {
@@ -828,7 +828,7 @@ void MessageHandler::handle_heatmap_snapshot(const Terminal::Pair& pair, const p
     heatmap_mgr->apply_snapshot(pair, snapshot_pb);
 }
 
-void MessageHandler::handle_historical_heatmap_batch(const Terminal::Pair &pair, const void *data, size_t size, HeatmapManager *heatmap_mgr) {
+void MessageHandler::handle_historical_heatmap_batch(const Terminal::Pair &pair, const void *data, size_t size, HeatmapManager *heatmap_mgr, int64_t timeframe_seconds) {
     if (!heatmap_mgr) {
         return;
     }
@@ -852,7 +852,7 @@ void MessageHandler::handle_historical_heatmap_batch(const Terminal::Pair &pair,
             continue;
             }
         snapshot_times.push_back(snapshot_pb->timestamp_ms());
-        handle_heatmap_snapshot(pair, *snapshot_pb, heatmap_mgr);
+        heatmap_mgr->apply_snapshot(pair, *snapshot_pb, timeframe_seconds);
     }
 
     bool sorted = std::is_sorted(snapshot_times.begin(), snapshot_times.end());

@@ -21,7 +21,8 @@ struct HeatmapKey {
 class HeatmapManager {
 public:
     HeatmapManager() = default;
-    void apply_snapshot(const Terminal::Pair& pair, const pb::HeatmapSnapshot& snapshot_pb);
+    void apply_snapshot(const Terminal::Pair& pair, const pb::HeatmapSnapshot& snapshot_pb, int64_t timeframe_seconds = 0);
+    void set_timeframe(const Terminal::Pair& pair, const std::string& mode, int64_t timeframe_seconds);
     void finalize_snapshot(const Terminal::Pair& pair, const pb::HeatmapSnapshot& snapshot_pb);
 
     // Returns the shader renderer for a symbol+mode
