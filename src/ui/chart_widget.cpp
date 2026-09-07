@@ -621,6 +621,7 @@ void ChartWidget::change_timeframe(const int new_tf_seconds)
 
 // Main Render
 void ChartWidget::render() {
+    rt_dom_frame_ = {}; // A hidden/collapsed plot must not publish a stale transform.
     if (!is_open) return;
 
     // Keep the tab's visible TF in sync with the live timeframe (catches every

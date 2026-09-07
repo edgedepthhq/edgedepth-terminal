@@ -11,6 +11,7 @@
 //   - USD/COIN display toggle, reset-mode pills, density-aware row_h()
 // ═══════════════════════════════════════════════════════════════════════════════
 #include "widget.h"
+#include "ui/realtime_dom_frame.h"
 #include "types/types.h"
 #include "stream_handler.h"
 #include <vector>
@@ -36,6 +37,8 @@ public:
 
     void update() override;
     void render() override;
+    void link_realtime(const RealtimeDOMFrame* frame) { rt_frame_ = frame; }
+    bool links_realtime() const { return link_rt_ && rt_frame_; }
     WidgetType type() const override { return WidgetType::DOM; }
     const char* title() const override { return title_.c_str(); }
 
@@ -70,6 +73,9 @@ private:
     int group_mult_ = 1;                 // price grouping: x1 / x10 / x100 of base tick
 
     // UI state
+    bool link_rt_ = true;
+    const RealtimeDOMFrame* rt_frame_ = nullptr; // Bound for this render pass only.
+    void render_linked_ladder(const RealtimeDOMFrame& frame);
     bool auto_center_ = true;
     bool show_trade_columns_ = true;
     bool display_usd_ = false;

@@ -39,16 +39,52 @@ from a screenshot.
 | Timeframe > RT | 1s observed candles | Show partial one-second OHLC from received trades. These are not historical candle backfill. |
 | Timeframe > RT | Trade-price line | Connect eligible observed trade prices. |
 | Timeframe > RT | Trade bubbles | Show or hide trade markers. |
-| Timeframe > RT | Auto market size | Default on. Minimum is based on the 75th percentile of received quote notionals over 60 seconds. After 32 records, changes are bounded to 25% every five seconds. |
+| Timeframe > RT | Auto market size | Default on. Minimum is based on the 75th percentile of received quote notionals over 60 seconds. After at least 32 eligible records, the reference stays fixed until explicit recalibration or replay reset. |
+| Timeframe > RT | Recalibrate bubble sizes | Reset the automatic size reference using eligible received records. This deliberately resizes and refilters historical bubbles. |
+| DOM | Link RT | Default on. Use the matching RT chart's sampled book, display clock and exact price-to-screen mapping. Turn off for independent current depth and trade columns. |
 | Timeframe > RT | Minimum trade value | With auto off, set price times quantity in quote units. For a USDT pair, the threshold is in USDT. Default manual value: 10,000. |
 | Layers > Depth settings | Fidelity | UHD/HD/SD/LD/ULD group 1/2/5/10/20 native price ticks. RT keeps the chosen grouping fixed; candle-mode zoom adaptation is separate. |
 | Layers > Depth settings | Recalibrate colors | Explicitly recalibrate brightness from the currently visible liquidity. This deliberately recolors history; normal feed updates do not. |
 | Chart navigation | Time zoom / Follow | Show five seconds to two minutes; Follow returns to the advancing edge. Price auto-fits eligible visible trades and quote steps. |
 
-Bubbles use square-root radius scaling from 7px to a 28px cap. Up to 20,000 trade
+Bubbles use square-root radius scaling from 4px to a 16px cap. Values at or above
+16 times the minimum share the cap. Opaque signed fills, restrained shading and
+dark borders reduce pale overlapping clusters. Newer records draw on top, with
+all centers kept at their received timestamps and prices. Up to 20,000 trade
 records/two minutes are retained, and the newest 1,500 qualifying records in view
-are drawn. Auto size is independent of chart zoom. A changing auto threshold can
-change which historical trade markers qualify; it does not change heatmap cells.
+are drawn. Auto size is independent of chart zoom. During warm-up the reference may
+settle every five seconds; after 32 eligible records it stays fixed. Explicit
+recalibration or changing the manual threshold can change which historical
+markers qualify. Neither changes heatmap cells.
+
+## Linked DOM
+
+The matching instrument's existing DOM links by default when RT is active.
+Charts render before DOMs each frame: the ladder consumes the chart's final
+price bounds and absolute screen coordinates after zoom, pan and resize.
+It never independently recenters or stretches prices to fill its own panel.
+A hidden chart produces a waiting state, not a stale transform.
+
+Linked mode shows the same immutable sampled book as the RT chart, including
+its 100ms sampling, 512-level-per-side coverage, 15-second freshness boundary,
+live display pause and replay as-of clock. It does not use the independent
+DOM's current read buffer or cumulative trade columns. Sequence failures and
+unverified pack seeks withhold linked depth instead of showing a plausible
+restored book. The header identifies live/replay and paused state.
+
+Native observed price levels remain at their exact screen Y positions. When
+rows are too dense, only text labels are thinned; depth is not silently grouped.
+Best bid/ask lines retain their exact prices and their quantities remain shown.
+The header also prints both exact quote prices. The Qty / Quote button toggles the visible
+sizes between base quantity and price times quantity.
+
+For a simple vertical DOM/tape split, linked mode temporarily hides the matching
+tape so the ladder can use the full right column. Turning linking off or leaving
+RT restores the tape and split. Floating and tabbed arrangements are preserved;
+rows outside a custom panel's bounds are clipped, never moved to fit.
+Independent mode is explicitly labelled and may continue updating while the RT
+chart's live display is paused. Close the independent panel or restore linking
+when comparing a frozen chart with depth.
 
 ## Why historical depth stays fixed
 
@@ -87,8 +123,8 @@ workflow.** Seeking clears the previous traversal; retained future data cannot
 paint backward. RT requires a valid seed followed by continuous depth deltas.
 The current pack seek implementation reuses the opening seed while skipping to
 the target, which can break that sequence. An in-buffer DOM restore also does not
-certify sequence integrity. RT reports that it is waiting for synchronized depth
-instead of presenting the restored DOM as verified history.
+certify sequence integrity. Both RT and its linked DOM report that they are waiting for synchronized depth
+instead of presenting an unverified restored book as history.
 
 To study RT depth reliably in these packs, reopen at the start and play through
 the move. Correct arbitrary seeking requires replaying the intervening orderbook

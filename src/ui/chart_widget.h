@@ -1,4 +1,5 @@
 #pragma once
+#include "ui/realtime_dom_frame.h"
 #include "core/realtime_history.h"
 
 #include <implot.h>
@@ -111,6 +112,7 @@ public:
     // the live edge (follow-live streaming) and, for the Line, draws the live-
     // edge dot. Toggled from the TIMEFRAME dropdown (see app_shell render_tf_menu).
     bool rt_mode() const { return rt_mode_; }
+    const RealtimeDOMFrame& realtime_dom_frame() const { return rt_dom_frame_; }
     void set_rt_mode(bool v);
     void toggle_rt_mode() { set_rt_mode(!rt_mode_); }
     void render_realtime_settings();
@@ -270,6 +272,7 @@ private:
     // also draws the live-edge dot. Toggled from the TIMEFRAME dropdown
     // (app_shell render_tf_menu). rt_was_on_ edge-detects the toggle so RT
     // re-arms follow-live exactly ONCE on the rising edge (not every frame).
+    RealtimeDOMFrame rt_dom_frame_;
     bool    rt_mode_    = false;
     bool    rt_was_on_  = false;
     bool rt_candles_ = false, rt_bubbles_ = true, rt_book_valid_ = false;

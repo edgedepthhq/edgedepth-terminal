@@ -3,8 +3,11 @@
 #include <string>
 #include <functional>
 
+class Widget;
+
 class LayoutManager {
 public:
+    static bool vertical_siblings(const Widget& first, const Widget& second);
     static void setup_default_layout(const std::string& exchange, const std::string& symbol);
     static void render_dockspace(const std::function<void()>& menu_callback,
                                   const std::string& exchange = "binancef",

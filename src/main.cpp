@@ -1112,7 +1112,39 @@ void update_and_render_widgets() {
     // subscriptions and is_open are untouched - is_open=false would ERASE it.)
     const bool rec_focus_widgets = ClipRecorder::focus_active() ||
                                    edu::RecorderRuntime::instance().active();
-    for (const auto& widget: g_app.widgets) {
+    // Price transforms are only final after ImPlot renders. Charts go first,
+    // then matching DOMs consume that same frame, regardless of widget order.
+    for (int pass = 0; pass < 3; ++pass) for (const auto& widget: g_app.widgets) {
+        const int widget_pass = widget->type() == WidgetType::Chart ? 0 :
+            widget->type() == WidgetType::DOM ? 1 : 2;
+        if (widget_pass != pass) continue;
+        if (widget->type() == WidgetType::DOM) {
+            auto* dom = static_cast<DOMWidget*>(widget.get());
+            dom->link_realtime(nullptr);
+            for (const auto& candidate : g_app.widgets) {
+                if (!candidate->is_open || candidate->type() != WidgetType::Chart) continue;
+                const auto* chart = static_cast<const ChartWidget*>(candidate.get());
+                if (chart->rt_mode() && chart->pair().exchange == dom->pair().exchange &&
+                    chart->pair().symbol == dom->pair().symbol) {
+                    dom->link_realtime(&chart->realtime_dom_frame());
+                    break;
+                }
+            }
+        }
+        if (widget->type() == WidgetType::Trades) {
+            const auto* tape = static_cast<const TradesWidget*>(widget.get());
+            bool covered = false;
+            for (const auto& candidate : g_app.widgets) {
+                if (!candidate->is_open || candidate->type() != WidgetType::DOM) continue;
+                const auto* dom = static_cast<const DOMWidget*>(candidate.get());
+                if (!dom->links_realtime() || dom->pair().exchange != tape->pair().exchange ||
+                    dom->pair().symbol != tape->pair().symbol) continue;
+                if (LayoutManager::vertical_siblings(*dom, *tape)) covered = true;
+            }
+            // Like clip-focus layout, skip submission only. Subscriptions and
+            // remembered docking survive; independent mode restores the tape.
+            if (covered) continue;
+        }
         if (rec_focus_widgets && widget->type() == WidgetType::Watchlist) continue;
         // Per-widget render timing - labels by widget type so the once/sec
         // console profile shows exactly where frame time goes.

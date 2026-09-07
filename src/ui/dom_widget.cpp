@@ -7,6 +7,7 @@
 
 #include "core/orderbook_manager.h"
 #include "core/symbol_metadata.h"
+#include "replayer/replay_manager.h"
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // File-local helpers
@@ -397,6 +398,16 @@ void DOMWidget::render() {
         return;
     }
 
+    ImGui::Checkbox("Link RT", &link_rt_);
+    if (ImGui::IsItemHovered()) Theme::tooltip("Shares the matching RT chart's sampled depth, pause and price positions. Native price levels; sparse labels when zoomed out. Independent mode restores the current book and trade columns.");
+    if (link_rt_ && rt_frame_) {
+        render_linked_ladder(*rt_frame_);
+        ImGui::End();
+        return;
+    }
+    ImGui::TextColored(Theme::Tokens::TX2, "%s / independent%s",
+        ctx_.replay_mgr().is_active() ? (ctx_.replay_mgr().is_paused() ? "Replay paused" : "Replay") : "Live",
+        link_rt_ ? " (no matching RT chart)" : "");
     const Terminal::Orderbook* ob = ctx_.ob_mgr().get_orderbook(pair_);
     if (!ob || !ob->snapshot || ob->asks.empty() || ob->bids.empty()) {
         ImGui::PushFont(Theme::Fonts::ui());
@@ -802,4 +813,93 @@ void DOMWidget::render_current_row(const Terminal::Orderbook& ob, ImDrawList* dl
     const ImU32 hairline = Theme::u32(Theme::Tokens::BD2);
     dl->AddLine(ImVec2(x_left, row_y0 + 0.5f),         ImVec2(x_right, row_y0 + 0.5f),         hairline);
     dl->AddLine(ImVec2(x_left, row_y0 + row_h - 0.5f), ImVec2(x_right, row_y0 + row_h - 0.5f), hairline);
+}
+
+// Absolute screen Y is intentional: the DOM may have different dock bounds or
+// header height. Clip the shared price grid; never recenter to fit this panel.
+void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
+    if (!frame.projected(ImGui::GetFrameCount())) {
+        ImGui::TextWrapped("RT chart is not visible. Show it to align depth.");
+        return;
+    }
+    ImGui::SameLine();
+    ImGui::TextColored(Theme::Tokens::TX2, "%s%s",
+        frame.replay ? "Replay" : "Live", frame.paused ? " paused" : "");
+    ImGui::SameLine();
+    if (ImGui::SmallButton(display_usd_ ? "Quote" : "Qty")) display_usd_ = !display_usd_;
+    if (ImGui::IsItemHovered()) Theme::tooltip("Linked sampled book. Toggle base quantity / quote value. Rows share the RT chart's clock and exact price positions.");
+    if (!frame.fresh()) {
+        ImGui::TextWrapped(frame.replay
+            ? "Waiting for synchronized RT depth. For pack replay, restart from the beginning."
+            : "Waiting for fresh synchronized RT depth.");
+        return;
+    }
+    const auto& book = *frame.book;
+    char bid[24], ask[24];
+    snprintf(bid, sizeof(bid), fmt_.price_fmt, book.bid);
+    snprintf(ask, sizeof(ask), fmt_.price_fmt, book.ask);
+    ImGui::TextColored(Theme::Tokens::UP, "Bid %s", bid);
+    ImGui::SameLine();
+    ImGui::TextColored(Theme::Tokens::DOWN, "Ask %s", ask);
+    const ImVec2 org = ImGui::GetCursorScreenPos();
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    const float top = std::max(org.y, frame.top);
+    const float bottom = std::min(org.y + avail.y, frame.bottom);
+    if (bottom <= top || avail.x <= 0) return;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->PushClipRect(ImVec2(org.x, top), ImVec2(org.x + avail.x, bottom), true);
+    const float center = org.x + avail.x * 0.5f;
+    const float text_h = ImGui::GetFontSize();
+    const float price_w = std::max(ImGui::CalcTextSize(bid).x, ImGui::CalcTextSize(ask).x) + 12;
+    const float left = center - price_w * 0.5f, right = center + price_w * 0.5f;
+    const float bar_w = std::max(0.0f, (avail.x - price_w) * 0.5f - 6);
+    const float tick_h = float(tick_size_ / (frame.price_max - frame.price_min) * (frame.bottom - frame.top));
+    const float row_h = std::max(1.0f, tick_h);
+    const double label_step = tick_size_ * std::max(1.0, std::ceil(double(text_h + 3) / tick_h));
+    // Labels thin out only. Every observed level and both quote lines keep
+    // their original price, even when native tick rows are subpixel height.
+    const double low = frame.price_min;
+    const double high = frame.price_max;
+    const double first = std::ceil(low / label_step) * label_step;
+    for (double price = first; price <= high; price += label_step) {
+        const float y = frame.price_y(price);
+        if (y < top || y > bottom) continue;
+        dl->AddLine(ImVec2(org.x, y), ImVec2(org.x + avail.x, y), Theme::u32(Theme::Tokens::BD1, 0.5f));
+        char label[24]; snprintf(label, sizeof(label), fmt_.price_fmt, price);
+        dl->AddText(ImVec2(center - ImGui::CalcTextSize(label).x * 0.5f, y - text_h * 0.5f),
+            Theme::u32(Theme::Tokens::TX2), label);
+    }
+    double maximum = 0;
+    for (const auto& level : book.levels) {
+        const float y = frame.price_y(level.price);
+        if (y >= top && y <= bottom)
+            maximum = std::max(maximum, display_usd_ ? level.size * level.price : level.size);
+    }
+    for (const auto& level : book.levels) {
+        const float y = frame.price_y(level.price);
+        if (y < top || y > bottom || !(maximum > 0)) continue;
+        const bool is_bid = level.price <= book.bid;
+        const double value = display_usd_ ? level.size * level.price : level.size;
+        const float width = bar_w * float(value / maximum);
+        const auto color = is_bid ? Theme::Tokens::UP : Theme::Tokens::DOWN;
+        dl->AddRectFilled(ImVec2(is_bid ? left - width : right, y - row_h * 0.5f),
+            ImVec2(is_bid ? left : right + width, y + row_h * 0.5f), Theme::u32(color, 0.5f));
+        const double label_index = level.price / label_step;
+        const bool labelled_tick = std::abs(label_index - std::round(label_index)) <
+            tick_size_ / label_step * 0.2;
+        const double best_price = is_bid ? book.bid : book.ask;
+        const bool best = std::abs(level.price - best_price) < tick_size_ * 0.25;
+        if (best || (labelled_tick && std::abs(y - frame.price_y(best_price)) >= text_h + 3)) {
+            char quantity[24]; fmt_value(level.size, level.price, quantity, sizeof(quantity));
+            dl->AddText(ImVec2(is_bid ? left - ImGui::CalcTextSize(quantity).x - 3 : right + 3, y - text_h * 0.5f),
+                Theme::u32(Theme::Tokens::TX1), quantity);
+        }
+    }
+    for (int side = 0; side < 2; ++side) {
+        const float y = frame.price_y(side ? book.ask : book.bid);
+        dl->AddLine(ImVec2(org.x, y), ImVec2(org.x + avail.x, y),
+            Theme::u32(side ? Theme::Tokens::DOWN : Theme::Tokens::UP), 1.25f);
+    }
+    dl->PopClipRect();
+    ImGui::Dummy(avail);
 }

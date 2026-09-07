@@ -197,7 +197,7 @@ Open-source trade aggregators and charting components exist, but complete browse
 ## Features
 
 - **Chart engine**: custom ImPlot candlesticks, multi-timeframe (1m to 1D), buy/sell volume + CVD, indicators (RSI, MACD, Volume, OI, funding), drawing tools, layered overlays
-- **DOM ladder**: full depth-of-market with grouping, USD/coin modes, cumulative view, book imbalance
+- **DOM ladder**: independent depth with grouping, USD/coin modes and trade columns, or a default RT link sharing the chart's price positions, sampled book and pause state. See [the RT guide](docs/REALTIME_DEPTH.md).
 - **Trade tape**: live time & sales with size highlighting
 - **Orderbook heatmap**: GPU-rendered depth history via a shader-based renderer
 - **Volume profile (VPVR), TPO / Market Profile, footprint**: built client-side from per-price tick volume, so they need a feed that carries it. Every `.edpack` does, which means the Replay Library packs below light all of them up with no account and no backend. A plain live feed does not: the bundled community gateway forwards trades, book and candles, not per-price volume history, so these panels stay empty on it

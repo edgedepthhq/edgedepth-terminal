@@ -3,6 +3,8 @@
 #include "imgui_internal.h"
 #include "../core/education_boot.h"
 #include <algorithm>
+#include "ui/widget.h"
+#include <cstdio>
 
 bool LayoutManager::is_initialized = false;
 float LayoutManager::top_reserve = 0.0f;
@@ -154,4 +156,19 @@ void LayoutManager::reset_layout_for(
     is_initialized = false;
     pending_exchange = exchange;
     pending_symbol = symbol;
+}
+
+// Only expand a simple DOM/tape vertical split. Floating windows, different
+// branches and tabbed user layouts retain their geometry and visible tape.
+bool LayoutManager::vertical_siblings(const Widget& first, const Widget& second) {
+    auto node_for = [](const Widget& widget) -> ImGuiDockNode* {
+        char title[512];
+        snprintf(title, sizeof(title), "%s%s", widget.title(), widget.title_suffix().c_str());
+        const auto* window = ImGui::FindWindowByName(title);
+        return window ? ImGui::DockBuilderGetNode(window->DockId) : nullptr;
+    };
+    const auto* a = node_for(first);
+    const auto* b = node_for(second);
+    return a && b && a != b && a->ParentNode && a->ParentNode == b->ParentNode &&
+        a->ParentNode->SplitAxis == ImGuiAxis_Y && a->Windows.Size <= 1 && b->Windows.Size <= 1;
 }

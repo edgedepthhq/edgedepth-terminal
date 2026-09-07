@@ -7,6 +7,8 @@
 #include "ui/upsell_modal.h"
 #include "rendering/theme.h"
 #include <cmath>
+#include <array>
+#include "rendering/realtime_bubble.h"
 
 void ChartWidget::set_rt_mode(bool on) {
     if (on && Entitlements::hosted() && !Entitlements::is_pro() &&
@@ -43,14 +45,18 @@ void ChartWidget::render_realtime_settings() {
     chart_type_ = rt_candles_ ? ChartType::Candles : ChartType::Line;
     ImGui::Checkbox("Trade bubbles", &rt_bubbles_);
     ImGui::Checkbox("Auto market size", &rt_auto_bubbles_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Uses the 75th percentile of received trade values over the last 60 seconds. Updates gradually every 5 seconds; independent of zoom. One bubble per record, with no inferred fills.");
-    if (rt_auto_bubbles_) ImGui::Text("Auto minimum: %.4g quote", rt_bubble_scale_.minimum());
+    if (ImGui::IsItemHovered()) Theme::tooltip("Uses the 75th percentile of received trade values over the last 60 seconds. Settles after 32 records and stays fixed until Recalibrate bubble sizes; independent of zoom. One bubble per record, with no inferred fills.");
+    if (rt_auto_bubbles_) {
+        ImGui::Text("Auto minimum: %.4g quote%s", rt_bubble_scale_.minimum(),
+            rt_bubble_scale_.settled() ? " (fixed)" : " (warming up)");
+        if (ImGui::Button("Recalibrate bubble sizes")) rt_bubble_scale_ = {};
+    }
     ImGui::BeginDisabled(rt_auto_bubbles_);
     ImGui::SetNextItemWidth(150);
     ImGui::InputFloat("Minimum trade value", &rt_min_notional_, 1000, 10000, "%.0f");
     if (!std::isfinite(rt_min_notional_)) rt_min_notional_ = 10000;
     rt_min_notional_ = std::max(1.0f, rt_min_notional_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Price x quantity in quote units. One bubble per received record; the exchange may aggregate fills. Radius starts at 7px and is capped at 28px.");
+    if (ImGui::IsItemHovered()) Theme::tooltip("Price x quantity in quote units. One bubble per received record; the exchange may aggregate fills. Radius starts at 4px and is capped at 16px. Sizes above 16 times the minimum share the cap.");
     ImGui::EndDisabled();
     ImGui::TextUnformatted("Depth: 100ms samples, 2 minutes retained");
     ImGui::TextUnformatted("Fixed price fidelity: Layers > Depth settings");
@@ -59,6 +65,7 @@ void ChartWidget::render_realtime_settings() {
 void ChartWidget::on_rewind(int64_t) {
     // The replay owner restores/replays depth separately. Never keep future
     // samples or GPU cells from the preceding traversal.
+    rt_dom_frame_ = {};
     rt_renderer_.reset();
     rt_latest_.reset();
     rt_pending_.clear();
@@ -190,6 +197,7 @@ void ChartWidget::render_realtime() {
     if (rt_auto_bubbles_) rt_bubble_scale_.update(trades, rt_clock_ms_);
     const double minimum = rt_auto_bubbles_ ? rt_bubble_scale_.minimum() : rt_min_notional_;
     int bubbles = 0;
+    std::array<const Terminal::Trade*, 1500> visible_trades{};
     if (rt_bubbles_) for (auto it = trades.rbegin(); it != trades.rend(); ++it) {
         const auto& trade = *it;
         if (trade.timestamp_ms > rt_clock_ms_ || trade.timestamp_ms > limits.X.Max) continue;
@@ -197,16 +205,29 @@ void ChartWidget::render_realtime() {
         const double notional = trade.price * trade.qty;
         if (!(minimum > 0) || notional < minimum || !std::isfinite(notional)) continue;
         if (++bubbles > 1500) break;
-        const ImVec2 point = ImPlot::PlotToPixels(double(trade.timestamp_ms), trade.price);
-        const float radius = std::min(28.0f, 7.0f * float(std::sqrt(notional / minimum)));
-        auto color = trade.is_buy ? Theme::Tokens::UP : Theme::Tokens::DOWN;
-        color.w = 0.72f;
-        dl->AddCircleFilled(point, radius, ImGui::GetColorU32(color), 24);
-        color.w = 1.0f;
-        dl->AddCircle(point, radius, ImGui::GetColorU32(color), 24, 1.0f);
+        visible_trades[size_t(bubbles - 1)] = &trade;
+    }
+    // Keep the newest eligible records, then draw oldest first. New arrivals
+    // remain visible on top without displacing, merging or deduplicating centers.
+    for (int i = std::min(bubbles, 1500) - 1; i >= 0; --i) {
+        const auto& trade = *visible_trades[size_t(i)];
+        RealtimeBubble::draw(*dl, ImPlot::PlotToPixels(double(trade.timestamp_ms), trade.price),
+            RealtimeBubble::radius(trade.price * trade.qty, minimum),
+            trade.is_buy ? Theme::Tokens::UP : Theme::Tokens::DOWN,
+            Theme::u32(Theme::Tokens::BASE, 0.8f));
     }
     const bool fresh = rt_book_valid_ && rt_latest_ &&
         rt_latest_->timestamp_ms <= rt_clock_ms_ && rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000;
+    rt_dom_frame_.book = rt_latest_;
+    rt_dom_frame_.frame = ImGui::GetFrameCount();
+    rt_dom_frame_.clock_ms = rt_clock_ms_;
+    rt_dom_frame_.price_min = limits.Y.Min;
+    rt_dom_frame_.price_max = limits.Y.Max;
+    rt_dom_frame_.top = ImPlot::GetPlotPos().y;
+    rt_dom_frame_.bottom = rt_dom_frame_.top + ImPlot::GetPlotSize().y;
+    rt_dom_frame_.synchronized = rt_book_valid_;
+    rt_dom_frame_.replay = ctx_.replay_mgr().is_active();
+    rt_dom_frame_.paused = rt_paused_ || ctx_.replay_mgr().is_paused();
     if (fresh && limits.X.Max > rt_clock_ms_) {
         const auto& book = *rt_latest_;
         const float right = ImPlot::GetPlotPos().x + ImPlot::GetPlotSize().x;

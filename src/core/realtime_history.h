@@ -101,12 +101,14 @@ private:
 
 // A bounded, as-of market scale shared by live, paused and replay rendering.
 // The viewport never enters these statistics. Warm-up can settle once a useful
-// sample exists; subsequent changes are limited to 25 percent every five seconds.
+// sample exists; thereafter explicit recalibration is required to resize history.
 class RealtimeBubbleScale {
 public:
     double minimum() const { return minimum_; }
+    bool settled() const { return settled_; }
     void update(const std::deque<Terminal::Trade>& trades, int64_t clock_ms) {
         if (clock_ms < clock_ms_) { minimum_ = 0; settled_ = false; }
+        if (settled_) { clock_ms_ = clock_ms; return; }
         if (minimum_ > 0 && clock_ms - clock_ms_ < 5000) return;
         std::vector<double> values;
         values.reserve(trades.size());
@@ -119,8 +121,7 @@ public:
         if (!values.empty()) {
             const size_t index = (values.size() - 1) * 3 / 4;
             std::nth_element(values.begin(), values.begin() + index, values.end());
-            minimum_ = minimum_ <= 0 || !settled_ ? values[index] :
-                std::clamp(values[index], minimum_ / 1.25, minimum_ * 1.25);
+            minimum_ = values[index];
             settled_ = values.size() >= 32;
         }
         clock_ms_ = clock_ms;

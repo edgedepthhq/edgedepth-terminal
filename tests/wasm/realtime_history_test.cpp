@@ -1,4 +1,5 @@
 #include "core/realtime_history.h"
+#include "ui/realtime_dom_frame.h"
 #include "core/orderbook_manager.h"
 #include <cstdio>
 
@@ -150,11 +151,35 @@ int main() {
     small_scale.update(small_trades, 60100);
     expect(small_scale.minimum() == frozen, "paused clock cannot rescale bubbles");
     small_scale.update(small_trades, 65100);
-    expect(small_scale.minimum() == frozen * 1.25, "settled scale limits abrupt market changes");
+    expect(small_scale.minimum() == frozen, "settled scale preserves historical size comparisons");
+    RealtimeBubbleScale recalibrated;
+    recalibrated.update(small_trades, 65100);
+    expect(recalibrated.minimum() == 7500, "explicit recalibration uses current eligible records");
     small_scale.update(small_trades, 59000);
     expect(small_scale.minimum() == 0, "rewind excludes future records from scale");
     small_scale.update(small_trades, 60100);
     expect(small_scale.minimum() == 7500, "rewind starts an eligible scale anew");
+    RealtimeDOMFrame frame;
+    frame.frame = 10; frame.top = 100; frame.bottom = 900;
+    frame.price_min = 90; frame.price_max = 110;
+    expect(frame.projected(10) && !frame.projected(11), "DOM rejects a stale chart transform");
+    expect(frame.price_y(100) == 500 && frame.price_y(101) == 460, "all prices share the chart screen transform");
+    frame.top = 200; frame.bottom = 600;
+    expect(frame.price_y(101) == 380, "resize changes DOM mapping in the same frame");
+    frame.price_min = 99; frame.price_max = 103;
+    expect(frame.price_y(100) == 500 && frame.price_y(101) == 400, "zoom and pan preserve absolute price alignment");
+    auto linked_book = std::make_shared<RealtimeDepthHistory::Sample>();
+    linked_book->timestamp_ms = 1000;
+    frame.book = linked_book; frame.clock_ms = 1000; frame.synchronized = true;
+    expect(frame.fresh(), "DOM accepts chart-eligible sampled book");
+    frame.clock_ms = 999;
+    expect(!frame.fresh(), "linked DOM never exposes future replay depth");
+    frame.clock_ms = 16001;
+    expect(!frame.fresh(), "linked DOM shares chart staleness boundary");
+    frame.clock_ms = 1000; frame.paused = true;
+    expect(frame.fresh(), "paused DOM uses frozen chart clock instead of wall clock");
+    frame.synchronized = false;
+    expect(!frame.fresh(), "seek or sequence failure withholds linked DOM despite retained book");
     if (!failures) std::puts("PASS: RT sequence, clocks, gaps, retention, rewind and trade multiplicity");
     return failures ? 1 : 0;
 }
