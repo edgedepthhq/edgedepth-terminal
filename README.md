@@ -1,6 +1,6 @@
 # EdgeDepth Terminal
 
-**An open-source orderflow terminal and local market-data replay/testing workbench that runs in your browser at 180 FPS.**
+**An open-source orderflow terminal and local market-data replay/testing workbench that runs in your browser.**
 
 C++20 compiled to WebAssembly. Dear ImGui + ImPlot for immediate-mode rendering, SDL3 + WebGL2 underneath, protobuf over WebSocket for data. No Electron, no DOM in the hot path, no garbage collector between you and the tape.
 
@@ -13,6 +13,66 @@ This is the full source of the terminal that powers [EdgeDepth](https://edgedept
 Run it against a local exchange feed, point it at your own wire-compatible data,
 or use deterministic `.edpack` recordings as repeatable fixtures. If you prefer
 a managed feed and stored history, open the [hosted live terminal](https://app.edgedepth.com/terminal?utm_source=github&utm_medium=oss&utm_campaign=terminal).
+
+## Product gallery
+
+These are captures of the actual terminal. The open-source renderer supports
+these views; the data source determines which layers have coverage. Hosted
+market data and history access are separate from the open-source license.
+
+### Full workspace
+
+![Terminal workspace with chart, watchlist, depth ladder and trade tape](assets/screenshot.png)
+
+*Existing hosted BTC workspace capture. Chart layers, docking, DOM and tape are
+part of the OSS renderer. Hosted analytics and stored history are not bundled
+with the community gateway.*
+
+### Diagonal and stacked footprints
+
+![Recorded TUT footprint with diagonal 3:1 imbalances and three-level stacks](assets/terminal-diagonal-stacks.png)
+
+*Actual local TUT v2 replay capture, paused after 07:02 UTC on 9 August 2026.
+Comparison is Diagonal, ratio 3:1, stack levels 3, with Imbalance Highlights
+on. Thick green outlines identify consecutive qualifying buy imbalances.
+Only closed-minute volume available at the replay clock is displayed.*
+
+### Live footprints
+
+![Real BTC footprint cells with buy and sell volume, imbalance outlines and partial live volume](assets/terminal-live-footprint.png)
+
+*Hosted live BTC capture supplied on 7 September 2026. Footprints support
+same-price or diagonal comparisons and consecutive stacked imbalances. In
+Settings, choose Imbalances > Diagonal, ratio 3, stack levels 3, and enable
+Display > Imbalance Highlights. Thin outlines mark imbalances; thicker outlines
+mark qualifying stacks. The forming minute is observed, partial volume;
+completed snapshots replace it when available. This capture illustrates the
+renderer and is not evidence that the latest continuity repair is deployed.*
+
+### Recorded replay
+
+![TUT recorded replay with chart, order book, trade tape and paused playback controls](assets/terminal-recorded-replay.png)
+
+*Local product capture from the published TUT v2 `.edpack`, recorded on 9 August
+2026. Playback runs locally after the pack loads. Replay footprint analysis uses
+closed minutes at the replay clock; it does not invent future or missing data.*
+
+The reported 180 FPS is an observation from one setup, not a performance
+guarantee. Hardware, browser, viewport and enabled layers affect frame rate.
+
+### Connection and depth coverage
+
+Live sockets retry automatically after closure, with a 1-30 second backoff.
+The status bar distinguishes connecting, retrying, open/waiting, and frame age.
+Frame age measures traffic on that socket, not completeness of every layer.
+Paused subscriptions remain paused. A network replay interrupted by closure
+keeps its last frame paused and asks you to reopen replay; local packs do not
+need the socket.
+
+Recent observed depth is retained for ten minutes across GPU rebuilds.
+Authoritative history replaces older provisional columns when it arrives.
+Unobserved minutes remain gaps, and history availability depends on the feed.
+The current order book is never copied backward to fill those gaps.
 
 ## Quick start
 

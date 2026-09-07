@@ -146,6 +146,7 @@ public:
     // ─── Replay lifecycle ────────────────────────────────────────────────
     // Sends unsubscribe for ALL active server-side subscriptions.
     // Client-side callback maps are preserved so we can re-subscribe later.
+    bool live_subscriptions_paused() const { return live_subscriptions_paused_; }
     void pause_live_subscriptions();
     // Re-sends subscribe for every key that was active before pause.
     void resume_live_subscriptions();

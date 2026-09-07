@@ -486,7 +486,7 @@ void StreamManager::dispatch_pattern_impl(
 }
 
 void StreamManager::send_subscribe(const StreamKey& key) const {
-    if (replay_mode_ || live_subscriptions_paused_) return;
+    if (ws_ <= 0 || replay_mode_ || live_subscriptions_paused_) return;
     // Presence tracking keys off live subscriptions only: replay data comes
     // from the pack or the box and its gaps are not the feed's fault.
     StreamPresence::instance().note_subscribed(static_cast<uint32_t>(key.stream_type));
@@ -549,7 +549,7 @@ void StreamManager::for_each_server_subscription(Fn&& fn) const {
 
 void StreamManager::update_websocket_handle(EMSCRIPTEN_WEBSOCKET_T ws) {
     ws_ = ws;
-    if (live_subscriptions_paused_) return;
+    if (ws_ <= 0 || live_subscriptions_paused_) return;
     // Re-establish everything the box knew about on the OLD socket. Same set as
     // pause/resume: the hand-written list this replaced omitted candles entirely,
     // so a reconnect used to leave the chart with no live candle feed.

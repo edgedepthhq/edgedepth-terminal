@@ -47,6 +47,9 @@ jobs:
       - name: Verify stream subscription lifecycle
         run: bash tests/wasm/run_stream_lifecycle.sh "$PWD/build"
 
+      - name: WebSocket reconnect regression
+        run: bash tests/wasm/run_websocket_reconnect.sh "$PWD/build"
+
       - name: Heatmap live-column regression
         run: bash tests/wasm/run_heatmap_live.sh "$PWD/build"
 

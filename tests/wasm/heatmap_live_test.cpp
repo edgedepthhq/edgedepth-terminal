@@ -86,5 +86,43 @@ int main() {
     r.sync_gpu_from_timeline();
     assert(r.live_price_qty_.empty());
     assert(metadata[r.meta_texture_][7] == 0);
+    r.clear();
+    r.set_replay_cutoff_ms(0);
+    r.finalize_column(60000, history);
+    r.finalize_column(120000, history);
+    r.sync_gpu_from_timeline();
+    r.update_live_column(185000, {{100, 31}}, 100);
+    r.update_live_column(245000, {{100, 41}}, 100);
+    // No observation at 300000: this minute must remain absent.
+    r.update_live_column(365000, {{100, 61}}, 100);
+    assert(r.get_value_at_price_and_time(100.25, 180000) == 31);
+    for (int i = 0; i < 3; ++i) {
+        r.gpu_dirty_ = true; // Navigation/backfill rebuild before history catches up.
+        r.sync_gpu_from_timeline();
+        assert(r.get_value_at_price_and_time(100.25, 180000) == 31);
+        assert(r.get_value_at_price_and_time(100.25, 240000) == 41);
+        assert(r.get_value_at_price_and_time(100.25, 300000) == 0);
+        assert(r.has_missing_columns(180000, 360000));
+        assert(!r.has_missing_columns(180000, 240000));
+        assert(r.has_missing_columns(0, 60000));
+        assert(!r.has_missing_columns(400000, 360000));
+        assert(r.get_value_at_price_and_time(100.25, 360000) == 61);
+    }
+    r.finalize_column(180000, {{100, 7}});
+    r.sync_gpu_from_timeline();
+    assert(r.get_value_at_price_and_time(100.25, 180000) == 7);
+    r.timeline_.erase(60000);
+    r.sync_gpu_from_timeline();
+    assert(r.get_value_at_price_and_time(100.25, 240000) == 41);
+    r.set_replay_cutoff_ms(200000);
+    r.sync_gpu_from_timeline();
+    r.set_replay_cutoff_ms(400000);
+    r.sync_gpu_from_timeline();
+    assert(r.get_value_at_price_and_time(100.25, 240000) == 0);
+    r.clear();
+    assert(r.observed_columns_.empty());
+    r.set_replay_cutoff_ms(0);
+    for (int i = 1; i <= 30; ++i) r.update_live_column(i * 60000, live);
+    assert(r.observed_columns_.size() == 10);
     std::puts("PASS: live depth survives rebuilds, finalization and origin changes; rewind/clear discard it");
 }

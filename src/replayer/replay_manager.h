@@ -202,6 +202,10 @@ public:
     void tick_usage(double dt_seconds, bool document_visible);
 
     // ─── Playback Control ────────────────────────────────────────────────
+    // A closed transport loses its server session association. Keep the last
+    // frame paused until the user reopens replay; never silently resume live.
+    void on_transport_interrupted(const WebSocketClient* socket);
+    bool transport_interrupted() const { return transport_interrupted_; }
     void pause();
     void resume();
     void toggle_pause();        // Space bar
@@ -494,6 +498,7 @@ private:
     // the WS, the replay DataContext gets no WS handle (historical requests
     // are served from the pack via the StreamManager hook), and no history
     // buffer is created.
+    bool transport_interrupted_ = false;
     bool pack_mode_ = false;
     std::unique_ptr<PackReplayEngine> pack_engine_;
 

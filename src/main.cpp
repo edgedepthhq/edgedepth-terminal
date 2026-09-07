@@ -345,6 +345,10 @@ static void on_ws_message(const uint8_t* data, size_t len, WsLane lane) {
 }
 
 static void on_ws_status(const std::string& status) {
+    if (status == "Reconnecting") {
+        g_app.stream_mgr->update_websocket_handle(0);
+        if (g_app.replay_mgr) g_app.replay_mgr->on_transport_interrupted(g_app.ws_client.get());
+    }
     if (status == "Connected") {
         g_app.stream_mgr->update_websocket_handle(g_app.ws_client->get_handle());
 
@@ -488,6 +492,8 @@ WebSocketClient* archive_lane_socket() {
 // auto-subscribes, or a replay connection would start paying for ticker24h and
 // paper-trading traffic on a socket that serves neither.
 static void on_replay_ws_status(const std::string& status) {
+    if (status == "Reconnecting" && g_app.replay_mgr)
+        g_app.replay_mgr->on_transport_interrupted(g_app.replay_ws_client.get());
     if (status == "Connected") {
         SDL_Log("Replay lane socket connected");
     }
@@ -1211,6 +1217,8 @@ static void apply_embedded_viewport(int css_w, int css_h, double dpr) {
 
 
 void main_loop() {
+    if (g_app.ws_client) g_app.ws_client->tick();
+    if (g_app.replay_ws_client) g_app.replay_ws_client->tick();
     static std::chrono::steady_clock::time_point last_frame{};
     static bool has_previous_frame = false;
     const auto now = std::chrono::steady_clock::now();
@@ -1359,7 +1367,7 @@ void main_loop() {
         LayoutManager::status_reserve = Theme::Layout::STATUSBAR_H;  // bottom telemetry bar
         // Drawing rail moved INTO ChartWidget (2026-08-06) - no left reserve.
         LayoutManager::left_reserve   = 0.0f;
-        AppShell::render(g_app.widgets, g_app.app_ctx);
+        AppShell::render(g_app.widgets, g_app.app_ctx, g_app.ws_client.get());
         drawing::render_style_editor(g_app.app_ctx);
     } else {
         LayoutManager::top_reserve    = 0.0f;
@@ -1370,10 +1378,7 @@ void main_loop() {
             // AppShell::init); connection pill = live WS for an archive event,
             // or the pack engine running for the box-free /demo replay.
             const std::string sym = edu.is_event() ? edu.event_symbol() : edu.pack_symbol();
-            const bool ws_ok = edu.is_event()
-                ? (g_app.ws_client && g_app.ws_client->is_connected())
-                : (g_app.replay_mgr && g_app.replay_mgr->is_active());
-            AppShell::render_statusbar(g_app.app_ctx, sym, ws_ok);
+            AppShell::render_statusbar(g_app.app_ctx, sym, g_app.ws_client.get(), edu.is_pack());
         }
     }
     // Drain a pending chart-toolbar "+ widget" add (embedded chromes file a

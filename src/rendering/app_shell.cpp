@@ -1,4 +1,5 @@
 #include "rendering/app_shell.h"
+#include "core/websocket.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -1641,7 +1642,7 @@ namespace {
     // Chrome rules: 1px line-1 top border, bg-1 fill, mono micro-text. Height =
     // Layout::STATUSBAR_H (22); the dockspace + replay bar reserve it via
     // LayoutManager::status_reserve.
-    void draw_statusbar(const AppContext& ctx, const std::string& symbol_lc, bool ws_ok) {
+    void draw_statusbar(const AppContext& ctx, const std::string& symbol_lc, const WebSocketClient* transport, bool local_pack) {
         using namespace Theme;
         const ImGuiViewport* vp = ImGui::GetMainViewport();
         const float bar_y = vp->Pos.y + vp->Size.y - Layout::STATUSBAR_H;
@@ -1667,9 +1668,17 @@ namespace {
         // left - connection + market context
         std::string sym = symbol_lc;
         for (char& c : sym) if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 32);
-        char left[128];
-        snprintf(left, sizeof(left), "WS %s \xc2\xb7 BINANCE PERP \xc2\xb7 %s",
-                 ws_ok ? "CONNECTED" : "-", sym.c_str());
+        if (ctx.replay_mgr().is_active() && !local_pack)
+            transport = ctx.replay_mgr().active_socket();
+        const bool ws_ok = local_pack || (transport && transport->is_connected());
+        char status[80] = "WS DISCONNECTED";
+        if (local_pack) snprintf(status, sizeof(status), "LOCAL REPLAY");
+        else if (transport) transport->format_connection_status(status, sizeof(status));
+        const char* mode = ctx.replay_mgr().transport_interrupted() ? " / REOPEN REPLAY" :
+            ctx.replay_mgr().is_active() ? " / REPLAY" :
+            ctx.stream_mgr().live_subscriptions_paused() ? " / PAUSED" : "";
+        char left[192];
+        snprintf(left, sizeof(left), "%s%s / %s", status, mode, sym.c_str());
         const float dot_x = vp->Pos.x + 14.0f;
         // coin logo at the far left (monogram fallback while loading / if missing)
         const float sb_logo = 13.0f;
@@ -1776,12 +1785,12 @@ namespace {
     // connection flag are passed in because AppShell::init (which sets g_pair and
     // subscribes stats) is intentionally skipped in those modes - its live
     // ticker24h subscription would leak into a historical replay.
-    void render_statusbar(const AppContext& ctx, const std::string& symbol_lc, bool ws_ok) {
-        draw_statusbar(ctx, symbol_lc, ws_ok);
+    void render_statusbar(const AppContext& ctx, const std::string& symbol_lc, const WebSocketClient* transport, bool local_pack) {
+        draw_statusbar(ctx, symbol_lc, transport, local_pack);
     }
 
     void render(std::vector<std::unique_ptr<Widget>>& widgets,
-                const AppContext& ctx) {
+                const AppContext& ctx, const WebSocketClient* transport) {
         // Cmd/Ctrl-K → Finder (the symbol picker modal; row select switches symbol).
         if (ImGui::IsKeyChordPressed(ImGuiMod_Shortcut | ImGuiKey_K)) {
             Menu::g_symbol_picker.pending = Menu::SymbolPickerState::PendingWidget::Charts;
@@ -1791,7 +1800,7 @@ namespace {
         }
         render_topbar(widgets, ctx);
         render_statsbar(ctx);
-        draw_statusbar(ctx, g_pair.symbol, g_stats.has_data);
+        draw_statusbar(ctx, g_pair.symbol, transport, false);
         render_tweaks_panel(widgets);
         // the symbol picker popup is opened from the topbar / Cmd-K now
         Menu::render_symbol_picker_popup(widgets, ctx);

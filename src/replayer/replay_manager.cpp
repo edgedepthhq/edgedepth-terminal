@@ -735,6 +735,16 @@ void ReplayManager::flush_pending_join() {
 // Playback Control
 // ═══════════════════════════════════════════════════════════════════════════════
 
+void ReplayManager::on_transport_interrupted(const WebSocketClient* socket) {
+    if (pack_mode_ || !is_active() || info_.state == State::Creating ||
+        active_socket() != socket) return;
+    info_.current_time_ms = interpolated_time_ms();
+    info_.last_status_update = now_ms();
+    transport_interrupted_ = true;
+    info_.error_message = "Connection lost. Reopen replay to continue from recorded data.";
+    transition(State::Paused);
+}
+
 void ReplayManager::pause() {
     if (info_.state != State::Playing) return;
     // Snapshot the current interpolated time so it's stable while paused.
@@ -747,6 +757,7 @@ void ReplayManager::pause() {
 }
 
 void ReplayManager::resume() {
+    if (transport_interrupted_) return;
     if (info_.state != State::Paused) return;
     // Re-anchor the interpolation clock. While paused, wall time advanced
     // but market time didn't. Without this, interpolated_time_ms() would
@@ -809,6 +820,7 @@ void ReplayManager::speed_down() {
 }
 
 void ReplayManager::seek(int64_t timestamp_ms, bool deliberate) {
+    if (transport_interrupted_) return;
     if (!is_active()) return;
 
     // No session yet → refuse WITHOUT touching the state machine. A seek fired
@@ -906,6 +918,7 @@ void ReplayManager::skip_backward(int64_t seconds) {
 static constexpr int64_t kLargeSkipThresholdMs = 2 * 60 * 1000;  // 2 minutes
 
 void ReplayManager::skip_forward_to(int64_t timestamp_ms) {
+    if (transport_interrupted_) return;
     if (!is_active()) return;
     timestamp_ms = std::clamp(timestamp_ms, info_.start_time_ms, info_.end_time_ms);
     // Seek ceiling (lesson scrub-forward lock): >> stops at the ceiling.
@@ -983,6 +996,7 @@ void ReplayManager::skip_forward_to(int64_t timestamp_ms) {
 }
 
 void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
+    if (transport_interrupted_) return;
     if (!is_active()) return;
     timestamp_ms = std::clamp(timestamp_ms, info_.start_time_ms, info_.end_time_ms);
 
@@ -1221,6 +1235,7 @@ void ReplayManager::tick_buffering_gate() {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 bool ReplayManager::handle_ws_message(const std::string& type, const void* json_data) {
+    if (transport_interrupted_) return true;
     const json& msg = *static_cast<const json*>(json_data);
 
     // Backend sends {"type":"...", "data":{payload}, "session_id":"..."}.
@@ -1527,6 +1542,8 @@ void ReplayManager::send_control_with_int64(
 }
 
 void ReplayManager::transition(State new_state) {
+    if (transport_interrupted_ && new_state != State::Paused &&
+        new_state != State::Stopped && new_state != State::Error) return;
     if (info_.state == new_state) return;
 
     State old_state = info_.state;
@@ -1593,6 +1610,7 @@ void ReplayManager::reset() {
     pack_mode_ = false;
     LayoutManager::bottom_reserve = 0.0f;
     info_ = SessionInfo{};
+    transport_interrupted_ = false;
     pending_ = PendingRequest{};
     scrubber_dragging_ = false;
     last_seek_time_ms_ = 0;
@@ -2712,6 +2730,10 @@ void ReplayManager::render_status_badge() {
         default:               return;
     }
 
+    if (transport_interrupted_) {
+        label = "CONNECTION LOST: REOPEN REPLAY";
+        color = Theme::Tokens::WARN;
+    }
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImGui::PushFont(Theme::Fonts::label());  // uppercase micro-label face
 

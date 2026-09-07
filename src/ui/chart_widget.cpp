@@ -1136,6 +1136,22 @@ void ChartWidget::render_chart() {
                 const double vis_candles = visible_span / static_cast<double>(candle_ms);
                 const bool show_labels = (vis_candles < 45);
                 reconstructor->render_cells(candle_ms, heatmap_sensitivity_, show_labels);
+                const int64_t coverage_end = heatmap_replay_cutoff > 0 ? heatmap_replay_cutoff :
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count();
+                if (reconstructor->has_missing_columns(static_cast<int64_t>(visible_x_min),
+                        std::min(static_cast<int64_t>(visible_x_max), coverage_end))) {
+                    const ImVec2 pos = ImPlot::GetPlotPos();
+                    const ImVec2 note(pos.x + 12.0f, pos.y + 82.0f);
+                    const char* text = "Depth gaps: no observation loaded";
+                    const ImVec2 size = ImGui::CalcTextSize(text);
+                    ImPlot::GetPlotDrawList()->AddRectFilled(
+                        ImVec2(note.x - 4.0f, note.y - 2.0f),
+                        ImVec2(note.x + size.x + 4.0f, note.y + size.y + 2.0f),
+                        ImGui::GetColorU32(Theme::Tokens::PANEL));
+                    ImPlot::GetPlotDrawList()->AddText(note,
+                        ImGui::GetColorU32(Theme::Tokens::TX2), text);
+                }
             }
             render_heatmap_tooltip();
         }

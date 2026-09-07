@@ -104,6 +104,12 @@ public:
     void set_replay_cutoff_ms(int64_t ms) {
         if (ms != replay_cutoff_ms_) {
             // A rewind invalidates a newer book; do not resurrect it on resume.
+            if (ms > 0) {
+                for (auto it = observed_columns_.begin(); it != observed_columns_.end();) {
+                    if (it->second.timestamp_ms > ms) it = observed_columns_.erase(it);
+                    else ++it;
+                }
+            }
             if (ms > 0 && live_timestamp_ms_ > ms) {
                 live_price_qty_.clear();
                 live_timestamp_ms_ = 0;
@@ -122,6 +128,7 @@ public:
     GLuint get_texture_id() const { return data_texture_; }
 
     float get_value_at_price_and_time(double price, int64_t time_ms) const;
+    bool has_missing_columns(int64_t start_ms, int64_t end_ms) const;
 
     int64_t get_min_time() const;
     int64_t get_max_time() const;
@@ -308,6 +315,17 @@ private:
 
     // Live column tracking
     void upload_live_column();
+    void upload_observed_column(int64_t timestamp_ms,
+        const std::unordered_map<double, float>& price_qty_map, double center_price);
+    struct ObservedColumn {
+        int64_t timestamp_ms;
+        double center_price;
+        std::unordered_map<double, float> prices;
+    };
+    // One actual observation per minute, bounded independently of backfill.
+    // Historical responses replace these provisional cells when available.
+    std::map<int64_t, ObservedColumn> observed_columns_;
+    static constexpr int64_t OBSERVED_RETENTION_MS = 10 * 60 * 1000;
     std::unordered_map<double, float> live_price_qty_;
     double live_center_price_ = 0.0;
     int live_ring_col_ = -1;

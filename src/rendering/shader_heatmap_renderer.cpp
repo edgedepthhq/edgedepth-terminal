@@ -236,6 +236,15 @@ void ShaderHeatmapRenderer::update_live_column(
     int64_t timestamp_ms,
     const std::unordered_map<double, float>& price_qty_map, double center_price)
 {
+    if (replay_cutoff_ms_ > 0 && timestamp_ms > replay_cutoff_ms_) return;
+    if (timestamp_ms < live_timestamp_ms_) return;
+    if (replay_cutoff_ms_ == 0 && !price_qty_map.empty()) {
+        const int64_t minute = timestamp_ms / 60000 * 60000;
+        observed_columns_[minute] = {timestamp_ms, center_price, price_qty_map};
+        while (!observed_columns_.empty() &&
+               observed_columns_.begin()->first <= minute - OBSERVED_RETENTION_MS)
+            observed_columns_.erase(observed_columns_.begin());
+    }
     live_center_price_ = center_price;
     // Keep the latest book independently of historical snapshots. A history
     // rebuild must not erase live depth or drop an update while the grid is dirty.
@@ -248,8 +257,11 @@ void ShaderHeatmapRenderer::update_live_column(
 void ShaderHeatmapRenderer::upload_live_column() {
     if (timeline_.empty() || native_bucket_size_ <= 0 || live_price_qty_.empty()) return;
     if (replay_cutoff_ms_ > 0 && live_timestamp_ms_ > replay_cutoff_ms_) return;
-    const auto& price_qty_map = live_price_qty_;
-    const int64_t timestamp_ms = live_timestamp_ms_;
+    upload_observed_column(live_timestamp_ms_, live_price_qty_, live_center_price_);
+}
+
+void ShaderHeatmapRenderer::upload_observed_column(int64_t timestamp_ms,
+    const std::unordered_map<double, float>& price_qty_map, double center_price) {
 
     // Place live depth at its actual time, never overwrite the last historical
     // column. Wait for a dirty grid to be rebuilt before using its origin.
@@ -269,8 +281,8 @@ void ShaderHeatmapRenderer::upload_live_column() {
         raw_pmin = std::min(raw_pmin, p);
         raw_pmax = std::max(raw_pmax, p);
     }
-    const double mid_price = live_center_price_ > 0.0
-        ? live_center_price_ : (raw_pmin + raw_pmax) * 0.5;
+    const double mid_price = center_price > 0.0
+        ? center_price : (raw_pmin + raw_pmax) * 0.5;
     const double half_window = (MAX_ROWS / 2) * native_bucket_size_;
     const double pmin = std::floor(
         (mid_price - half_window) / native_bucket_size_) * native_bucket_size_;
@@ -699,6 +711,13 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
     ring_count_ = upload_cols;
     live_ring_col_ = -1;
     gpu_dirty_ = false;
+    for (const auto& [minute, observed] : observed_columns_) {
+        if (replay_cutoff_ms_ > 0 && observed.timestamp_ms > replay_cutoff_ms_) continue;
+        if (observed.timestamp_ms < gpu_origin_ms_) continue;
+        const int64_t col = (observed.timestamp_ms - gpu_origin_ms_) / time_step_ms_;
+        if (col >= RING_SIZE || column_meta_[col].finalized) continue;
+        upload_observed_column(observed.timestamp_ms, observed.prices, observed.center_price);
+    }
     upload_live_column();
 }
 
@@ -730,6 +749,7 @@ void ShaderHeatmapRenderer::clear() {
     live_ring_col_ = -1;
     live_timestamp_ms_ = 0;
     live_price_qty_.clear();
+    observed_columns_.clear();
     gpu_dirty_ = true;
     global_max_qty_ = 0.01f;
     global_price_center_ = 0.0;
@@ -1105,6 +1125,19 @@ double ShaderHeatmapRenderer::get_max_price() const {
         }
     }
     return pmax;
+}
+
+bool ShaderHeatmapRenderer::has_missing_columns(int64_t start_ms, int64_t end_ms) const {
+    if (start_ms > end_ms) return false;
+    if (ring_count_ == 0 || time_step_ms_ <= 0) return true;
+    const int64_t first = static_cast<int64_t>(std::floor(
+        static_cast<double>(start_ms - gpu_origin_ms_) / time_step_ms_ + 0.5));
+    const int64_t last = static_cast<int64_t>(std::floor(
+        static_cast<double>(end_ms - gpu_origin_ms_) / time_step_ms_ + 0.5));
+    if (first < 0 || last >= ring_count_) return true;
+    for (int64_t col = first; col <= last; ++col)
+        if (column_meta_[col].num_rows == 0) return true;
+    return false;
 }
 
 float ShaderHeatmapRenderer::get_value_at_price_and_time(
