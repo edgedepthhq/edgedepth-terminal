@@ -2702,6 +2702,7 @@ void ChartWidget::render_controls() {
     ImGui::SetNextWindowPos(ImVec2(ct_anchor.x, ct_anchor.y + 4.0f));
     ImGui::SetNextWindowSize(ImVec2(286.0f, 0.0f));
     push_menu_style();
+    bool open_footprint_settings = false;
     if (ImGui::BeginPopup("chart_type_popup")) {
         draw_menu_shadow();
         menu_header("CHART VIEW \xc2\xb7 7 OPTIONS");
@@ -2771,7 +2772,7 @@ void ChartWidget::render_controls() {
             }
             if ((idx == 1 || idx == 2) && rclick) {
                 ImGui::CloseCurrentPopup();
-                footprint_settings_panel_.open();
+                open_footprint_settings = true;
             }
             if (idx == 5 && rclick) {
                 ImGui::CloseCurrentPopup();
@@ -2795,6 +2796,9 @@ void ChartWidget::render_controls() {
         ImGui::EndPopup();
     }
     pop_menu_style();
+
+    // Open at the same window/ID scope as the settings panel, not inside the menu.
+    if (open_footprint_settings) footprint_settings_panel_.open();
 
     // Renko brick-size config popup (opened by right-clicking the Renko row OR
     // the on-chart gear; the gear defers OpenPopup to here so it runs at window
@@ -6643,12 +6647,42 @@ static void format_fp_volume(char* buf, size_t buf_size, double vol) {
     }
 }
 
+// Shared by cluster and profile: default same-price outlines are unchanged.
+static void draw_fp_imbalance(ImDrawList* draw, const FootprintManager& manager,
+    const FootprintManager::GroupedLevel& row, float left, float right,
+    float top, float bottom) {
+    if (!manager.show_imbalances) return;
+    if (manager.comparison == FootprintManager::Comparison::SamePrice &&
+        manager.stacked_levels == 0) {
+        if (row.buy_imbalance || row.sell_imbalance) {
+            draw->AddRect(ImVec2(left, top), ImVec2(right, bottom),
+                row.buy_imbalance ? IM_COL32(80, 180, 120, 160) : IM_COL32(180, 80, 80, 160),
+                0.0f, 0, 1.0f);
+        }
+        return;
+    }
+    const float mid = (left + right) * 0.5f;
+    if (row.sell_imbalance) draw->AddRect(ImVec2(left, top), ImVec2(mid, bottom),
+        ImGui::GetColorU32(Theme::Tokens::DOWN), 0.0f, 0, row.sell_stack ? 2.5f : 1.0f);
+    if (row.buy_imbalance) draw->AddRect(ImVec2(mid, top), ImVec2(right, bottom),
+        ImGui::GetColorU32(Theme::Tokens::UP), 0.0f, 0, row.buy_stack ? 2.5f : 1.0f);
+}
+
 void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_x_max) {
     auto& fp_mgr = ctx_.footprint_mgr();
     const auto& timestamps = ctx_.candle_mgr().timestamps();
     if (timestamps.empty()) return;
 
     const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
+    if (tf_sec < 60) {
+        ImPlot::GetPlotDrawList()->AddText(ImPlot::GetPlotPos(),
+            ImGui::GetColorU32(Theme::Tokens::TX2), "Footprints require 1m or higher");
+        return;
+    }
+    const int64_t as_of_ms = ctx_.replay_mgr().is_active()
+        ? ctx_.replay_mgr().interpolated_time_ms()
+        : std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
     const double tf_ms = static_cast<double>(tf_sec) * 1000.0;
     const double visible_candles = (visible_x_max - visible_x_min) / tf_ms;
     const int64_t tf_ms_i = static_cast<int64_t>(tf_sec) * 1000;
@@ -6720,7 +6754,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
         if (zoomed_out_block) {
             // Use cached merge - no per-frame allocation
             const auto* mc = fp_mgr.get_merged_grouped(
-                pair_.symbol, timestamps[i], tf_sec, 0.0);
+                pair_.symbol, timestamps[i], tf_sec, 0.0, as_of_ms);
             if (!mc) continue;
 
             double delta = mc->delta;
@@ -6777,9 +6811,19 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
             }
         }
 
+        if (tick_size_ > 0.0) effective_tpr = std::max(tick_size_,
+            std::ceil(effective_tpr / tick_size_) * tick_size_);
+
         // Use cached merge+group - no per-frame vector allocations
         const auto* mc = fp_mgr.get_merged_grouped(
-            pair_.symbol, timestamps[i], tf_sec, effective_tpr);
+            pair_.symbol, timestamps[i], tf_sec, effective_tpr, as_of_ms);
+        if (show_text && as_of_ms >= timestamps[i] && as_of_ms - timestamps[i] < tf_ms_i) {
+            const ImVec2 label = ImPlot::PlotToPixels(candle_center - tf_ms * 0.35, highs[i]);
+            draw_list->AddText(font, fp_font_size * 0.8f,
+                ImVec2(label.x, label.y - fp_font_size),
+                ImGui::GetColorU32(Theme::Tokens::TX2),
+                mc && mc->provisional ? "Partial (closed minutes)" : "Awaiting minute close");
+        }
         if (!mc) continue;
         const auto& grouped = mc->levels;
 
@@ -6897,14 +6941,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
                 }
             }
 
-            // Imbalance highlight - subtle border
-            if (fp_mgr.show_imbalances && gl.is_imbalance) {
-                ImU32 imb_color = gl.buy_dominant
-                    ? IM_COL32(80, 180, 120, 160)
-                    : IM_COL32(180, 80, 80, 160);
-                draw_list->AddRect(ImVec2(left, row_top), ImVec2(right, row_bottom),
-                                   imb_color, 0.0f, 0, 1.0f);
-            }
+            draw_fp_imbalance(draw_list, fp_mgr, gl, left, right, row_top, row_bottom);
 
             // POC - subtle horizontal line
             if (fp_mgr.show_poc && gl.is_poc) {
@@ -6962,6 +6999,15 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
     if (timestamps.empty()) return;
 
     const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
+    if (tf_sec < 60) {
+        ImPlot::GetPlotDrawList()->AddText(ImPlot::GetPlotPos(),
+            ImGui::GetColorU32(Theme::Tokens::TX2), "Footprints require 1m or higher");
+        return;
+    }
+    const int64_t as_of_ms = ctx_.replay_mgr().is_active()
+        ? ctx_.replay_mgr().interpolated_time_ms()
+        : std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
     const double tf_ms = static_cast<double>(tf_sec) * 1000.0;
     const int64_t tf_ms_i = static_cast<int64_t>(tf_sec) * 1000;
     const double visible_candles = (visible_x_max - visible_x_min) / tf_ms;
@@ -7022,7 +7068,7 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
         // Same as cluster: single delta-colored rectangle per candle
         if (zoomed_out_block) {
             const auto* mc = fp_mgr.get_merged_grouped(
-                pair_.symbol, timestamps[i], tf_sec, 0.0);
+                pair_.symbol, timestamps[i], tf_sec, 0.0, as_of_ms);
             if (!mc) continue;
 
             double delta = mc->delta;
@@ -7079,8 +7125,18 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
             }
         }
 
+        if (tick_size_ > 0.0) effective_tpr = std::max(tick_size_,
+            std::ceil(effective_tpr / tick_size_) * tick_size_);
+
         const auto* mc = fp_mgr.get_merged_grouped(
-            pair_.symbol, timestamps[i], tf_sec, effective_tpr);
+            pair_.symbol, timestamps[i], tf_sec, effective_tpr, as_of_ms);
+        if (show_text && as_of_ms >= timestamps[i] && as_of_ms - timestamps[i] < tf_ms_i) {
+            const ImVec2 label = ImPlot::PlotToPixels(candle_center - tf_ms * 0.35, highs[i]);
+            draw_list->AddText(font, fp_font_size * 0.8f,
+                ImVec2(label.x, label.y - fp_font_size),
+                ImGui::GetColorU32(Theme::Tokens::TX2),
+                mc && mc->provisional ? "Partial (closed minutes)" : "Awaiting minute close");
+        }
         if (!mc) continue;
         const auto& grouped = mc->levels;
 
@@ -7178,14 +7234,7 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
                                    IM_COL32(220, 220, 220, 200), 0.0f, 0, 1.5f);
             }
 
-            // Imbalance highlight
-            if (fp_mgr.show_imbalances && gl.is_imbalance) {
-                ImU32 imb_color = gl.buy_dominant
-                    ? IM_COL32(80, 180, 120, 160)
-                    : IM_COL32(180, 80, 80, 160);
-                draw_list->AddRect(ImVec2(left, row_top), ImVec2(right, row_bot),
-                                   imb_color, 0.0f, 0, 1.0f);
-            }
+            draw_fp_imbalance(draw_list, fp_mgr, gl, left, right, row_top, row_bot);
         }
 
         // Outer border around entire footprint box
@@ -7222,7 +7271,7 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
 }
 
 void ChartWidget::render_footprint_settings_popup() {
-    footprint_settings_panel_.set_panel_height(280.0f);
+    footprint_settings_panel_.set_panel_height(340.0f);
     if (footprint_settings_panel_.begin()) {
         auto& fp = ctx_.footprint_mgr();
 
@@ -7233,12 +7282,36 @@ void ChartWidget::render_footprint_settings_popup() {
             if (ImGui::Combo("Mode##fp", &mode_idx, fp_modes, 4)) {
                 fp.mode = static_cast<FootprintManager::Mode>(mode_idx);
             }
-            ImGui::Spacing();
-            ImGui::SetNextItemWidth(80);
+        }
+        if (footprint_settings_panel_.tab("Imbalances")) {
+            int comparison = static_cast<int>(fp.comparison);
+            const char* comparisons[] = { "Same price", "Diagonal" };
+            ImGui::SetNextItemWidth(130);
+            if (ImGui::Combo("Comparison##fp", &comparison, comparisons, 2))
+                fp.comparison = static_cast<FootprintManager::Comparison>(comparison);
+            if (ImGui::IsItemHovered()) Theme::tooltip(
+                "Diagonal: buys vs sells one row below; sells vs buys one row above.\n"
+                "Missing rows and zero opposing volume do not qualify.");
+            ImGui::SetNextItemWidth(100);
             ImGui::SliderFloat("Imbalance Ratio##fp", &fp.imbalance_ratio, 1.5f, 10.0f, "%.1f:1");
             if (ImGui::IsItemHovered()) {
-                Theme::tooltip("Minimum buy:sell or sell:buy ratio\nfor imbalance highlighting");
+                Theme::tooltip("At least this ratio against the opposing volume\nat the selected comparison price");
             }
+            ImGui::Spacing();
+            ImGui::SetNextItemWidth(100);
+            if (ImGui::InputDouble("Minimum volume##fp", &fp.imbalance_min_volume, 0, 0, "%.4f"))
+                fp.imbalance_min_volume = std::isfinite(fp.imbalance_min_volume)
+                    ? std::max(0.0, fp.imbalance_min_volume) : 0.0;
+            if (ImGui::IsItemHovered()) Theme::tooltip("Minimum qualifying buy or sell volume, in feed volume units.");
+            ImGui::SetNextItemWidth(100);
+            if (ImGui::SliderInt("Stack levels##fp", &fp.stacked_levels, 0, 10,
+                                 fp.stacked_levels == 0 ? "Off" : "%d", ImGuiSliderFlags_AlwaysClamp))
+                if (fp.stacked_levels == 1) fp.stacked_levels = 2;
+            if (ImGui::IsItemHovered()) Theme::tooltip(
+                "Thick outlines mark consecutive same-side imbalances.\n"
+                "A missing grouped price breaks a stack. 0 disables stacks.");
+            ImGui::TextWrapped("Thin outlines: imbalance. Thick: stack. Sells left, buys right.");
+            ImGui::TextWrapped("Uses available closed 1m buckets. Partial candles can change; missing minutes are not zero volume.");
         }
         if (footprint_settings_panel_.tab("Display")) {
             ImGui::Checkbox("Imbalance Highlights##fp", &fp.show_imbalances);

@@ -113,6 +113,7 @@ Open-source trade aggregators and charting components exist, but complete browse
 - **Trade tape**: live time & sales with size highlighting
 - **Orderbook heatmap**: GPU-rendered depth history via a shader-based renderer
 - **Volume profile (VPVR), TPO / Market Profile, footprint**: built client-side from per-price tick volume, so they need a feed that carries it. Every `.edpack` does, which means the Replay Library packs below light all of them up with no account and no backend. A plain live feed does not: the bundled community gateway forwards trades, book and candles, not per-price volume history, so these panels stay empty on it
+- **Footprint imbalances**: same-price or diagonal buy/sell comparisons, configurable ratio and minimum volume, and consecutive same-side stacks. Uses available closed one-minute tick-volume buckets; replay excludes buckets ending after the playhead. Right-click a footprint view in the chart menu, then choose Imbalances.
 - **Liquidation heatmap layers**: the dense liquidation Field, leverage-tier levels, and profile rendering. The Field is computed client-side from candles, so it works on any feed
 - **Market replay**: deterministic replay engine with scrubbing, and self-contained [`.edpack`](docs/EDPACK.md) files that play entirely client-side with no server
 - **Replay Library**: a manifest-driven browser of free, curated `.edpack` recordings for local replay and regression testing

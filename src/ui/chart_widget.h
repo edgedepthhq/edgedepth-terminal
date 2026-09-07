@@ -455,7 +455,7 @@ private:
     SettingsPanel vpvr_settings_panel_{"vpvr_settings",
         {"Display", "Sizing"}};
     SettingsPanel footprint_settings_panel_{"footprint_settings",
-        {"Mode", "Display", "Sizing"}};
+        {"Mode", "Imbalances", "Display", "Sizing"}};
     SettingsPanel tpo_settings_panel_{"tpo_settings",
         {"General", "Session", "Value Area", "Single Prints"}};
 

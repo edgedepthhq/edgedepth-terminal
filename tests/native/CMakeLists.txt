@@ -37,3 +37,5 @@ add_terminal_native_test(dispatch_drain_test dispatch_drain_test.cpp)
 add_terminal_native_test(double_buffer_test double_buffer_test.cpp)
 add_terminal_native_test(tpo_manager_test tpo_manager_test.cpp)
 add_terminal_native_test(indicator_series_test indicator_series_test.cpp)
+
+add_terminal_native_test(footprint_manager_test footprint_manager_test.cpp)

@@ -20,7 +20,7 @@
 #include <vector>
 #include <cmath>
 
-#include <pb/messages.pb.h>
+namespace pb { class TickVolumeUpdate; }
 
 class StreamManager;
 
@@ -62,6 +62,8 @@ public:
         Profile,    // Aggregated sidebar histogram (all visible candles)
     };
 
+    enum class Comparison { SamePrice, Diagonal };
+
     // ── Grouped level (after client-side tick regrouping) ────────────────
     struct GroupedLevel {
         double price_mid    = 0.0;
@@ -72,8 +74,11 @@ public:
         double total_volume = 0.0;
         double delta        = 0.0;
         bool is_poc         = false;
-        bool is_imbalance   = false; // buy:sell > ratio or sell:buy > ratio
-        bool buy_dominant   = false; // which side has the imbalance
+        int64_t bucket_index = 0;
+        bool buy_imbalance = false;
+        bool sell_imbalance = false;
+        bool buy_stack = false;
+        bool sell_stack = false;
     };
 
     // ── Public API ───────────────────────────────────────────────────────
@@ -84,6 +89,9 @@ public:
 
     // Called by message handler when a TickVolumeUpdate arrives (live or historical).
     void on_tick_volume_update(const std::string& symbol, const pb::TickVolumeUpdate& update);
+
+    // Store a decoded, complete one-minute snapshot (main thread only).
+    void store_footprint(const std::string& symbol, CandleFootprint fp);
 
     // Look up the footprint for a specific candle by its start_time.
     const CandleFootprint* get_footprint(const std::string& symbol, int64_t start_time) const;
@@ -97,6 +105,12 @@ public:
     // ── Cached group_levels - avoids per-frame rebuild ──────────────────
     struct MergedCache {
         std::vector<GroupedLevel> levels;
+        int64_t timeframe_seconds = 0;
+        Comparison comparison = Comparison::SamePrice;
+        float ratio = 0.0f;
+        double minimum_volume = 0.0;
+        int stack_levels = 0;
+        bool provisional = false; // chart candle has not ended, not a coverage claim
         double tick_per_row       = 0.0;
         uint64_t composite_ver    = 0;    // sum of constituent bucket versions
         double total_volume       = 0.0;
@@ -111,7 +125,7 @@ public:
     // Returns nullptr if no data. All heavy work is cached - safe to call every frame.
     const MergedCache* get_merged_grouped(
         const std::string& symbol, int64_t candle_ts,
-        int64_t tf_sec, double tick_per_row);
+        int64_t tf_sec, double tick_per_row, int64_t as_of_ms);
 
     // Fast-path: check if any data has changed since last frame.
     // If false, all existing cache entries are guaranteed valid.
@@ -127,6 +141,9 @@ public:
     bool  show_imbalances  = true;
     bool  show_poc         = true;
     bool  show_summary     = true;    // V: / D: footer per candle
+    Comparison comparison = Comparison::SamePrice;
+    double imbalance_min_volume = 0.0; // numerator volume, in feed units
+    int stacked_levels = 0;           // 0 = off; otherwise at least 2
     float imbalance_ratio  = 3.0f;    // threshold for imbalance detection
 
     // ── State queries ────────────────────────────────────────────────────

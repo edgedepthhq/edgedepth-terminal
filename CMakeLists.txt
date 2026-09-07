@@ -453,6 +453,7 @@ set(PROJECT_SRC
         src/core/tpo_manager.cpp
         src/core/footprint_manager.h
         src/core/footprint_manager.cpp
+        src/core/footprint_transport.cpp
         src/types/stack_arena.h
         src/core/heatmap_colormap.h
         src/core/heatmap_colormap.cpp

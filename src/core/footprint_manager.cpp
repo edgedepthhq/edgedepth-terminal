@@ -1,127 +1,15 @@
 #include "footprint_manager.h"
-#include "../stream_handler.h"
-#include "../types/types.h"
-#include <pb/messages.pb.h>
-
-#include <zstd.h>
 #include <algorithm>
-#include <cmath>
-#include <nlohmann/json.hpp>
+#include <limits>
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// FootprintManager implementation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-void FootprintManager::request_history(
-    const Terminal::Pair& pair, int64_t start_ms, int64_t end_ms,
-    StreamManager* sm)
-{
-    if (!sm) return;
-
-    // Don't fire new requests while one is already in flight
-    if (loading_) return;
-
-    // Skip if requested range is already covered by what we have
-    if (pair.symbol == last_symbol_ &&
-        start_ms >= last_start_ && end_ms <= last_end_) {
-        return;
-    }
-
-    // Extend the covered range (union of old + new)
-    if (pair.symbol == last_symbol_ && last_start_ > 0) {
-        start_ms = std::min(start_ms, last_start_);
-        end_ms   = std::max(end_ms, last_end_);
-    }
-
-    last_symbol_ = pair.symbol;
-    last_start_ = start_ms;
-    last_end_ = end_ms;
-    loading_ = true;
-
-    nlohmann::json req;
-    req["method"] = "get_footprint_history";
-    req["data"]["pair"]["exchange"] = pair.exchange;
-    req["data"]["pair"]["symbol"] = pair.symbol;
-    req["data"]["start_time"] = start_ms;
-    req["data"]["end_time"] = end_ms;
-
-    sm->send_message(req.dump());
-}
-
-void FootprintManager::on_tick_volume_update(
-    const std::string& symbol, const pb::TickVolumeUpdate& update)
-{
-    // Sentinel: timestamp_ms=0 signals end of historical batch
-    if (update.timestamp_ms() == 0) {
-        loading_ = false;
-        return;
-    }
-
-    int64_t start_time = update.start_time();
-    if (start_time == 0) start_time = update.timestamp_ms();
-
-    CandleFootprint fp;
-    fp.start_time   = start_time;
-    fp.end_time     = update.end_time();
-    fp.total_volume = update.total_volume();
-    fp.total_buy    = update.buy_volume();
-    fp.total_sell   = update.sell_volume();
-    fp.delta        = fp.total_buy - fp.total_sell;
-    fp.poc          = update.poc();
-    fp.high_price   = update.high_price();
-    fp.low_price    = update.low_price();
-
-    // Decompress levels_data (zstd → protobuf TickVolumeLevels)
-    const std::string& blob = update.levels_data();
-    if (!blob.empty()) {
-        // Try zstd decompression first
-        unsigned long long frame_size = ZSTD_getFrameContentSize(blob.data(), blob.size());
-        bool is_zstd = (frame_size != ZSTD_CONTENTSIZE_ERROR &&
-                        frame_size != ZSTD_CONTENTSIZE_UNKNOWN);
-
-        const uint8_t* proto_data = nullptr;
-        size_t proto_size = 0;
-        std::vector<uint8_t> decompressed;
-
-        if (is_zstd && frame_size > 0 && frame_size < 10 * 1024 * 1024) {
-            decompressed.resize(static_cast<size_t>(frame_size));
-            size_t result = ZSTD_decompress(decompressed.data(), static_cast<size_t>(frame_size),
-                                            blob.data(), blob.size());
-            if (!ZSTD_isError(result)) {
-                proto_data = decompressed.data();
-                proto_size = result;
-            }
-        }
-
-        // Fallback: try as raw protobuf
-        if (!proto_data) {
-            proto_data = reinterpret_cast<const uint8_t*>(blob.data());
-            proto_size = blob.size();
-        }
-
-        pb::TickVolumeLevels levels_pb;
-        if (levels_pb.ParseFromArray(proto_data, static_cast<int>(proto_size))) {
-            fp.levels.reserve(levels_pb.levels_size());
-            for (const auto& lv : levels_pb.levels()) {
-                Level level;
-                level.price        = lv.price();
-                level.buy_volume   = lv.buy_volume();
-                level.sell_volume  = lv.sell_volume();
-                level.total_volume = lv.total_volume();
-                level.trade_count  = lv.trade_count();
-                level.delta        = lv.buy_volume() - lv.sell_volume();
-                fp.levels.push_back(level);
-            }
-            // Sort by price ascending
-            std::sort(fp.levels.begin(), fp.levels.end(),
-                      [](const Level& a, const Level& b) { return a.price < b.price; });
-        }
-    }
-
+void FootprintManager::store_footprint(const std::string& symbol, CandleFootprint fp) {
+    // The source owns minute snapshots. Other resolutions must never overwrite
+    // one-minute data, and unknown time bounds cannot prove replay availability.
+    if (fp.start_time <= 0 || fp.start_time % 60000 != 0 ||
+        fp.end_time - fp.start_time != 60000) return;
     fp.valid = !fp.levels.empty();
-    ++data_version_;
-    fp.version = data_version_;
-    data_[symbol][start_time] = std::move(fp);
+    fp.version = ++data_version_;
+    data_[symbol][fp.start_time] = std::move(fp);
 }
 
 const FootprintManager::CandleFootprint* FootprintManager::get_footprint(
@@ -141,6 +29,7 @@ int FootprintManager::candle_count(const std::string& symbol) const {
 }
 
 void FootprintManager::clear(const std::string& symbol) {
+    ++data_version_;
     data_.erase(symbol);
     merged_cache_.erase(symbol);
     if (last_symbol_ == symbol) {
@@ -152,23 +41,30 @@ void FootprintManager::clear(const std::string& symbol) {
 
 const FootprintManager::MergedCache* FootprintManager::get_merged_grouped(
     const std::string& symbol, int64_t candle_ts,
-    int64_t tf_sec, double tick_per_row)
+    int64_t tf_sec, double tick_per_row, int64_t as_of_ms)
 {
+    if (tf_sec < 60 || tf_sec % 60 != 0 || candle_ts > as_of_ms) return nullptr;
+    const bool provisional = as_of_ms - candle_ts < tf_sec * 1000;
     auto& sym_cache = merged_cache_[symbol];
     auto it = sym_cache.find(candle_ts);
 
     // Fast path: cache entry exists with matching tick_per_row.
     // Check composite version to see if underlying data changed.
-    if (it != sym_cache.end() && it->second.tick_per_row == tick_per_row) {
+    if (it != sym_cache.end() && it->second.tick_per_row == tick_per_row &&
+        it->second.timeframe_seconds == tf_sec && it->second.comparison == comparison &&
+        it->second.ratio == imbalance_ratio &&
+        it->second.minimum_volume == imbalance_min_volume &&
+        it->second.stack_levels == stacked_levels) {
         // Compute composite version from constituent 1m buckets
         const int buckets = std::max(1, static_cast<int>(tf_sec / 60));
         int64_t base_ms = (candle_ts / 60000) * 60000;
         uint64_t composite_ver = 0;
         for (int b = 0; b < buckets; ++b) {
             const auto* sub = get_footprint(symbol, base_ms + b * 60000);
-            if (sub) composite_ver += sub->version;
+            if (sub && sub->end_time <= as_of_ms) composite_ver += sub->version;
         }
         if (it->second.composite_ver == composite_ver) {
+            it->second.provisional = provisional;
             return it->second.levels.empty() ? nullptr : &it->second;
         }
     }
@@ -182,7 +78,7 @@ const FootprintManager::MergedCache* FootprintManager::get_merged_grouped(
     bool any_data = false;
     for (int b = 0; b < buckets; ++b) {
         const auto* sub = get_footprint(symbol, base_ms + b * 60000);
-        if (!sub) continue;
+        if (!sub || sub->end_time > as_of_ms) continue;
         any_data = true;
         composite_ver += sub->version;
         merged.total_volume += sub->total_volume;
@@ -197,6 +93,12 @@ const FootprintManager::MergedCache* FootprintManager::get_merged_grouped(
     }
 
     MergedCache& cache = sym_cache[candle_ts];
+    cache.timeframe_seconds = tf_sec;
+    cache.comparison = comparison;
+    cache.ratio = imbalance_ratio;
+    cache.minimum_volume = imbalance_min_volume;
+    cache.stack_levels = stacked_levels;
+    cache.provisional = provisional;
     cache.tick_per_row = tick_per_row;
     cache.composite_ver = composite_ver;
 
@@ -222,7 +124,7 @@ const FootprintManager::MergedCache* FootprintManager::get_merged_grouped(
 std::vector<FootprintManager::GroupedLevel> FootprintManager::group_levels(
     const CandleFootprint& fp, double tick_per_row) const
 {
-    if (fp.levels.empty()) return {};
+    if (fp.levels.empty() || !std::isfinite(tick_per_row)) return {};
 
     // Auto tick_per_row: target ~15-20 rows per candle
     if (tick_per_row <= 0.0) {
@@ -235,11 +137,24 @@ std::vector<FootprintManager::GroupedLevel> FootprintManager::group_levels(
 
     // Group raw levels into tick_per_row buckets
     std::unordered_map<int64_t, GroupedLevel> buckets;
-    double max_total = 0.0;
+
 
     for (const auto& lv : fp.levels) {
-        int64_t bucket_idx = static_cast<int64_t>(std::floor(lv.price / tick_per_row));
+        if (!std::isfinite(lv.price) || !std::isfinite(lv.buy_volume) ||
+            !std::isfinite(lv.sell_volume) || lv.buy_volume < 0 || lv.sell_volume < 0 ||
+            !std::isfinite(lv.total_volume) || lv.total_volume <= 0) continue;
+        double index = lv.price / tick_per_row;
+        // Correct only floating-point error at an exact grid edge, not prices
+        // genuinely inside a bucket (e.g. 0.3 / 0.1 is just below 3).
+        const double nearest = std::round(index);
+        if (std::abs(index - nearest) <= 4 * std::numeric_limits<double>::epsilon() *
+                std::max(1.0, std::abs(index))) index = nearest;
+        index = std::floor(index);
+        if (!std::isfinite(index) || index <= static_cast<double>(INT64_MIN) ||
+            index >= static_cast<double>(INT64_MAX)) continue;
+        int64_t bucket_idx = static_cast<int64_t>(index);
         auto& gl = buckets[bucket_idx];
+        gl.bucket_index = bucket_idx;
         if (gl.total_volume == 0.0) {
             gl.price_lo  = bucket_idx * tick_per_row;
             gl.price_hi  = gl.price_lo + tick_per_row;
@@ -259,9 +174,6 @@ std::vector<FootprintManager::GroupedLevel> FootprintManager::group_levels(
             poc_vol = gl.total_volume;
             poc_bucket = idx;
         }
-        if (gl.total_volume > max_total) {
-            max_total = gl.total_volume;
-        }
     }
 
     // Build sorted output + mark POC and imbalances
@@ -269,17 +181,6 @@ std::vector<FootprintManager::GroupedLevel> FootprintManager::group_levels(
     result.reserve(buckets.size());
     for (auto& [idx, gl] : buckets) {
         gl.is_poc = (idx == poc_bucket);
-
-        // Imbalance detection: one side > ratio × other side
-        double buy = gl.buy_volume;
-        double sell = gl.sell_volume;
-        if (sell > 0.0 && buy / sell >= imbalance_ratio) {
-            gl.is_imbalance = true;
-            gl.buy_dominant = true;
-        } else if (buy > 0.0 && sell / buy >= imbalance_ratio) {
-            gl.is_imbalance = true;
-            gl.buy_dominant = false;
-        }
 
         result.push_back(std::move(gl));
     }
@@ -290,5 +191,50 @@ std::vector<FootprintManager::GroupedLevel> FootprintManager::group_levels(
                   return a.price_mid < b.price_mid;
               });
 
+    // Buy at p compares with sells one grouped row below; sell at p with
+    // buys one row above. Missing rows and zero denominators never qualify.
+    auto adjacent = [](const GroupedLevel& lo, const GroupedLevel& hi) {
+        return lo.bucket_index != INT64_MAX && hi.bucket_index == lo.bucket_index + 1;
+    };
+    auto qualifies = [this](double numerator, double denominator) {
+        return std::isfinite(imbalance_ratio) && imbalance_ratio > 1.0f &&
+            std::isfinite(imbalance_min_volume) &&
+            numerator > 0.0 && numerator >= std::max(0.0, imbalance_min_volume) &&
+            denominator > 0.0 && numerator / denominator >= imbalance_ratio;
+    };
+    for (size_t i = 0; i < result.size(); ++i) {
+        auto& row = result[i];
+        if (comparison == Comparison::SamePrice) {
+            row.buy_imbalance = qualifies(row.buy_volume, row.sell_volume);
+            row.sell_imbalance = qualifies(row.sell_volume, row.buy_volume);
+        } else {
+            row.buy_imbalance = i > 0 && adjacent(result[i-1], row) &&
+                qualifies(row.buy_volume, result[i-1].sell_volume);
+            row.sell_imbalance = i+1 < result.size() && adjacent(row, result[i+1]) &&
+                qualifies(row.sell_volume, result[i+1].buy_volume);
+        }
+    }
+    if (stacked_levels >= 2) {
+        // Linear passes mark the whole maximal run, independently per side.
+        for (bool buy : {false, true}) {
+            size_t begin = 0;
+            while (begin < result.size()) {
+                auto flagged = [buy](const GroupedLevel& r) {
+                    return buy ? r.buy_imbalance : r.sell_imbalance;
+                };
+                if (!flagged(result[begin])) { ++begin; continue; }
+                size_t end = begin + 1;
+                while (end < result.size() && flagged(result[end]) &&
+                       adjacent(result[end-1], result[end])) ++end;
+                if (end - begin >= static_cast<size_t>(stacked_levels)) {
+                    for (size_t j = begin; j < end; ++j) {
+                        if (buy) result[j].buy_stack = true;
+                        else result[j].sell_stack = true;
+                    }
+                }
+                begin = end;
+            }
+        }
+    }
     return result;
 }
