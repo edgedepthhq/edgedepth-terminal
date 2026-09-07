@@ -193,7 +193,7 @@ namespace Theme {
         s.FrameRounding     = 5.0f;   // --r2
         s.GrabRounding      = 5.0f;
         s.PopupRounding     = Radius::R3;   // floating chrome: radius 6
-        s.TabRounding       = 5.0f;
+        s.TabRounding       = 0.0f;
         s.WindowBorderSize  = 1.0f;
         s.ChildBorderSize   = 1.0f;
         s.FrameBorderSize   = 1.0f;

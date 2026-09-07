@@ -102,6 +102,11 @@ public:
     // 0 = disabled (live mode). Set to replay interpolated time during active replay.
     void set_replay_cutoff_ms(int64_t ms) {
         if (ms != replay_cutoff_ms_) {
+            // A rewind invalidates a newer book; do not resurrect it on resume.
+            if (ms > 0 && live_timestamp_ms_ > ms) {
+                live_price_qty_.clear();
+                live_timestamp_ms_ = 0;
+            }
             replay_cutoff_ms_ = ms;
             gpu_dirty_ = true;  // Force re-sync to clip at new cutoff
         }
@@ -296,6 +301,8 @@ private:
     float zscore_stddev_ = 1.0f;
 
     // Live column tracking
+    void upload_live_column();
+    std::unordered_map<double, float> live_price_qty_;
     int live_ring_col_ = -1;
     int64_t live_timestamp_ms_ = 0;
 

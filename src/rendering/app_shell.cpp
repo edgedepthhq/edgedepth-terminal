@@ -971,9 +971,7 @@ namespace {
         float total = caretw + 1.0f;
         for (int sec : visible_favs) total += ImGui::CalcTextSize(tf_label(sec)).x + padx * 2.0f;
         const ImVec2 p0 = ImGui::GetCursorScreenPos();
-        // 2c favourites bar - square, bg-1 fill, line-2 hairline frame
-        dl->AddRectFilled(p0, ImVec2(p0.x + total, p0.y + h), u32(Tokens::INPUT), Radius::R2);
-        dl->AddRect(p0, ImVec2(p0.x + total, p0.y + h), u32(Tokens::BD2), Radius::R2, 0, 1.0f);
+        // Flat favourites share the toolbar surface; selection carries the accent.
 
         float x = p0.x;
         for (int sec : visible_favs) {
@@ -988,7 +986,7 @@ namespace {
             if (clk && chart) chart->change_timeframe(sec);
             // Selected timeframe uses the shared accent on an inset chip.
             if (on) {
-                dl->AddRectFilled(ImVec2(x + 3, p0.y + 3), ImVec2(x + w - 3, p0.y + h - 3), u32(Tokens::BRAND_SOFT), Radius::R2);
+                dl->AddRectFilled(ImVec2(x + 3, p0.y + 3), ImVec2(x + w - 3, p0.y + h - 3), u32(Tokens::BRAND_SOFT), 2.0f);
             } else if (hov) {
                 dl->AddRectFilled(ImVec2(x + 1, p0.y + 1), ImVec2(x + w - 1, p0.y + h - 1), u32(Tokens::HOVER));
             }

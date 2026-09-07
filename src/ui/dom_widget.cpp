@@ -240,7 +240,6 @@ void DOMWidget::build_row_models(const Terminal::Orderbook& ob) {
 
     rows_ask_.resize(levels_per_side_);
     rows_bid_.resize(levels_per_side_);
-    shown_bid_total_ = 0.0; shown_ask_total_ = 0.0;   // book-imbalance meter totals
 
     auto fill = [&](RowModel& rm, double price, bool is_ask) {
         rm = RowModel{};
@@ -252,7 +251,6 @@ void DOMWidget::build_row_models(const Terminal::Orderbook& ob) {
             rm.has_size = true;
             rm.depth_frac = static_cast<float>(size / max_size);
             fmt_value(size, price, rm.size_txt, sizeof(rm.size_txt));
-            if (is_ask) shown_ask_total_ += size; else shown_bid_total_ += size;
         }
 
         if (show_trade_columns_) {
@@ -411,7 +409,6 @@ void DOMWidget::render() {
 
     render_controls();
     render_ladder(*ob);
-    render_imbalance(*ob);
     handle_mouse_input();
 
     ImGui::End();
@@ -574,7 +571,7 @@ void DOMWidget::render_ladder(const Terminal::Orderbook& ob) {
     const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_NoHostExtendX;
 
     // Reserve a fixed band at the bottom for the book-imbalance meter (drawn after).
-    const ImVec2 tbl_size(0.0f, std::max(60.0f, ImGui::GetContentRegionAvail().y - 34.0f));
+    const ImVec2 tbl_size(0.0f, std::max(60.0f, ImGui::GetContentRegionAvail().y));
     if (!ImGui::BeginTable("DOMTable", num_columns, flags, tbl_size)) {
         ImGui::PopStyleVar();
         ImGui::PopFont();
@@ -641,59 +638,6 @@ void DOMWidget::render_ladder(const Terminal::Orderbook& ob) {
     ImGui::EndTable();
     ImGui::PopStyleVar();
     ImGui::PopFont();
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Book-imbalance meter - pinned under the ladder (shown-window bid vs ask)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-void DOMWidget::render_imbalance(const Terminal::Orderbook& ob) {
-    using namespace Theme;
-    (void)ob;
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 org = ImGui::GetCursorScreenPos();
-    const float ww = ImGui::GetContentRegionAvail().x;
-    const float PADX = 14.0f, band_h = 34.0f;
-
-    dl->AddLine(org, ImVec2(org.x + ww, org.y), u32(Tokens::BD1), 1.0f);   // top border
-
-    const double tot = shown_bid_total_ + shown_ask_total_;
-    const float target = tot > 0.0 ? static_cast<float>(shown_bid_total_ / tot) : 0.5f;
-    // EMA smoothing (tau ~4s, framerate-independent) so the meter reads as a trend
-    // instead of strobing every book tick. TODO(next): configurable rolling window.
-    const float dt = ImGui::GetIO().DeltaTime;
-    if (imbalance_ema_ < 0.0f) imbalance_ema_ = target;
-    else imbalance_ema_ += (target - imbalance_ema_) * (1.0f - std::exp(-dt / 4.0f));
-    const float bid_pct = imbalance_ema_;
-
-    // Label row (padding 8 14): "BOOK IMBALANCE" left; "NN% BID \xc2\xb7 NN% ASK" right.
-    const float ly = org.y + 8.0f;
-    ImGui::PushFont(Fonts::label());
-    dl->AddText(ImVec2(org.x + PADX, ly), u32(Tokens::TX3), "BOOK IMBALANCE");
-    ImGui::PopFont();
-
-    char rb[32], ra[32];
-    snprintf(rb, sizeof(rb), "%d%% BID", static_cast<int>(std::lround(bid_pct * 100.0f)));
-    snprintf(ra, sizeof(ra), "%d%% ASK", static_cast<int>(std::lround((1.0f - bid_pct) * 100.0f)));
-    ImGui::PushFont(Fonts::mono_sm());
-    const float aw = ImGui::CalcTextSize(ra).x;
-    const float dw = ImGui::CalcTextSize(" \xc2\xb7 ").x;
-    const float bw = ImGui::CalcTextSize(rb).x;
-    float rxx = org.x + ww - PADX - aw;
-    dl->AddText(ImVec2(rxx, ly), u32(Tokens::DOWN), ra);
-    rxx -= dw; dl->AddText(ImVec2(rxx, ly), u32(Tokens::TX3), " \xc2\xb7 ");
-    rxx -= bw; dl->AddText(ImVec2(rxx, ly), u32(Tokens::UP), rb);
-    ImGui::PopFont();
-
-    // Track (height 5): down-soft bg, up fill from left (bid share), center tick.
-    const float ty = org.y + band_h - 8.0f - 5.0f;
-    const float tx0 = org.x + PADX, tx1 = org.x + ww - PADX, tw = tx1 - tx0;
-    dl->AddRectFilled(ImVec2(tx0, ty), ImVec2(tx1, ty + 5.0f), u32(Tokens::DOWN_SOFT));
-    dl->AddRectFilled(ImVec2(tx0, ty), ImVec2(tx0 + tw * bid_pct, ty + 5.0f), u32(Tokens::UP));
-    const float cxp = tx0 + tw * 0.5f;
-    dl->AddLine(ImVec2(cxp, ty - 2.0f), ImVec2(cxp, ty + 7.0f), u32(Tokens::BD2), 1.0f);
-
-    ImGui::Dummy(ImVec2(ww, band_h));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

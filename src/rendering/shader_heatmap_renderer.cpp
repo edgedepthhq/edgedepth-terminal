@@ -248,8 +248,19 @@ void ShaderHeatmapRenderer::update_live_column(
     int64_t timestamp_ms,
     const std::unordered_map<double, float>& price_qty_map)
 {
-    if (timeline_.empty() || native_bucket_size_ <= 0) return;
-    if (price_qty_map.empty()) return;
+    // Keep the latest book independently of historical snapshots. A history
+    // rebuild must not erase live depth or drop an update while the grid is dirty.
+    live_price_qty_ = price_qty_map;
+    live_timestamp_ms_ = timestamp_ms;
+    if (price_qty_map.empty()) { gpu_dirty_ = true; return; }
+    upload_live_column();
+}
+
+void ShaderHeatmapRenderer::upload_live_column() {
+    if (timeline_.empty() || native_bucket_size_ <= 0 || live_price_qty_.empty()) return;
+    if (replay_cutoff_ms_ > 0 && live_timestamp_ms_ > replay_cutoff_ms_) return;
+    const auto& price_qty_map = live_price_qty_;
+    const int64_t timestamp_ms = live_timestamp_ms_;
 
     // Place live depth at its actual time, never overwrite the last historical
     // column. Wait for a dirty grid to be rebuilt before using its origin.
@@ -261,7 +272,6 @@ void ShaderHeatmapRenderer::update_live_column(
     const int target_col = static_cast<int>(target);
     ring_count_ = std::max(ring_count_, target_col + 1);
     live_ring_col_ = target_col;
-    live_timestamp_ms_ = timestamp_ms;
 
     // Center the MAX_ROWS window around the live data's midpoint
     double raw_pmin = std::numeric_limits<double>::max();
@@ -349,6 +359,7 @@ void ShaderHeatmapRenderer::finalize_column(
 
                 if (col >= ring_count_) ring_count_ = col + 1;
             }
+            upload_live_column();
             return;  // Successfully uploaded - no need for full rebuild
         }
     }
@@ -356,7 +367,6 @@ void ShaderHeatmapRenderer::finalize_column(
     // Fallback: column doesn't fit in current ring - need full rebuild
     gpu_dirty_ = true;
     live_ring_col_ = -1;
-    live_timestamp_ms_ = 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -693,7 +703,9 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
     }
 
     ring_count_ = upload_cols;
+    live_ring_col_ = -1;
     gpu_dirty_ = false;
+    upload_live_column();
 }
 
 int ShaderHeatmapRenderer::find_column_for_time(int64_t timestamp_ms) const {
@@ -723,6 +735,7 @@ void ShaderHeatmapRenderer::clear() {
     first_seen_ts_ = 0;
     live_ring_col_ = -1;
     live_timestamp_ms_ = 0;
+    live_price_qty_.clear();
     gpu_dirty_ = true;
     global_max_qty_ = 0.01f;
     global_price_center_ = 0.0;

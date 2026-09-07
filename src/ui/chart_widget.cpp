@@ -2339,7 +2339,7 @@ void ChartWidget::render_controls() {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 bp = ImGui::GetCursorScreenPos();
     const float  ww = ImGui::GetContentRegionAvail().x;
-    const float  bar_h = Theme::Layout::PILLSROW_H;         // 44
+    const float  bar_h = 36.0f;
     const float  ctrl_y = bp.y + (bar_h - 28.0f) * 0.5f;    // centre 28px controls in the band
     dl->AddRectFilled(bp, ImVec2(bp.x + ww, bp.y + bar_h), Theme::u32(Theme::Tokens::PANEL));
 
@@ -2470,8 +2470,8 @@ void ChartWidget::render_controls() {
         const bool clicked = ImGui::InvisibleButton("##ct_btn", ImVec2(w, 28.0f));
         const bool open = ImGui::IsPopupOpen("chart_type_popup");
         const bool hot  = ImGui::IsItemHovered() || open;
-        dl->AddRect(ImVec2(cx, ctrl_y), ImVec2(cx + w, ctrl_y + 28.0f),
-                    Theme::u32(hot ? Theme::Tokens::BRAND : Theme::Tokens::BD2), Theme::Radius::R2, 0, 1.0f);
+        if (hot) dl->AddRectFilled(ImVec2(cx, ctrl_y), ImVec2(cx + w, ctrl_y + 28.0f),
+                    Theme::u32(Theme::Tokens::ELEV), 2.0f);
         draw_ctype_glyph(dl, static_cast<int>(chart_type_), cx + 9.0f, ctrl_y + 7.0f,
                          Theme::u32(hot ? Theme::Tokens::BRAND_TX : Theme::Tokens::TX2));
         float caret_x = cx + 9.0f + 14.0f;
@@ -2508,8 +2508,8 @@ void ChartWidget::render_controls() {
         const bool clicked = ImGui::InvisibleButton("##ly_btn", ImVec2(w, 28.0f));
         const bool open = ImGui::IsPopupOpen("layers_popup");
         const bool hot  = ImGui::IsItemHovered() || open;
-        dl->AddRect(ImVec2(cx, ctrl_y), ImVec2(cx + w, ctrl_y + 28.0f),
-                    Theme::u32(hot ? Theme::Tokens::BRAND : Theme::Tokens::BD2), Theme::Radius::R2, 0, 1.0f);
+        if (hot) dl->AddRectFilled(ImVec2(cx, ctrl_y), ImVec2(cx + w, ctrl_y + 28.0f),
+                    Theme::u32(Theme::Tokens::ELEV), 2.0f);
         draw_layers_glyph(dl, cx + 9.0f, ctrl_y + 6.5f,
                           Theme::u32(hot ? Theme::Tokens::BRAND_TX : Theme::Tokens::TX2));
         float bx = cx + 9.0f + 15.0f + 6.0f;
@@ -2552,9 +2552,8 @@ void ChartWidget::render_controls() {
         const bool clicked = ImGui::InvisibleButton("##add_widget_btn", ImVec2(w, 28.0f));
         const bool open = ImGui::IsPopupOpen("add_widget_popup");
         const bool hot  = ImGui::IsItemHovered() || open;
-        dl->AddRect(ImVec2(cx, ctrl_y), ImVec2(cx + w, ctrl_y + 28.0f),
-                    Theme::u32(hot ? Theme::Tokens::BRAND : Theme::Tokens::BD2),
-                    Theme::Radius::R2, 0, 1.0f);
+        if (hot) dl->AddRectFilled(ImVec2(cx, ctrl_y), ImVec2(cx + w, ctrl_y + 28.0f),
+                    Theme::u32(Theme::Tokens::ELEV), 2.0f);
         dl->AddText(ImVec2(cx + 10.0f, ctrl_y + (28.0f - ImGui::GetFontSize()) * 0.5f),
                     Theme::u32(hot ? Theme::Tokens::BRAND_TX : Theme::Tokens::TX2), label);
         if (ImGui::IsItemHovered()) Theme::tooltip("Add a widget");
@@ -2579,9 +2578,8 @@ void ChartWidget::render_controls() {
                 ImGui::InvisibleButton("##draw_menu_btn", ImVec2(w, 28.0f));
             const bool open = ImGui::IsPopupOpen("chart_draw_popup");
             const bool hot  = ImGui::IsItemHovered() || open;
-            dl->AddRect(ImVec2(cx, ctrl_y), ImVec2(cx + w, ctrl_y + 28.0f),
-                        Theme::u32(hot ? Theme::Tokens::BRAND : Theme::Tokens::BD2),
-                        Theme::Radius::R2, 0, 1.0f);
+            if (hot) dl->AddRectFilled(ImVec2(cx, ctrl_y), ImVec2(cx + w, ctrl_y + 28.0f),
+                    Theme::u32(Theme::Tokens::ELEV), 2.0f);
             drawing::draw_ui_icon(
                 dl, drawing::UiIcon::Pencil,
                 ImVec2(cx + 10.0f + 7.5f, ctrl_y + 14.0f), 6.0f,
@@ -2611,8 +2609,8 @@ void ChartWidget::render_controls() {
     }
 
     auto push_menu_style = []() {
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 10));
-        ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, Theme::Radius::R3);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 6));
+        ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 2.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
         ImGui::PushStyleColor(ImGuiCol_PopupBg, Theme::Tokens::PANEL);
@@ -2748,7 +2746,7 @@ void ChartWidget::render_controls() {
     // Chart-view menu: price views first, then order-flow views. Each row says
     // what changes, so the menu works as a compact feature inventory too.
     ImGui::SetNextWindowPos(ImVec2(ct_anchor.x, ct_anchor.y + 4.0f));
-    ImGui::SetNextWindowSize(ImVec2(380.0f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f));
     push_menu_style();
     int settings_view = -1;
     if (ImGui::BeginPopup("chart_type_popup")) {
@@ -2776,7 +2774,7 @@ void ChartWidget::render_controls() {
             const int idx = rows[r].idx;
             const bool active = (chart_type_ == static_cast<ChartType>(idx));
             const float row_w = ImGui::GetContentRegionAvail().x;
-            const float row_h = 54.0f;
+            const float row_h = 32.0f;
             const ImVec2 rp = ImGui::GetCursorScreenPos();
             ImGui::PushID(r);
             const bool has_settings = idx == 1 || idx == 2 || idx == 5 || idx == 6;
@@ -2795,11 +2793,7 @@ void ChartWidget::render_controls() {
             d->AddText(ImVec2(rp.x + 32.0f, rp.y + 7.0f),
                        Theme::u32(Theme::Tokens::TX1), rows[r].label);
             ImGui::PopFont();
-            ImGui::PushFont(Theme::Fonts::ui());
-            d->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
-                       ImVec2(rp.x + 32.0f, rp.y + 25.0f),
-                       Theme::u32(Theme::Tokens::TX3), rows[r].detail, nullptr, row_w - 44.0f);
-            ImGui::PopFont();
+            if (hov) Theme::tooltip("%s", rows[r].detail);
             if (active)
                 draw_check(d, rp.x + row_w - settings_w - 18.0f, rp.y + 8.0f, 12.0f,
                            Theme::u32(Theme::Tokens::BRAND_TX));
@@ -2827,7 +2821,11 @@ void ChartWidget::render_controls() {
             if (has_settings) {
                 ImGui::PushID(r);
                 ImGui::SetCursorScreenPos(ImVec2(rp.x + row_w - settings_w, rp.y + 3.0f));
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+                ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
                 settings_clicked = ImGui::SmallButton("Settings");
+                ImGui::PopStyleVar();
+                ImGui::PopStyleColor();
                 ImGui::PopID();
                 ImGui::SetCursorScreenPos(ImVec2(rp.x, rp.y + row_h));
             }

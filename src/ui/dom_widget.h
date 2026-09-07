@@ -48,7 +48,6 @@ public:
         trade_accumulator_.reset();
         max_bid_size_ = 0.0;
         max_ask_size_ = 0.0;
-        imbalance_ema_ = -1.0f;
     }
 
 private:
@@ -79,9 +78,6 @@ private:
     double max_bid_size_ = 0.0;
     double max_ask_size_ = 0.0;
     // Shown-window resting totals (bid vs ask) for the book-imbalance meter.
-    double shown_bid_total_ = 0.0;
-    double shown_ask_total_ = 0.0;
-    float  imbalance_ema_ = -1.0f;   // EMA-smoothed bid-share (-1 = uninitialised)
 
     // ── Row-model cache (FPS item, 2026-07-05) ──────────────────────────────
     // The ladder used to re-run the full format cascade every frame: per row,
@@ -137,7 +133,6 @@ private:
     // Rendering
     void render_controls();
     void render_ladder(const Terminal::Orderbook& ob);
-    void render_imbalance(const Terminal::Orderbook& ob);
     void render_level_row(const RowModel& rm, bool is_ask, ImDrawList* dl, float pad_y);
     void render_current_row(const Terminal::Orderbook& ob, ImDrawList* dl, float pad_y);
 };
