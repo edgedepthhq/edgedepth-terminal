@@ -44,6 +44,9 @@ jobs:
           mkdir build && cd build
           emcmake cmake -DCMAKE_BUILD_TYPE=Release ..
 
+      - name: Verify stream subscription lifecycle
+        run: bash tests/wasm/run_stream_lifecycle.sh "$PWD/build"
+
       - name: Build
         run: cd build && emmake make -j$(nproc) c_based_trader_client
 

@@ -104,7 +104,7 @@ DOMWidget::DOMWidget(const Terminal::Pair& pair, const AppContext& ctx,
     : pair_(pair)
     , ctx_(ctx)
     , stream_key_{pair, Terminal::Stream::Orderbook, 0}
-    , title_("DOM " + pair.exchange + " " + pair.symbol)
+    , title_(std::string("DOM · ") + pair.symbol + " · " + widget_venue_label(pair.exchange) + "###dom_" + pair.exchange + "_" + pair.symbol)
     , tick_size_(tick_size)
     , levels_per_side_(levels_per_side)
     , fmt_(SymbolRegistry::instance().get_formatter(pair.exchange, pair.symbol))

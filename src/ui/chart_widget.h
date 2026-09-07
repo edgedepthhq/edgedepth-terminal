@@ -297,6 +297,8 @@ private:
     // capacity keeps the client tolerant of additive admin timeframes.
     std::array<Terminal::PatternOverlay, 4> pattern_overlays_{};
     std::array<bool, 4> pattern_overlay_active_{};
+    StreamManager* heatmap_stream_mgr_ = nullptr;
+    StreamManager* footprint_stream_mgr_ = nullptr;
     StreamManager* pattern_stream_mgr_ = nullptr;
     bool pattern_subscribed_ = false;
 

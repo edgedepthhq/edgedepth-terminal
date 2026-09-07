@@ -8,7 +8,7 @@
 
 TradesWidget::TradesWidget(const Terminal::Pair& pair, const AppContext& ctx, const PriceFormatter& fmt)
     : pair_(pair)
-    , title_("T " + pair.exchange + " " + pair.symbol)
+    , title_(std::string("Trades · ") + pair.symbol + " · " + widget_venue_label(pair.exchange) + "###trades_" + pair.exchange + "_" + pair.symbol)
     , stream_key_{pair, Terminal::Stream::Trades, 0}
     , ctx_(ctx)
     , fmt_(fmt)

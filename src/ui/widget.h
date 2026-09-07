@@ -10,6 +10,14 @@
 struct StreamKey;
 class StreamManager;
 
+inline const char* widget_venue_label(const std::string& exchange) {
+    if (exchange == "hl") return "Hyperliquid";
+    if (exchange == "binancef") return "Binance Futures";
+    if (exchange == "binance") return "Binance";
+    if (exchange == "bybit") return "Bybit";
+    return exchange.c_str();
+}
+
 enum class WidgetType {
     Trades,
     Orderbook,

@@ -128,7 +128,7 @@ ChartWidget::ChartWidget(
     timeframe_label_ = timeframe_to_string(title_tf_seconds_);
     // Visible prefix carries the TF; identity after "###" is TF-independent so the
     // chart stays docked across TF changes (matches layout.cpp's chart dock id).
-    title_ = "Chart " + pair.exchange + " " + pair.symbol + " " + timeframe_label_ +
+    title_ = std::string("Chart · ") + pair.symbol + " · " + widget_venue_label(pair.exchange) + " " + timeframe_label_ +
              "###chart_" + pair.exchange + "_" + pair.symbol;
     // tick_size_ == 0 means the registry has not answered for this pair yet.
     // The axis still has to print something, so it runs on price-magnitude
@@ -205,6 +205,11 @@ ChartWidget::ChartWidget(
 }
 
 ChartWidget::~ChartWidget() {
+    if (heatmap_stream_mgr_)
+        heatmap_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Heatmap, 0}, this);
+    if (footprint_stream_mgr_)
+        footprint_stream_mgr_->unsubscribe_direct(
+            {pair_, Terminal::Stream::TickVolume, 60}, this);
     if (volume_subscribed_) {
         StreamKey vol_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
         ctx_.stream_mgr().unsubscribe_volume(vol_key, this);
@@ -258,6 +263,26 @@ void ChartWidget::refresh_instrument() {
 
 void ChartWidget::update() {
     ProfileScope _ps("ChartUpd");
+    if (heatmap_stream_mgr_ &&
+        (!heatmap_enabled_ || !ct_allows_time_overlays(chart_type_) ||
+         heatmap_stream_mgr_ != &ctx_.stream_mgr())) {
+        heatmap_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Heatmap, 0}, this);
+        heatmap_stream_mgr_ = nullptr;
+        heatmap_data_requested_ = false;
+    }
+    const bool wants_footprint = chart_type_ == ChartType::FootprintCluster ||
+                                 chart_type_ == ChartType::FootprintProfile;
+    if (footprint_stream_mgr_ &&
+        (!wants_footprint || footprint_stream_mgr_ != &ctx_.stream_mgr())) {
+        footprint_stream_mgr_->unsubscribe_direct(
+            {pair_, Terminal::Stream::TickVolume, 60}, this);
+        footprint_stream_mgr_ = nullptr;
+    }
+    if (wants_footprint && !footprint_stream_mgr_) {
+        footprint_stream_mgr_ = &ctx_.stream_mgr();
+        footprint_stream_mgr_->subscribe_direct(
+            {pair_, Terminal::Stream::TickVolume, 60}, this);
+    }
     // Provisional precision while the instrument is unknown: better a chart
     // axis at price-magnitude precision than one printing 0.24 three rows
     // running. Replaced wholesale by refresh_instrument().
@@ -602,7 +627,7 @@ void ChartWidget::render() {
         if (tf != title_tf_seconds_) {
             title_tf_seconds_ = tf;
             timeframe_label_  = timeframe_to_string(tf);
-            title_ = "Chart " + pair_.exchange + " " + pair_.symbol + " " + timeframe_label_ +
+            title_ = std::string("Chart · ") + pair_.symbol + " · " + widget_venue_label(pair_.exchange) + " " + timeframe_label_ +
                      "###chart_" + pair_.exchange + "_" + pair_.symbol;
         }
     }
@@ -669,6 +694,16 @@ void ChartWidget::render() {
                       ImGuiWindowFlags_NoScrollbar |
                           ImGuiWindowFlags_NoScrollWithMouse);
 
+    if (chart_type_ != ChartType::TPO) {
+        if (chart_type_ != ChartType::Renko && ImGui::GetCursorPosY() > 0.0f &&
+            ImGui::GetContentRegionAvail().x > 650.0f)
+            ImGui::SameLine(0, 16);
+        if (ctx_.candle_mgr().follow_live()) {
+            ImGui::TextDisabled("%s", ctx_.replay_mgr().is_active() ? "Following replay" : "Following live");
+        } else if (ImGui::SmallButton(ctx_.replay_mgr().is_active() ? "Follow replay" : "Follow live")) {
+            ctx_.candle_mgr().set_follow_live(true);
+        }
+    }
     const float total_height = ImGui::GetContentRegionAvail().y;
     // Indicator pane (tabbed, design .indi-pane): 0 / header-only / INDI_PANE_H.
     // Renko skips the time-aligned indicator pane (render_indicators early-returns),
@@ -2406,7 +2441,7 @@ void ChartWidget::render_controls() {
     // Left group: chart-view button, layers button, divider ---------------------
     const float caret_w = 9.0f;
     float cx = bp.x + 12.0f;   // left gutter (bar padding 0 12)
-    ImVec2 ct_anchor, ly_anchor;
+    ImVec2 ct_anchor, ly_anchor, widget_anchor;
 
     // Timeframe segment (favourites bar + caret -> grouped dropdown), reusing the
     // shell control so the bare terminal matches the /terminal?event= chrome. Sits
@@ -2509,7 +2544,8 @@ void ChartWidget::render_controls() {
     // toolbar means it renders in EVERY chrome, including the embedded /demo +
     // event replays where the native topbar is suppressed.
     {
-        const char* label = "+ widget";
+        const char* label = "+ Widget";
+        widget_anchor = ImVec2(cx, ctrl_y + 28.0f);
         const float tw = ImGui::CalcTextSize(label).x;
         const float w = 10.0f + tw + 10.0f;
         ImGui::SetCursorScreenPos(ImVec2(cx, ctrl_y));
@@ -2574,11 +2610,53 @@ void ChartWidget::render_controls() {
         }
     }
 
+    auto push_menu_style = []() {
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 10));
+        ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, Theme::Radius::R3);
+        ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+        ImGui::PushStyleColor(ImGuiCol_PopupBg, Theme::Tokens::PANEL);
+        ImGui::PushStyleColor(ImGuiCol_Border, Theme::Tokens::BD2);
+    };
+    auto pop_menu_style = []() { ImGui::PopStyleColor(2); ImGui::PopStyleVar(4); };
+    auto draw_menu_shadow = []() {
+        ImDrawList* d = ImGui::GetWindowDrawList();
+        const ImVec2 a = ImGui::GetWindowPos();
+        const ImVec2 b(a.x + ImGui::GetWindowSize().x, a.y + ImGui::GetWindowSize().y);
+        d->PushClipRectFullScreen();
+        for (int i = 5; i >= 1; --i) {
+            const float e = (float)i * 2.0f;
+            d->AddRect(ImVec2(a.x - e, a.y - e + 3.0f), ImVec2(b.x + e, b.y + e + 3.0f),
+                       IM_COL32(0, 0, 0, 14), Theme::Radius::R3 + e, 0, 1.6f);
+        }
+        d->PopClipRect();
+    };
+    // Popover header row (Hanken micro-label, text-3).
+    auto menu_header = [](const char* s) {
+        const float base_x = ImGui::GetCursorPosX();
+        ImGui::SetCursorPos(ImVec2(base_x + 5.0f, ImGui::GetCursorPosY() + 4.0f));
+        ImGui::PushFont(Theme::Fonts::label());
+        ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::TX3);
+        ImGui::TextUnformatted(s);
+        ImGui::PopStyleColor();
+        ImGui::PopFont();
+        ImGui::SetCursorPosX(base_x);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5.0f);
+    };
+
+
     // Add-widget menu (single-select). In the live terminal a symbol-bearing
     // choice opens the symbol picker (multi-symbol, same as the old topbar +); in
     // the embedded single-symbol replays it files a request for THIS chart's
     // symbol. Global widgets carry no symbol, so they always file a request.
+    ImGui::SetNextWindowPos(ImVec2(widget_anchor.x, widget_anchor.y + 4.0f), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(260.0f, 0.0f));
+    push_menu_style();
+    ImGui::PushFont(Theme::Fonts::ui());
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 10));
     if (ImGui::BeginPopup("add_widget_popup")) {
+        draw_menu_shadow();
+        menu_header("ADD WIDGET");
         using PW = Menu::SymbolPickerState::PendingWidget;
         const bool embedded = EducationBoot::instance().is_embedded()
                            || EducationBoot::instance().is_pack();
@@ -2600,15 +2678,19 @@ void ChartWidget::render_controls() {
         };
         if (ImGui::MenuItem("Chart"))     add(PW::Charts);
         if (ImGui::MenuItem("Orderbook")) add(PW::Orderbook);
-        if (ImGui::MenuItem("DOM"))       add(PW::DOM);
+        if (ImGui::MenuItem("Depth of market (DOM)"))       add(PW::DOM);
         if (ImGui::MenuItem("Trades"))    add(PW::Trades);
-        if (ImGui::MenuItem("Stats"))     add(PW::Stats);
+        if (ImGui::MenuItem("Market statistics"))     add(PW::Stats);
         if (ImGui::MenuItem("Debug"))     add(PW::Debug);
         ImGui::Separator();
         if (ImGui::MenuItem("Paper Trading")) add(PW::PaperTrading);
         if (!embedded && ImGui::MenuItem("Replay Library")) add(PW::ReplayLibrary);
         ImGui::EndPopup();
     }
+
+    ImGui::PopStyleVar();
+    ImGui::PopFont();
+    pop_menu_style();
 
     // (RT toggle relocated to the TIMEFRAME dropdown - app_shell render_tf_menu.
     //  It now applies to every chart type, not just the Line, so the old Line-
@@ -2663,46 +2745,12 @@ void ChartWidget::render_controls() {
     // Shared floating-chrome style for both menus: bg-1, 1px line-2 border,
     // radius 6, padding 4, plus a soft drop shadow (floating menus are the one
     // place rounding + shadow are allowed).
-    auto push_menu_style = []() {
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(4, 4));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, Theme::Radius::R3);
-        ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
-        ImGui::PushStyleColor(ImGuiCol_PopupBg, Theme::Tokens::PANEL);
-        ImGui::PushStyleColor(ImGuiCol_Border, Theme::Tokens::BD2);
-    };
-    auto pop_menu_style = []() { ImGui::PopStyleColor(2); ImGui::PopStyleVar(4); };
-    auto draw_menu_shadow = []() {
-        ImDrawList* d = ImGui::GetWindowDrawList();
-        const ImVec2 a = ImGui::GetWindowPos();
-        const ImVec2 b(a.x + ImGui::GetWindowSize().x, a.y + ImGui::GetWindowSize().y);
-        d->PushClipRectFullScreen();
-        for (int i = 5; i >= 1; --i) {
-            const float e = (float)i * 2.0f;
-            d->AddRect(ImVec2(a.x - e, a.y - e + 3.0f), ImVec2(b.x + e, b.y + e + 3.0f),
-                       IM_COL32(0, 0, 0, 14), Theme::Radius::R3 + e, 0, 1.6f);
-        }
-        d->PopClipRect();
-    };
-    // Popover header row (Hanken micro-label, text-3).
-    auto menu_header = [](const char* s) {
-        const float base_x = ImGui::GetCursorPosX();
-        ImGui::SetCursorPos(ImVec2(base_x + 5.0f, ImGui::GetCursorPosY() + 4.0f));
-        ImGui::PushFont(Theme::Fonts::label());
-        ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::TX3);
-        ImGui::TextUnformatted(s);
-        ImGui::PopStyleColor();
-        ImGui::PopFont();
-        ImGui::SetCursorPosX(base_x);
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5.0f);
-    };
-
     // Chart-view menu: price views first, then order-flow views. Each row says
     // what changes, so the menu works as a compact feature inventory too.
     ImGui::SetNextWindowPos(ImVec2(ct_anchor.x, ct_anchor.y + 4.0f));
-    ImGui::SetNextWindowSize(ImVec2(286.0f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(380.0f, 0.0f));
     push_menu_style();
-    bool open_footprint_settings = false;
+    int settings_view = -1;
     if (ImGui::BeginPopup("chart_type_popup")) {
         draw_menu_shadow();
         menu_header("CHART VIEW \xc2\xb7 7 OPTIONS");
@@ -2720,7 +2768,7 @@ void ChartWidget::render_controls() {
             if (r == 0 || r == 4) {
                 if (r == 4) {
                     const ImVec2 sep = ImGui::GetCursorScreenPos();
-                    d->AddLine(ImVec2(sep.x + 5.0f, sep.y), ImVec2(sep.x + 273.0f, sep.y),
+                    d->AddLine(ImVec2(sep.x + 5.0f, sep.y), ImVec2(sep.x + ImGui::GetContentRegionAvail().x - 5.0f, sep.y),
                                Theme::u32(Theme::Tokens::BD1), 1.0f);
                 }
                 menu_header(r == 0 ? "PRICE" : "ORDER FLOW");
@@ -2728,12 +2776,16 @@ void ChartWidget::render_controls() {
             const int idx = rows[r].idx;
             const bool active = (chart_type_ == static_cast<ChartType>(idx));
             const float row_w = ImGui::GetContentRegionAvail().x;
-            const float row_h = 44.0f;
+            const float row_h = 54.0f;
             const ImVec2 rp = ImGui::GetCursorScreenPos();
             ImGui::PushID(r);
-            const bool clicked = ImGui::InvisibleButton("##ctrow", ImVec2(row_w, row_h));
+            const bool has_settings = idx == 1 || idx == 2 || idx == 5 || idx == 6;
+            const float settings_w = has_settings ? 68.0f : 0.0f;
+            const bool pressed = ImGui::InvisibleButton("##ctrow", ImVec2(row_w - settings_w, row_h),
+                ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
             const bool hov = ImGui::IsItemHovered();
-            const bool rclick = ImGui::IsItemClicked(ImGuiMouseButton_Right);
+            const bool rclick = pressed && ImGui::IsMouseReleased(ImGuiMouseButton_Right);
+            const bool clicked = pressed && !rclick;
             ImGui::PopID();
             if (hov) d->AddRectFilled(rp, ImVec2(rp.x + row_w, rp.y + row_h),
                                       Theme::u32(Theme::Tokens::ELEV), Theme::Radius::R2);
@@ -2743,12 +2795,13 @@ void ChartWidget::render_controls() {
             d->AddText(ImVec2(rp.x + 32.0f, rp.y + 7.0f),
                        Theme::u32(Theme::Tokens::TX1), rows[r].label);
             ImGui::PopFont();
-            ImGui::PushFont(Theme::Fonts::mono_sm());
-            d->AddText(ImVec2(rp.x + 32.0f, rp.y + 24.0f),
-                       Theme::u32(Theme::Tokens::TX3), rows[r].detail);
+            ImGui::PushFont(Theme::Fonts::ui());
+            d->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
+                       ImVec2(rp.x + 32.0f, rp.y + 25.0f),
+                       Theme::u32(Theme::Tokens::TX3), rows[r].detail, nullptr, row_w - 44.0f);
             ImGui::PopFont();
             if (active)
-                draw_check(d, rp.x + row_w - 22.0f, rp.y + (row_h - 12.0f) * 0.5f, 12.0f,
+                draw_check(d, rp.x + row_w - settings_w - 18.0f, rp.y + 8.0f, 12.0f,
                            Theme::u32(Theme::Tokens::BRAND_TX));
             if (clicked) {
                 const ChartType prev = chart_type_;
@@ -2770,26 +2823,26 @@ void ChartWidget::render_controls() {
                 }
                 ImGui::CloseCurrentPopup();
             }
-            if ((idx == 1 || idx == 2) && rclick) {
-                ImGui::CloseCurrentPopup();
-                open_footprint_settings = true;
+            bool settings_clicked = false;
+            if (has_settings) {
+                ImGui::PushID(r);
+                ImGui::SetCursorScreenPos(ImVec2(rp.x + row_w - settings_w, rp.y + 3.0f));
+                settings_clicked = ImGui::SmallButton("Settings");
+                ImGui::PopID();
+                ImGui::SetCursorScreenPos(ImVec2(rp.x, rp.y + row_h));
             }
-            if (idx == 5 && rclick) {
+            if (has_settings && (settings_clicked || rclick)) {
                 ImGui::CloseCurrentPopup();
-                tpo_settings_panel_.open();
-            }
-            if (idx == 6 && rclick) {
-                ImGui::CloseCurrentPopup();
-                ImGui::OpenPopup("renko_settings");
+                settings_view = idx;
             }
         }
         {
             const ImVec2 fp = ImGui::GetCursorScreenPos();
-            d->AddLine(ImVec2(fp.x + 5.0f, fp.y), ImVec2(fp.x + 273.0f, fp.y),
+            d->AddLine(ImVec2(fp.x + 5.0f, fp.y), ImVec2(fp.x + ImGui::GetContentRegionAvail().x - 5.0f, fp.y),
                        Theme::u32(Theme::Tokens::BD1), 1.0f);
             ImGui::PushFont(Theme::Fonts::label());
             d->AddText(ImVec2(fp.x + 9.0f, fp.y + 9.0f), Theme::u32(Theme::Tokens::TX3),
-                       "RIGHT-CLICK A VIEW FOR ITS SETTINGS");
+                       "SETTINGS ALSO OPEN WITH RIGHT-CLICK");
             ImGui::PopFont();
             ImGui::Dummy(ImVec2(278.0f, 28.0f));
         }
@@ -2798,7 +2851,9 @@ void ChartWidget::render_controls() {
     pop_menu_style();
 
     // Open at the same window/ID scope as the settings panel, not inside the menu.
-    if (open_footprint_settings) footprint_settings_panel_.open();
+    if (settings_view == 1 || settings_view == 2) footprint_settings_panel_.open();
+    if (settings_view == 5) tpo_settings_panel_.open();
+    if (settings_view == 6) ImGui::OpenPopup("renko_settings");
 
     // Renko brick-size config popup (opened by right-clicking the Renko row OR
     // the on-chart gear; the gear defers OpenPopup to here so it runs at window
@@ -2808,7 +2863,7 @@ void ChartWidget::render_controls() {
 
     // Layers menu (multi-select) + a liquidation leverage sub-section.
     ImGui::SetNextWindowPos(ImVec2(ly_anchor.x, ly_anchor.y + 4.0f));
-    ImGui::SetNextWindowSize(ImVec2(250.0f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(300.0f, 0.0f));
     push_menu_style();
     if (ImGui::BeginPopup("layers_popup")) {
         draw_menu_shadow();
@@ -3557,7 +3612,8 @@ void ChartWidget::handle_plot_interaction() {
 
         // ─── Right-click → open context menu ────────────────────
         // In TPO mode, right-click is handled by render_tpo() for session context
-        if (!draw_cap && ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
+        if (!draw_cap && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId) &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Right) &&
             chart_type_ != ChartType::TPO) {
             // Capture timestamp NOW while plot is still hovered.
             // Once the popup opens, ImPlot no longer reports hovered and
@@ -4466,10 +4522,11 @@ int64_t ChartWidget::align_to_interval(int64_t timestamp_s, int64_t interval_sec
 void ChartWidget::request_heatmap_data() {
     const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
     if (heatmap_data_requested_ && heatmap_loaded_timeframe_ == tf_sec) return;
-    // Unsubscribe from previous heatmap stream if switching timeframes
-    if (heatmap_loaded_timeframe_ > 0) {
-        StreamKey old_key{pair_, Terminal::Stream::Heatmap, heatmap_loaded_timeframe_};
-        ctx_.stream_mgr().send_unsubscribe(old_key);
+    // Heatmap delivery is timeframe-independent on the server. Keep it in the
+    // managed registry so reconnect and replay pause/resume restore it.
+    if (!heatmap_stream_mgr_) {
+        heatmap_stream_mgr_ = &ctx_.stream_mgr();
+        heatmap_stream_mgr_->subscribe_direct({pair_, Terminal::Stream::Heatmap, 0}, this);
     }
 
     // During replay, use replay start time as anchor instead of wall clock
@@ -4493,9 +4550,6 @@ void ChartWidget::request_heatmap_data() {
     ctx_.stream_mgr().request_historical_heatmap(
         pair_, heatmap_mode_, start_time_ms, anchor_ms, tf_sec
     );
-    // Subscribe to live heatmap stream so completed candle periods get filled in
-    StreamKey heatmap_key{pair_, Terminal::Stream::Heatmap, tf_sec};
-    ctx_.stream_mgr().send_subscribe(heatmap_key);
     heatmap_data_requested_ = true;
     heatmap_loaded_timeframe_ = tf_sec;
 }
@@ -4586,7 +4640,9 @@ void ChartWidget::update_live_heatmap_from_orderbook() {
     // Skip expensive OB iteration when user has scrolled away from live.
     // The live column would be outside the viewport grid and silently dropped anyway.
     if (last_visible_range_.X.Max > 0) {
-        auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        auto now_ms = ctx_.replay_mgr().is_active()
+            ? ctx_.replay_mgr().interpolated_time_ms()
+            : std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
         const auto visible_right = static_cast<int64_t>(last_visible_range_.X.Max);
@@ -6670,8 +6726,17 @@ static void draw_fp_imbalance(ImDrawList* draw, const FootprintManager& manager,
 
 void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_x_max) {
     auto& fp_mgr = ctx_.footprint_mgr();
+    const ImVec2 status_pos = ImPlot::GetPlotPos();
+    const char* cadence = "Footprints update after each minute closes";
+    const ImVec2 note(status_pos.x + 12.0f, status_pos.y + 60.0f);
+    const ImVec2 note_size = ImGui::CalcTextSize(cadence);
+    ImPlot::GetPlotDrawList()->AddRectFilled(
+        ImVec2(note.x - 4.0f, note.y - 2.0f),
+        ImVec2(note.x + note_size.x + 4.0f, note.y + note_size.y + 2.0f),
+        ImGui::GetColorU32(Theme::Tokens::PANEL));
+    ImPlot::GetPlotDrawList()->AddText(note, ImGui::GetColorU32(Theme::Tokens::TX2), cadence);
     const auto& timestamps = ctx_.candle_mgr().timestamps();
-    if (timestamps.empty()) return;
+    if (timestamps.empty() && !ctx_.candle_mgr().has_building_candle()) return;
 
     const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
     if (tf_sec < 60) {
@@ -6740,12 +6805,22 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
         }
     }
 
-    for (size_t i = start_idx; i < timestamps.size(); ++i) {
-        const double ts = static_cast<double>(timestamps[i]);
+    const auto& building = ctx_.candle_mgr().building_candle();
+    const bool include_building = ctx_.candle_mgr().has_building_candle() &&
+        (timestamps.empty() || building.timestamp_ms > timestamps.back());
+    const size_t candle_count = timestamps.size() + (include_building ? 1 : 0);
+    for (size_t i = start_idx; i < candle_count; ++i) {
+        const bool is_building = i == timestamps.size();
+        const int64_t candle_ts = is_building ? building.timestamp_ms : timestamps[i];
+        const double candle_open = is_building ? building.open : opens[i];
+        const double candle_close = is_building ? building.close : closes[i];
+        const double candle_high = is_building ? building.high : highs[i];
+        const double candle_low = is_building ? building.low : lows[i];
+        const double ts = static_cast<double>(candle_ts);
         if (ts > visible_x_max + tf_ms) break;
 
         // Early cull: skip candles entirely off-screen vertically
-        if (highs[i] < visible_y_min || lows[i] > visible_y_max) continue;
+        if (candle_high < visible_y_min || candle_low > visible_y_max) continue;
 
         const double candle_center = ts + tf_ms * 0.5;
 
@@ -6754,7 +6829,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
         if (zoomed_out_block) {
             // Use cached merge - no per-frame allocation
             const auto* mc = fp_mgr.get_merged_grouped(
-                pair_.symbol, timestamps[i], tf_sec, 0.0, as_of_ms);
+                pair_.symbol, candle_ts, tf_sec, 0.0, as_of_ms);
             if (!mc) continue;
 
             double delta = mc->delta;
@@ -6763,8 +6838,8 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
                 : 0.0f;
             dn = std::sqrt(dn);
 
-            const double body_top_price = std::max(opens[i], closes[i]);
-            const double body_bot_price = std::min(opens[i], closes[i]);
+            const double body_top_price = std::max(candle_open, candle_close);
+            const double body_bot_price = std::min(candle_open, candle_close);
             const double half_w = tf_ms * 0.35;
             const ImVec2 px_top = ImPlot::PlotToPixels(candle_center, body_top_price);
             const ImVec2 px_bot = ImPlot::PlotToPixels(candle_center, body_bot_price);
@@ -6798,11 +6873,11 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
         // Auto tick_per_row with minimum pixel height guarantee
         double effective_tpr = tick_per_row;
         if (effective_tpr <= 0.0) {
-            double range = highs[i] - lows[i];
+            double range = candle_high - candle_low;
             if (range <= 0.0) range = 1.0;
             effective_tpr = range / 18.0;
-            const ImVec2 px_hi = ImPlot::PlotToPixels(candle_center, highs[i]);
-            const ImVec2 px_lo = ImPlot::PlotToPixels(candle_center, lows[i]);
+            const ImVec2 px_hi = ImPlot::PlotToPixels(candle_center, candle_high);
+            const ImVec2 px_lo = ImPlot::PlotToPixels(candle_center, candle_low);
             float candle_px_height = std::abs(px_lo.y - px_hi.y);
             if (candle_px_height > 0.0f) {
                 int max_rows = std::max(3, static_cast<int>(candle_px_height / 12.0f));
@@ -6816,9 +6891,9 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
 
         // Use cached merge+group - no per-frame vector allocations
         const auto* mc = fp_mgr.get_merged_grouped(
-            pair_.symbol, timestamps[i], tf_sec, effective_tpr, as_of_ms);
-        if (show_text && as_of_ms >= timestamps[i] && as_of_ms - timestamps[i] < tf_ms_i) {
-            const ImVec2 label = ImPlot::PlotToPixels(candle_center - tf_ms * 0.35, highs[i]);
+            pair_.symbol, candle_ts, tf_sec, effective_tpr, as_of_ms);
+        if (show_text && as_of_ms >= candle_ts && as_of_ms - candle_ts < tf_ms_i) {
+            const ImVec2 label = ImPlot::PlotToPixels(candle_center - tf_ms * 0.35, candle_high);
             draw_list->AddText(font, fp_font_size * 0.8f,
                 ImVec2(label.x, label.y - fp_font_size),
                 ImGui::GetColorU32(Theme::Tokens::TX2),
@@ -6961,7 +7036,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
 
         // V:/D: footer
         if (fp_mgr.show_summary && show_text) {
-            const ImVec2 px_low = ImPlot::PlotToPixels(candle_center, lows[i]);
+            const ImVec2 px_low = ImPlot::PlotToPixels(candle_center, candle_low);
             float footer_y = px_low.y + 3.0f;
             float ff = fp_font_size * 0.8f;
 
@@ -6995,8 +7070,17 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
 
 void ChartWidget::render_footprint_profile(double visible_x_min, double visible_x_max) {
     auto& fp_mgr = ctx_.footprint_mgr();
+    const ImVec2 status_pos = ImPlot::GetPlotPos();
+    const char* cadence = "Footprints update after each minute closes";
+    const ImVec2 note(status_pos.x + 12.0f, status_pos.y + 60.0f);
+    const ImVec2 note_size = ImGui::CalcTextSize(cadence);
+    ImPlot::GetPlotDrawList()->AddRectFilled(
+        ImVec2(note.x - 4.0f, note.y - 2.0f),
+        ImVec2(note.x + note_size.x + 4.0f, note.y + note_size.y + 2.0f),
+        ImGui::GetColorU32(Theme::Tokens::PANEL));
+    ImPlot::GetPlotDrawList()->AddText(note, ImGui::GetColorU32(Theme::Tokens::TX2), cadence);
     const auto& timestamps = ctx_.candle_mgr().timestamps();
-    if (timestamps.empty()) return;
+    if (timestamps.empty() && !ctx_.candle_mgr().has_building_candle()) return;
 
     const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
     if (tf_sec < 60) {
@@ -7057,10 +7141,20 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
         }
     }
 
-    for (size_t i = start_idx; i < timestamps.size(); ++i) {
-        const double ts = static_cast<double>(timestamps[i]);
+    const auto& building = ctx_.candle_mgr().building_candle();
+    const bool include_building = ctx_.candle_mgr().has_building_candle() &&
+        (timestamps.empty() || building.timestamp_ms > timestamps.back());
+    const size_t candle_count = timestamps.size() + (include_building ? 1 : 0);
+    for (size_t i = start_idx; i < candle_count; ++i) {
+        const bool is_building = i == timestamps.size();
+        const int64_t candle_ts = is_building ? building.timestamp_ms : timestamps[i];
+        const double candle_open = is_building ? building.open : opens[i];
+        const double candle_close = is_building ? building.close : closes[i];
+        const double candle_high = is_building ? building.high : highs[i];
+        const double candle_low = is_building ? building.low : lows[i];
+        const double ts = static_cast<double>(candle_ts);
         if (ts > visible_x_max + tf_ms) break;
-        if (highs[i] < visible_y_min || lows[i] > visible_y_max) continue;
+        if (candle_high < visible_y_min || candle_low > visible_y_max) continue;
 
         const double candle_center = ts + tf_ms * 0.5;
 
@@ -7068,7 +7162,7 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
         // Same as cluster: single delta-colored rectangle per candle
         if (zoomed_out_block) {
             const auto* mc = fp_mgr.get_merged_grouped(
-                pair_.symbol, timestamps[i], tf_sec, 0.0, as_of_ms);
+                pair_.symbol, candle_ts, tf_sec, 0.0, as_of_ms);
             if (!mc) continue;
 
             double delta = mc->delta;
@@ -7077,8 +7171,8 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
                 : 0.0f;
             dn = std::sqrt(dn);
 
-            const double body_top_price = std::max(opens[i], closes[i]);
-            const double body_bot_price = std::min(opens[i], closes[i]);
+            const double body_top_price = std::max(candle_open, candle_close);
+            const double body_bot_price = std::min(candle_open, candle_close);
             const double half_w = tf_ms * 0.35;
             const ImVec2 px_top = ImPlot::PlotToPixels(candle_center, body_top_price);
             const ImVec2 px_bot = ImPlot::PlotToPixels(candle_center, body_bot_price);
@@ -7112,11 +7206,11 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
         // Auto tick_per_row (same logic as cluster)
         double effective_tpr = tick_per_row;
         if (effective_tpr <= 0.0) {
-            double range = highs[i] - lows[i];
+            double range = candle_high - candle_low;
             if (range <= 0.0) range = 1.0;
             effective_tpr = range / 18.0;
-            const ImVec2 px_hi = ImPlot::PlotToPixels(candle_center, highs[i]);
-            const ImVec2 px_lo = ImPlot::PlotToPixels(candle_center, lows[i]);
+            const ImVec2 px_hi = ImPlot::PlotToPixels(candle_center, candle_high);
+            const ImVec2 px_lo = ImPlot::PlotToPixels(candle_center, candle_low);
             float candle_px_height = std::abs(px_lo.y - px_hi.y);
             if (candle_px_height > 0.0f) {
                 int max_rows = std::max(3, static_cast<int>(candle_px_height / 12.0f));
@@ -7129,9 +7223,9 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
             std::ceil(effective_tpr / tick_size_) * tick_size_);
 
         const auto* mc = fp_mgr.get_merged_grouped(
-            pair_.symbol, timestamps[i], tf_sec, effective_tpr, as_of_ms);
-        if (show_text && as_of_ms >= timestamps[i] && as_of_ms - timestamps[i] < tf_ms_i) {
-            const ImVec2 label = ImPlot::PlotToPixels(candle_center - tf_ms * 0.35, highs[i]);
+            pair_.symbol, candle_ts, tf_sec, effective_tpr, as_of_ms);
+        if (show_text && as_of_ms >= candle_ts && as_of_ms - candle_ts < tf_ms_i) {
+            const ImVec2 label = ImPlot::PlotToPixels(candle_center - tf_ms * 0.35, candle_high);
             draw_list->AddText(font, fp_font_size * 0.8f,
                 ImVec2(label.x, label.y - fp_font_size),
                 ImGui::GetColorU32(Theme::Tokens::TX2),
@@ -7247,7 +7341,7 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
 
         // V:/D: footer
         if (fp_mgr.show_summary && show_text) {
-            const ImVec2 px_low = ImPlot::PlotToPixels(candle_center, lows[i]);
+            const ImVec2 px_low = ImPlot::PlotToPixels(candle_center, candle_low);
             float footer_y = px_low.y + 3.0f;
             float ff = fp_font_size * 0.8f;
 

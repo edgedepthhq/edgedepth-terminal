@@ -109,7 +109,7 @@ namespace Theme {
     // ── Layout metrics (px, logical) - theme-tokens.json `density` ──────────
     namespace Layout {
         inline constexpr float TOPBAR_H        = 44.0f;
-        inline constexpr float STATSBAR_H      = 52.0f;   // v2 market header (was 62); closeable
+        inline constexpr float STATSBAR_H      = 38.0f;   // compact market header; closeable
         inline constexpr float PILLSROW_H      = 44.0f;   // v2 chart toolbar band (was 36)
         inline constexpr float STATUSBAR_H     = 22.0f;   // owns telemetry (WS · FPS · CLOCK)
         inline constexpr float TRANSPORT_H     = 66.0f;

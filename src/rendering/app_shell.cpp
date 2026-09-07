@@ -961,18 +961,22 @@ namespace {
     float render_tf_control(ChartWidget* chart) {
         using namespace Theme;
         const int64_t cur = chart ? chart->timeframe_seconds() : 0;
+        const int current_tf = static_cast<int>(cur);
+        const bool compact = ImGui::GetContentRegionAvail().x < 760.0f;
+        const std::span<const int> visible_favs = compact
+            ? std::span<const int>(&current_tf, 1) : std::span<const int>(g_tf_favs);
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        ImGui::PushFont(Fonts::mono());
-        const float h = 30.0f, padx = 13.0f, caretw = 30.0f;
+        ImGui::PushFont(Fonts::ui());
+        const float h = 30.0f, padx = 11.0f, caretw = 30.0f;
         float total = caretw + 1.0f;
-        for (int sec : g_tf_favs) total += ImGui::CalcTextSize(tf_label(sec)).x + padx * 2.0f;
+        for (int sec : visible_favs) total += ImGui::CalcTextSize(tf_label(sec)).x + padx * 2.0f;
         const ImVec2 p0 = ImGui::GetCursorScreenPos();
         // 2c favourites bar - square, bg-1 fill, line-2 hairline frame
-        dl->AddRectFilled(p0, ImVec2(p0.x + total, p0.y + h), u32(Tokens::INPUT));
-        dl->AddRect(p0, ImVec2(p0.x + total, p0.y + h), u32(Tokens::BD2), 0.0f, 0, 1.0f);
+        dl->AddRectFilled(p0, ImVec2(p0.x + total, p0.y + h), u32(Tokens::INPUT), Radius::R2);
+        dl->AddRect(p0, ImVec2(p0.x + total, p0.y + h), u32(Tokens::BD2), Radius::R2, 0, 1.0f);
 
         float x = p0.x;
-        for (int sec : g_tf_favs) {
+        for (int sec : visible_favs) {
             const char* lbl = tf_label(sec);
             const float w = ImGui::CalcTextSize(lbl).x + padx * 2.0f;
             const bool on = (sec == cur);
@@ -982,17 +986,15 @@ namespace {
             const bool hov = ImGui::IsItemHovered();
             ImGui::PopID();
             if (clk && chart) chart->change_timeframe(sec);
-            // active cell: monochrome raised (bg-2) + hairline border, no underline.
-            // De-cyaned: teal is reserved for CTAs / links / live data, not on-states.
+            // Selected timeframe uses the shared accent on an inset chip.
             if (on) {
-                dl->AddRectFilled(ImVec2(x, p0.y), ImVec2(x + w, p0.y + h), u32(Tokens::ELEV));
-                dl->AddRect(ImVec2(x + 1, p0.y + 1), ImVec2(x + w - 1, p0.y + h - 1), u32(Tokens::BD3), 0.0f, 0, 1.0f);
+                dl->AddRectFilled(ImVec2(x + 3, p0.y + 3), ImVec2(x + w - 3, p0.y + h - 3), u32(Tokens::BRAND_SOFT), Radius::R2);
             } else if (hov) {
                 dl->AddRectFilled(ImVec2(x + 1, p0.y + 1), ImVec2(x + w - 1, p0.y + h - 1), u32(Tokens::HOVER));
             }
             const ImVec2 ts = ImGui::CalcTextSize(lbl);
             dl->AddText(ImVec2(x + (w - ts.x) * 0.5f, p0.y + (h - ts.y) * 0.5f),
-                        u32(on ? Tokens::TX1 : (hov ? Tokens::TX1 : Tokens::TX2)), lbl);
+                        u32(on ? Tokens::BRAND_TX : (hov ? Tokens::TX1 : Tokens::TX2)), lbl);
             x += w;
         }
         // caret cell - bg-2, line-2 left hairline, accent caret (2c)
@@ -1000,6 +1002,7 @@ namespace {
         ImGui::SetCursorScreenPos(ImVec2(x, p0.y));
         if (ImGui::InvisibleButton("##tf_caret", ImVec2(caretw, h))) ImGui::OpenPopup("##tf_menu");
         const bool chov = ImGui::IsItemHovered();
+        if (chov) Theme::tooltip("All timeframes and favourites");
         dl->AddRectFilled(ImVec2(x + 1, p0.y + 1), ImVec2(x + caretw - 1, p0.y + h - 1),
                           u32(chov ? Tokens::HOVER : Tokens::ELEV));
         dl->AddLine(ImVec2(x + 0.5f, p0.y + 1), ImVec2(x + 0.5f, p0.y + h - 1), u32(Tokens::BD2));
@@ -1370,10 +1373,11 @@ namespace {
         // mono value; three cells carry a bottom-anchored detail on one baseline.
         const float y0       = vp->Pos.y + Layout::TOPBAR_H;
         const float strip_h  = Layout::STATSBAR_H;
-        const float label_y  = y0 + 7.0f;
-        const float value_y  = y0 + 20.0f;
-        const float detail_y = y0 + strip_h - 14.0f;   // shared bottom baseline
-        const float x_pad    = 16.0f;
+        const float label_y  = y0 + 3.0f;
+        const float value_y  = y0 + 17.0f;
+        const float detail_y = value_y;   // shared bottom baseline
+        const float x_pad    = 12.0f;
+        float value_end[6]{};
 
         const float ratios[6] = {1.0f, 1.15f, 1.0f, 1.15f, 1.1f, 1.25f};
         float rsum = 0.0f; for (float r : ratios) rsum += r;
@@ -1395,11 +1399,15 @@ namespace {
             dl->AddText(ImVec2(cx[i] + x_pad, value_y), u32(col), s);
             const float w = ImGui::CalcTextSize(s).x;
             ImGui::PopFont();
-            return cx[i] + x_pad + w;
+            value_end[i] = cx[i] + x_pad + w;
+            return value_end[i];
         };
         auto put_detail = [&](int i, const char* s, const ImVec4& col, float a = 1.0f) {
             ImGui::PushFont(Fonts::mono_sm());
-            dl->AddText(ImVec2(cx[i] + x_pad, detail_y), u32(col, a), s);
+            if (value_end[i] + 8.0f + ImGui::CalcTextSize(s).x < cx[i + 1] - 24.0f)
+                dl->AddText(ImVec2(value_end[i] + 8.0f, detail_y + 2.0f), u32(col, a), s);
+            if (ImGui::IsMouseHoveringRect(ImVec2(cx[i], y0), ImVec2(cx[i + 1], y0 + strip_h)))
+                Theme::tooltip("%s", s);
             ImGui::PopFont();
         };
 
@@ -1431,7 +1439,7 @@ namespace {
 
         // 4. FUNDING / COUNTDOWN - neutral value + dim countdown. (Review: the
         // washed amber read poorly; funding now matches the other values in white.)
-        put_label(3, "FUNDING / COUNTDOWN");
+        put_label(3, "FUNDING");
         if (g_stats.has_data) {
             snprintf(v, sizeof(v), "%+.4f%%", g_stats.funding * 100.0);
             put_value(3, v, Tokens::TX1);
@@ -1444,12 +1452,12 @@ namespace {
 
         // 5. LONG / SHORT - tri-color value (long up / slash text-3 / short down)
         // + 3px ratio bar, from the positioning account ratio (retail crowd).
-        put_label(4, "LONG / SHORT");
+        put_label(4, "LONG / SHORT ACCOUNTS");
         if (pos && pos->global_long_account > 0.0) {
-            const float lg = static_cast<float>(pos->global_long_account);
+            const float lg = std::clamp(static_cast<float>(pos->global_long_account), 0.0f, 1.0f);
             char lb[16], sb[16];
-            snprintf(lb, sizeof(lb), "%.0f%%", lg * 100.0f);
-            snprintf(sb, sizeof(sb), "%.0f%%", (1.0f - lg) * 100.0f);
+            snprintf(lb, sizeof(lb), "L %.0f%%", lg * 100.0f);
+            snprintf(sb, sizeof(sb), "S %.0f%%", (1.0f - lg) * 100.0f);
             ImGui::PushFont(Fonts::mono_md());
             float tx = cx[4] + x_pad;
             dl->AddText(ImVec2(tx, value_y), u32(Tokens::UP), lb);
@@ -1457,12 +1465,15 @@ namespace {
             dl->AddText(ImVec2(tx, value_y), u32(Tokens::TX3), " / ");
             tx += ImGui::CalcTextSize(" / ").x;
             dl->AddText(ImVec2(tx, value_y), u32(Tokens::DOWN), sb);
+            tx += ImGui::CalcTextSize(sb).x;
             ImGui::PopFont();
-            // 3px ratio bar on the bottom baseline (long up | short down).
-            const float bx = cx[4] + x_pad, bw = (cx[5] - cx[4]) - x_pad * 2.0f;
-            const float by = detail_y + 2.0f, lw = (bw - 1.0f) * lg;
-            dl->AddRectFilled(ImVec2(bx, by), ImVec2(bx + lw, by + 3.0f), u32(Tokens::UP));
-            dl->AddRectFilled(ImVec2(bx + lw + 1.0f, by), ImVec2(bx + bw, by + 3.0f), u32(Tokens::DOWN));
+            // Compact ratio meter beside the explicitly labelled percentages.
+            const float bx = tx + 10.0f, bw = std::min(80.0f, cx[5] - x_pad - bx);
+            const float by = value_y + 7.0f, lw = (bw - 1.0f) * lg;
+            if (bw > 12.0f) {
+                dl->AddRectFilled(ImVec2(bx, by), ImVec2(bx + lw, by + 3.0f), u32(Tokens::UP));
+                dl->AddRectFilled(ImVec2(bx + lw + 1.0f, by), ImVec2(bx + bw, by + 3.0f), u32(Tokens::DOWN));
+            }
         } else put_value(4, "-", Tokens::TX4);
 
         // 6. LIQUIDATIONS 24H - neutral value + neutral L/S split (text-3). Long +

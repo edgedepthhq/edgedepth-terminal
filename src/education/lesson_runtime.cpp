@@ -355,7 +355,7 @@ namespace edu {
 static const char* el_window_hint(const std::string& el) {
     if (el.find("Dom") != std::string::npos || el.find("dom") != std::string::npos) return "DOM ";
     if (el.find("Indi") != std::string::npos || el.find("indi") != std::string::npos) return "Chart ";
-    if (el.find("Tape") != std::string::npos || el.find("tape") != std::string::npos) return "T ";
+    if (el.find("Tape") != std::string::npos || el.find("tape") != std::string::npos) return "Trades ";
     return "";
 }
 

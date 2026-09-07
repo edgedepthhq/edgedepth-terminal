@@ -34,6 +34,26 @@ void StreamManager::send_message(const std::string& message) const {
 //     printf("Sent message: %s\n", message.c_str());
 // }
 
+// These payloads go directly to their managers in MessageHandler.
+// Keep owners here so reconnect and replay transitions retain the subscription.
+void StreamManager::subscribe_direct(const StreamKey& key, void* owner) {
+    auto& owners = direct_subs_[key];
+    if (std::find(owners.begin(), owners.end(), owner) != owners.end()) return;
+    if (owners.empty()) send_subscribe(key);
+    owners.push_back(owner);
+}
+
+void StreamManager::unsubscribe_direct(const StreamKey& key, void* owner) {
+    const auto it = direct_subs_.find(key);
+    if (it == direct_subs_.end()) return;
+    auto& owners = it->second;
+    std::erase(owners, owner);
+    if (owners.empty()) {
+        send_unsubscribe(key);
+        direct_subs_.erase(it);
+    }
+}
+
 void StreamManager::subscribe_trades(StreamKey key, StreamHandler<Terminal::Trade> handler) {
     if (trade_subs_.find(key) == trade_subs_.end()) {
         send_subscribe(key);
@@ -505,6 +525,7 @@ void StreamManager::for_each_server_subscription(Fn&& fn) const {
             if (!handlers.empty()) fn(key);
         }
     };
+    visit_handlers(direct_subs_);
     visit_handlers(trade_subs_);
     visit_handlers(stats_subs_);
     visit_handlers(liquidation_subs_);

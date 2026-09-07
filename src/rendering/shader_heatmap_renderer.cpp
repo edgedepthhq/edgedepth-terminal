@@ -251,9 +251,15 @@ void ShaderHeatmapRenderer::update_live_column(
     if (timeline_.empty() || native_bucket_size_ <= 0) return;
     if (price_qty_map.empty()) return;
 
-    // Live column goes at the end of the current ring
-    const int target_col = (ring_count_ > 0) ? ring_count_ - 1 : 0;
-    if (target_col >= RING_SIZE) return;
+    // Place live depth at its actual time, never overwrite the last historical
+    // column. Wait for a dirty grid to be rebuilt before using its origin.
+    if (gpu_dirty_ || time_step_ms_ <= 0 || ring_count_ == 0) return;
+    const int64_t origin = timeline_.begin()->first;
+    if (timestamp_ms < origin) return;
+    const int64_t target = (timestamp_ms - origin) / time_step_ms_;
+    if (target >= RING_SIZE) return;
+    const int target_col = static_cast<int>(target);
+    ring_count_ = std::max(ring_count_, target_col + 1);
     live_ring_col_ = target_col;
     live_timestamp_ms_ = timestamp_ms;
 
@@ -299,13 +305,15 @@ void ShaderHeatmapRenderer::finalize_column(
     if (native_bucket_size_ <= 0 || price_qty_map.empty()) return;
 
     // Store in timeline (CPU-side for tooltips/labels)
+    const int64_t old_origin = timeline_.empty() ? timestamp_ms : timeline_.begin()->first;
     timeline_[timestamp_ms] = price_qty_map;
     evict_oldest_timeline();
+    if (timeline_.begin()->first != old_origin) gpu_dirty_ = true;
 
     // Direct GPU upload of this single column instead of marking the entire
     // ring dirty (which would trigger a full rebuild of all columns).
     // This is critical for FPS: finalize is called every few seconds for live data.
-    if (ring_count_ > 0 && time_step_ms_ > 0) {
+    if (!gpu_dirty_ && ring_count_ > 0 && time_step_ms_ > 0) {
         const int64_t oldest_ts = timeline_.begin()->first;
         const int col = static_cast<int>((timestamp_ms - oldest_ts) / time_step_ms_);
         if (col >= 0 && col < RING_SIZE) {
@@ -672,12 +680,14 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
         if (col > highest_col) highest_col = col;
     }
 
-    // ── Batch upload metadata only (data was uploaded per-column above) ──
+    // Upload the full metadata row, including the zeroed unused slots. Live
+    // columns can extend the ring before the next rebuild; gaps must not reveal
+    // valid flags left over from an earlier viewport or replay position.
     const int upload_cols = (highest_col >= 0) ? highest_col + 1 : 0;
     if (upload_cols > 0) {
         glBindTexture(GL_TEXTURE_2D, meta_texture_);
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
-                        upload_cols, 1,
+                        RING_SIZE, 1,
                         GL_RGBA, GL_FLOAT, meta_staging_.data());
         glBindTexture(GL_TEXTURE_2D, 0);
     }
@@ -861,7 +871,7 @@ void ShaderHeatmapRenderer::render_cells(
         // Columns are now center-anchored (see data_time_start) → the first/last column
         // extends half a step either side of its bucket time, so widen the scissor to match.
         const double data_time_min = static_cast<double>(get_min_time()) - time_step_ms_ * 0.5;
-        const double data_time_max = static_cast<double>(get_max_time()) + time_step_ms_ * 0.5;
+        const double data_time_max = static_cast<double>(oldest_ts + (ring_count_ - 1) * time_step_ms_) + time_step_ms_ * 0.5;
         const double data_price_min = get_min_price();
         const double data_price_max = get_max_price();
 

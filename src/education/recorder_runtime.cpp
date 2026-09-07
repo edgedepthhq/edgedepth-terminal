@@ -57,7 +57,7 @@ constexpr int64_t kSkipMaxMs = 120000;
 // "Chart …"). Empty = no focus.
 const char* focus_window_hint(const std::string& f) {
     if (f == "dom")   return "DOM ";
-    if (f == "tape")  return "T ";
+    if (f == "tape")  return "Trades ";
     if (f == "chart") return "Chart ";
     return "";
 }

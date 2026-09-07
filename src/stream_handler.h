@@ -57,6 +57,9 @@ public:
     // widget callbacks directly. Call drain_dispatches() on main thread.
     void set_dispatch_queue(DispatchQueue* q) { dispatch_queue_ = q; }
 
+    void subscribe_direct(const StreamKey& key, void* owner);
+    void unsubscribe_direct(const StreamKey& key, void* owner);
+
     void subscribe_trades(StreamKey key, StreamHandler<Terminal::Trade> handler);
     void subscribe_candles(const StreamKey& key, StreamHandler<Terminal::Candle> handler);
     void subscribe_candles_batch(const StreamKey& key, StreamBatchHandler<Terminal::Candle> handler);
@@ -169,6 +172,7 @@ private:
     bool live_subscriptions_paused_ = false;
     static std::function<bool(const std::string&)> pack_request_hook_;
 
+    std::map<StreamKey, std::vector<void*>> direct_subs_;
     std::map<StreamKey, std::vector<StreamHandler<Terminal::Trade>>> trade_subs_;
     std::map<StreamKey, std::vector<StreamHandler<Terminal::Candle>>> candle_subs_;
     std::map<StreamKey, std::vector<StreamBatchHandler<Terminal::Candle>>> candle_batch_subs_;

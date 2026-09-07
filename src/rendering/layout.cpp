@@ -25,8 +25,8 @@ void LayoutManager::setup_default_layout(const std::string& exchange, const std:
     // Chart dock identity is TF-independent (after "###") so the chart stays docked
     // when its timeframe changes. Must match the id ChartWidget builds in its title.
     std::string chart_name  = "Chart " + exchange + " " + symbol + "###chart_" + exchange + "_" + symbol;
-    std::string dom_name    = "DOM " + exchange + " " + symbol;
-    std::string trades_name = "T " + exchange + " " + symbol;
+    std::string dom_name    = "###dom_" + exchange + "_" + symbol;
+    std::string trades_name = "###trades_" + exchange + "_" + symbol;
 
     if (EducationBoot::instance().is_embedded()) {
         // Lesson/Studio layout: NO Watchlist, NO Depth. Chart fills the center;
