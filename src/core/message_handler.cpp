@@ -75,7 +75,7 @@ void MessageHandler::route_message(const pb::WSPayload& ws_payload, const Messag
     // Dispatch based on stream type
     switch (ws_payload.stream()) {
         case pb::Stream::STREAM_TRADES:
-            handle_trade_message(pair, inner_data, inner_size, ctx.streams, ctx.orderbooks);
+            handle_trade_message(pair, inner_data, inner_size, ctx.streams, ctx.orderbooks, ctx.footprint, ctx.dispatch_queue);
             break;
         case pb::Stream::STREAM_CANDLES:
             handle_candle_message(pair, ws_payload.timeframe(),
@@ -364,7 +364,8 @@ void MessageHandler::route_message(const pb::WSPayload& ws_payload, const Messag
 }
 
 void MessageHandler::handle_trade_message(const Terminal::Pair& pair, const void* data, size_t size,
-                                          StreamManager* stream_mgr, OrderbookManager* orderbook_mgr) {
+                                          StreamManager* stream_mgr, OrderbookManager* orderbook_mgr,
+                                          FootprintManager* footprint_mgr, DispatchQueue* queue) {
     auto* trade_pb = google::protobuf::Arena::CreateMessage<pb::Trade>(&s_arena);
     if (!trade_pb->ParseFromArray(data, static_cast<int>(size))) {
         return;
@@ -374,6 +375,17 @@ void MessageHandler::handle_trade_message(const Terminal::Pair& pair, const void
     // feeds that do carry one.
     if (orderbook_mgr) {
         orderbook_mgr->note_trade_price(pair, trade_pb->price());
+    }
+    if (footprint_mgr && !stream_mgr->is_replay_mode()) {
+        // Capture scalars before the protobuf arena resets. One update per wire
+        // trade, independent of the number of chart/tape subscribers.
+        auto update = [fm = footprint_mgr, market = FootprintManager::market_key(pair.exchange, pair.symbol),
+                       ts = trade_pb->timestamp_ms(), price = trade_pb->price(),
+                       qty = trade_pb->qty(), buy = trade_pb->is_buy()](StreamManager&) {
+            fm->on_trade(market, ts, price, qty, buy);
+        };
+        if (queue) queue->push({std::move(update)});
+        else update(*stream_mgr);
     }
     handle_trade(pair, *trade_pb, stream_mgr);
 }
@@ -896,7 +908,7 @@ void MessageHandler::handle_tick_volume_message(
     auto* batch_pb = google::protobuf::Arena::CreateMessage<pb::TickVolumeUpdateBatch>(&s_arena);
     if (batch_pb->ParseFromArray(data, static_cast<int>(size)) && batch_pb->updates_size() > 0) {
         for (const auto& update : batch_pb->updates()) {
-            fp_mgr->on_tick_volume_update(pair.symbol, update);
+            fp_mgr->on_tick_volume_update(FootprintManager::market_key(pair.exchange, pair.symbol), update);
         }
         return;
     }
@@ -907,7 +919,7 @@ void MessageHandler::handle_tick_volume_message(
         return;
     }
 
-    fp_mgr->on_tick_volume_update(pair.symbol, *update_pb);
+    fp_mgr->on_tick_volume_update(FootprintManager::market_key(pair.exchange, pair.symbol), *update_pb);
 }
 
 

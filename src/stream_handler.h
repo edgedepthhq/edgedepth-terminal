@@ -40,6 +40,7 @@ public:
 
     // When true, send_subscribe/send_unsubscribe are no-ops.
     // Replay data arrives from the Replayer actor, not live NATS consumers.
+    bool is_replay_mode() const { return replay_mode_; }
     void set_replay_mode(bool v) { replay_mode_ = v; }
 
     // Pack replay (Hot Replay Path B): while a .edpack session is active, the

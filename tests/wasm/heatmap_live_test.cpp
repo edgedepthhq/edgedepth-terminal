@@ -66,6 +66,21 @@ int main() {
     assert(metadata[r.meta_texture_][7] == 1); // History, not the cached future book.
     r.update_live_column(190000,live);
     check_live(1);
+    // A deep book can have remote orders far outside the active market.
+    // The bounded GPU row window must stay around the best bid/ask midpoint.
+    const std::unordered_map<double,float> deep{{1,1},{100,17},{101,29},{100000,1}};
+    r.update_live_column(191000, deep, 100.5);
+    check_live(1);
+    assert(r.get_value_at_price_and_time(100.25, 180000) == 17);
+    assert(r.get_value_at_price_and_time(100.25, 240000) == 0); // No neighbour borrowing.
+    auto changed = deep; changed[100] = 23;
+    r.update_live_column(192000, changed, 100.5);
+    assert(r.get_value_at_price_and_time(100.25, 180000) == 23); // Labels see the updated book.
+    r.timeline_[60000] = history; // Backfill changes CPU origin before debounced sync.
+    r.gpu_dirty_ = true;
+    assert(r.get_value_at_price_and_time(100.25, 180000) == 23); // Old GPU grid still owns lookup.
+    r.sync_gpu_from_timeline();
+    assert(r.get_value_at_price_and_time(100.25, 180000) == 23);
     r.clear();
     r.finalize_column(120000,history);
     r.sync_gpu_from_timeline();

@@ -87,18 +87,6 @@ bool ShaderHeatmapRenderer::process_snapshot(const pb::HeatmapSnapshot& snapshot
     if (bucket_size <= 0) return false;
     native_bucket_size_ = bucket_size;
 
-    // Detect time step from first two snapshots
-    if (snapshot_count_ == 0) {
-        first_seen_ts_ = ts;
-    } else if (snapshot_count_ == 1) {
-        const int64_t gap = std::abs(ts - first_seen_ts_);
-        if (gap > 0) {
-            if (gap >= 2700000) time_step_ms_ = 3600000;
-            else if (gap >= 600000) time_step_ms_ = 900000;
-            else if (gap >= 180000) time_step_ms_ = 300000;
-            else time_step_ms_ = 60000;
-        }
-    }
     snapshot_count_++;
 
     // Build price→qty map from protobuf
@@ -246,8 +234,9 @@ void ShaderHeatmapRenderer::recompute_reach_from_mark(
 
 void ShaderHeatmapRenderer::update_live_column(
     int64_t timestamp_ms,
-    const std::unordered_map<double, float>& price_qty_map)
+    const std::unordered_map<double, float>& price_qty_map, double center_price)
 {
+    live_center_price_ = center_price;
     // Keep the latest book independently of historical snapshots. A history
     // rebuild must not erase live depth or drop an update while the grid is dirty.
     live_price_qty_ = price_qty_map;
@@ -265,7 +254,7 @@ void ShaderHeatmapRenderer::upload_live_column() {
     // Place live depth at its actual time, never overwrite the last historical
     // column. Wait for a dirty grid to be rebuilt before using its origin.
     if (gpu_dirty_ || time_step_ms_ <= 0 || ring_count_ == 0) return;
-    const int64_t origin = timeline_.begin()->first;
+    const int64_t origin = gpu_origin_ms_;
     if (timestamp_ms < origin) return;
     const int64_t target = (timestamp_ms - origin) / time_step_ms_;
     if (target >= RING_SIZE) return;
@@ -280,7 +269,8 @@ void ShaderHeatmapRenderer::upload_live_column() {
         raw_pmin = std::min(raw_pmin, p);
         raw_pmax = std::max(raw_pmax, p);
     }
-    const double mid_price = (raw_pmin + raw_pmax) * 0.5;
+    const double mid_price = live_center_price_ > 0.0
+        ? live_center_price_ : (raw_pmin + raw_pmax) * 0.5;
     const double half_window = (MAX_ROWS / 2) * native_bucket_size_;
     const double pmin = std::floor(
         (mid_price - half_window) / native_bucket_size_) * native_bucket_size_;
@@ -461,6 +451,8 @@ void ShaderHeatmapRenderer::upload_column(
     double price_min, double bucket_size,
     float max_value, float flags)
 {
+    column_meta_[ring_col].values.assign(column_build_buf_.begin(),
+                                         column_build_buf_.begin() + num_rows);
     // Upload data column (1 × num_rows, padded to MAX_ROWS)
     glBindTexture(GL_TEXTURE_2D, data_texture_);
     glTexSubImage2D(GL_TEXTURE_2D, 0,
@@ -515,6 +507,8 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
         return;
     }
 
+    gpu_origin_ms_ = timeline_.begin()->first;
+    gpu_bucket_size_ = native_bucket_size_;
     const bool apply_spread = (colormap_type_ == ColormapType::Liquidation);
     global_max_qty_ = 0.01f;
     std::fill(prev_column_carry_.begin(), prev_column_carry_.end(), 0.0f);
@@ -711,9 +705,9 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
 int ShaderHeatmapRenderer::find_column_for_time(int64_t timestamp_ms) const {
     if (ring_count_ == 0 || time_step_ms_ <= 0) return -1;
     if (timeline_.empty()) return -1;
-    const int64_t oldest = timeline_.begin()->first;
+    const int64_t oldest = gpu_origin_ms_;
     const int col = static_cast<int>((timestamp_ms - oldest) / time_step_ms_);
-    if (col < 0 || col >= ring_count_) return -1;
+    if (timestamp_ms < oldest || col < 0 || col >= ring_count_) return -1;
     return col;
 }
 
@@ -796,16 +790,6 @@ void ShaderHeatmapRenderer::render_cells(
     }
     if (ring_count_ == 0) return;
 
-    // Align time_step with candle timeframe to prevent column width drift.
-    // The auto-detected time_step may be slightly off (e.g., 299800ms vs 300000ms)
-    // due to irregular snapshot timing. Snap to the candle timeframe when close.
-    if (candle_timeframe_ms > 0 && time_step_ms_ > 0) {
-        const double ratio = static_cast<double>(candle_timeframe_ms) / time_step_ms_;
-        if (ratio > 0.8 && ratio < 1.2) {
-            time_step_ms_ = candle_timeframe_ms;
-        }
-    }
-
     current_candle_timeframe_ms_ = candle_timeframe_ms;
 
     // Get viewport from ImPlot
@@ -846,7 +830,7 @@ void ShaderHeatmapRenderer::render_cells(
 
     // Time as seconds - use oldest timestamp as reference epoch.
     // Use timeline_ directly (more robust than column_meta_[0] with time-indexed ring)
-    const int64_t oldest_ts = timeline_.begin()->first;
+    const int64_t oldest_ts = gpu_origin_ms_;
     u.viewport_time_min = static_cast<float>(
         (limits.X.Min - static_cast<double>(oldest_ts)) / 1000.0);
     u.viewport_time_max = static_cast<float>(
@@ -867,7 +851,7 @@ void ShaderHeatmapRenderer::render_cells(
     u.ring_size = RING_SIZE;
     u.max_rows = MAX_ROWS;
 
-    u.bucket_size = static_cast<float>(native_bucket_size_);
+    u.bucket_size = static_cast<float>(gpu_bucket_size_);
     u.bucket_multiplier = bucket_multiplier_;
     u.sensitivity = sensitivity;
     u.max_qty = global_max_qty_;
@@ -910,17 +894,52 @@ void ShaderHeatmapRenderer::render_cells(
     dl->AddCallback(ImDrawCallback_ResetRenderState, nullptr);
     ImPlot::PopPlotClipRect();
 
-    // CPU-side labels when zoomed in
-    if (show_labels) {
-        const double display_bucket = native_bucket_size_ * bucket_multiplier_;
-        const int vis_cols = static_cast<int>(
-            (limits.X.Max - limits.X.Min) / candle_timeframe_ms) + 1;
-        const int vis_rows = static_cast<int>(
-            (limits.Y.Max - limits.Y.Min) / display_bucket) + 1;
-        if (vis_cols * vis_rows < 1000) {
-            render_labels(candle_timeframe_ms, sensitivity);
+    // Label culling uses visible cell dimensions and a bounded draw count.
+    if (show_labels) render_labels(candle_timeframe_ms, sensitivity);
+}
+
+void ShaderHeatmapRenderer::render_labels(int64_t, float sensitivity) const {
+    if (ring_count_ == 0 || gpu_bucket_size_ <= 0) return;
+    auto* draw = ImPlot::GetPlotDrawList();
+    const auto limits = ImPlot::GetPlotLimits();
+    // Measure near the viewport, not at Unix epoch zero (float cancellation).
+    const auto p1 = ImPlot::PlotToPixels(limits.X.Min, limits.Y.Min);
+    const auto p2 = ImPlot::PlotToPixels(limits.X.Min + time_step_ms_,
+                                        limits.Y.Min + gpu_bucket_size_ * bucket_multiplier_);
+    const float cell_w = std::abs(p2.x-p1.x), cell_h = std::abs(p2.y-p1.y);
+    if (cell_w < 40 || cell_h < 16) return;
+    ImPlot::PushPlotClipRect();
+    for (int col = 0; col < ring_count_; ++col) {
+        const auto& meta = column_meta_[col];
+        const double ts = static_cast<double>(gpu_origin_ms_ + col * time_step_ms_);
+        if (ts < limits.X.Min - time_step_ms_ / 2 || ts > limits.X.Max + time_step_ms_ / 2) continue;
+        if (replay_cutoff_ms_ > 0 && meta.timestamp_ms > replay_cutoff_ms_) continue;
+        // Match the shader's float metadata and per-column aggregation origin.
+        const double pmin = static_cast<float>(meta.price_min);
+        const double step = static_cast<float>(meta.price_step);
+        const double bucket = step * bucket_multiplier_;
+        if (bucket <= 0) continue;
+        int first = std::max(0, static_cast<int>(std::floor((limits.Y.Min-pmin)/bucket)) * bucket_multiplier_);
+        for (int row = first; row < static_cast<int>(meta.values.size()); row += bucket_multiplier_) {
+            const double price = pmin + row * step;
+            if (price > limits.Y.Max) break;
+            float qty = 0;
+            for (int r = row; r < std::min(row + bucket_multiplier_, static_cast<int>(meta.values.size())); ++r) qty += meta.values[r];
+            if (qty < 0.01f) continue;
+            char label[16];
+            if (qty >= 1000) snprintf(label,sizeof(label),"%.1fk",qty/1000);
+            else if (qty >= 100) snprintf(label,sizeof(label),"%.0f",qty);
+            else if (qty >= 10) snprintf(label,sizeof(label),"%.1f",qty);
+            else snprintf(label,sizeof(label),"%.2f",qty);
+            const auto size = ImGui::CalcTextSize(label);
+            if (size.x > cell_w * 0.95f || size.y > cell_h * 0.9f) continue;
+            const auto center = ImPlot::PlotToPixels(ts, price + bucket * 0.5);
+            const float normalized = global_max_qty_ > 0 ? qty * sensitivity / global_max_qty_ : 0;
+            const auto color = normalized > 0.5f ? IM_COL32(0,0,0,230) : IM_COL32(255,255,255,230);
+            draw->AddText(ImVec2(center.x-size.x/2,center.y-size.y/2),color,label);
         }
     }
+    ImPlot::PopPlotClipRect();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1053,84 +1072,6 @@ void ShaderHeatmapRenderer::gl_render_callback(
 // CPU-side Label Rendering
 // ═══════════════════════════════════════════════════════════════════════════════
 
-void ShaderHeatmapRenderer::render_labels(
-    int64_t candle_timeframe_ms, float sensitivity) const
-{
-    if (timeline_.empty() || native_bucket_size_ <= 0) return;
-
-    ImDrawList* draw_list = ImPlot::GetPlotDrawList();
-    const ImPlotRect limits = ImPlot::GetPlotLimits();
-    const double display_bucket = native_bucket_size_ * bucket_multiplier_;
-
-    // Check cell size in pixels - only render if cells are large enough
-    const ImVec2 p1 = ImPlot::PlotToPixels(0, 0);
-    const ImVec2 p2 = ImPlot::PlotToPixels(
-        static_cast<double>(candle_timeframe_ms), display_bucket);
-    const float cell_w = std::abs(p2.x - p1.x);
-    const float cell_h = std::abs(p2.y - p1.y);
-    if (cell_w < 40.0f || cell_h < 16.0f) return;
-
-    ImPlot::PushPlotClipRect();
-    int labels_rendered = 0;
-    constexpr int MAX_LABELS = 500;
-
-    const int64_t first_col = (static_cast<int64_t>(limits.X.Min) /
-        candle_timeframe_ms) * candle_timeframe_ms;
-    const int64_t last_col = (static_cast<int64_t>(limits.X.Max) /
-        candle_timeframe_ms + 1) * candle_timeframe_ms;
-    const double first_row = std::floor(limits.Y.Min / display_bucket) * display_bucket;
-    const double last_row = std::ceil(limits.Y.Max / display_bucket) * display_bucket;
-
-    for (int64_t col_time = first_col;
-         col_time <= last_col && labels_rendered < MAX_LABELS;
-         col_time += candle_timeframe_ms)
-    {
-        // Find data near this timestamp in timeline_
-        auto it = timeline_.lower_bound(col_time - candle_timeframe_ms / 2);
-        if (it == timeline_.end()) continue;
-        if (std::abs(it->first - col_time) > candle_timeframe_ms) continue;
-
-        for (double row_price = first_row;
-             row_price <= last_row && labels_rendered < MAX_LABELS;
-             row_price += display_bucket)
-        {
-            // Sum values in this display bucket
-            float qty = 0.0f;
-            for (const auto& [p, q] : it->second) {
-                const double dp = std::floor(p / display_bucket) * display_bucket;
-                if (std::abs(dp - row_price) < display_bucket * 0.5) {
-                    qty += q;
-                }
-            }
-            if (qty < 0.01f) continue;
-
-            const double cx = static_cast<double>(col_time);
-            const double cy = row_price + display_bucket * 0.5;
-            const ImVec2 center_px = ImPlot::PlotToPixels(cx, cy);
-
-            char label[16];
-            if (qty >= 1000.0f) snprintf(label, sizeof(label), "%.1fk", qty / 1000.0f);
-            else if (qty >= 100.0f) snprintf(label, sizeof(label), "%.0f", qty);
-            else if (qty >= 10.0f) snprintf(label, sizeof(label), "%.1f", qty);
-            else snprintf(label, sizeof(label), "%.2f", qty);
-
-            const ImVec2 text_size = ImGui::CalcTextSize(label);
-            if (text_size.x > cell_w * 0.95f || text_size.y > cell_h * 0.9f) continue;
-
-            const ImVec2 text_pos(center_px.x - text_size.x * 0.5f,
-                                  center_px.y - text_size.y * 0.5f);
-            const float normalized = (global_max_qty_ > 0.001f)
-                ? qty / global_max_qty_ : 0.0f;
-            const ImU32 text_color = (normalized > 0.5f)
-                ? IM_COL32(0, 0, 0, 230) : IM_COL32(255, 255, 255, 230);
-
-            draw_list->AddText(text_pos, text_color, label);
-            labels_rendered++;
-        }
-    }
-    ImPlot::PopPlotClipRect();
-}
-
 // ═══════════════════════════════════════════════════════════════════════════════
 // Query Methods
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1169,19 +1110,19 @@ double ShaderHeatmapRenderer::get_max_price() const {
 float ShaderHeatmapRenderer::get_value_at_price_and_time(
     double price, int64_t time_ms) const
 {
-    // Look up from CPU-side timeline_ (no GPU readback)
-    auto it = timeline_.lower_bound(time_ms - time_step_ms_ / 2);
-    if (it == timeline_.end()) return 0.0f;
-    if (std::abs(it->first - time_ms) > time_step_ms_) return 0.0f;
-
-    const double bucket = native_bucket_size_ * bucket_multiplier_;
-    const double bp = std::floor(price / bucket) * bucket;
-    float total = 0.0f;
-    for (const auto& [p, q] : it->second) {
-        const double dp = std::floor(p / bucket) * bucket;
-        if (std::abs(dp - bp) < bucket * 0.5) total += q;
-    }
-    return total;
+    // Query the exact column/rows uploaded to the GPU; never borrow a neighbour.
+    const int col = find_column_for_time(time_ms);
+    if (col < 0) return 0;
+    const auto& meta = column_meta_[col];
+    if (replay_cutoff_ms_ > 0 && meta.timestamp_ms > replay_cutoff_ms_) return 0;
+    const double step = static_cast<float>(meta.price_step);
+    if (step <= 0) return 0;
+    const int row = static_cast<int>(std::floor((price-static_cast<float>(meta.price_min))/step));
+    if (row < 0) return 0;
+    const int first = row / bucket_multiplier_ * bucket_multiplier_;
+    float qty = 0;
+    for (int r = first; r < std::min(first+bucket_multiplier_,static_cast<int>(meta.values.size())); ++r) qty += meta.values[r];
+    return qty;
 }
 
 ShaderHeatmapRenderer::ViewportStats

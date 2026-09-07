@@ -46,7 +46,8 @@ private:
         const Terminal::Pair& pair,
         const void* data, size_t size,
         StreamManager* stream_mgr,
-        OrderbookManager* orderbook_mgr = nullptr
+        OrderbookManager* orderbook_mgr = nullptr,
+        FootprintManager* footprint_mgr = nullptr, DispatchQueue* queue = nullptr
     );
 
     static void handle_candle_message(

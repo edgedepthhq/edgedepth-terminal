@@ -90,6 +90,14 @@ public:
     // Called by message handler when a TickVolumeUpdate arrives (live or historical).
     void on_tick_volume_update(const std::string& symbol, const pb::TickVolumeUpdate& update);
 
+    // Observed trades are provisional until replaced by a complete minute.
+    // Live context only; callers serialize with snapshot delivery on the main thread.
+    void on_trade(const std::string& market, int64_t timestamp_ms,
+                  double price, double qty, bool is_buy);
+    static std::string market_key(const std::string& exchange, const std::string& symbol) {
+        return exchange + ":" + symbol;
+    }
+
     // Store a decoded, complete one-minute snapshot (main thread only).
     void store_footprint(const std::string& symbol, CandleFootprint fp);
 
@@ -110,6 +118,7 @@ public:
         float ratio = 0.0f;
         double minimum_volume = 0.0;
         int stack_levels = 0;
+        bool observed_trades = false; // Contains locally observed, potentially incomplete volume.
         bool provisional = false; // chart candle has not ended, not a coverage claim
         double tick_per_row       = 0.0;
         uint64_t composite_ver    = 0;    // sum of constituent bucket versions
@@ -155,6 +164,9 @@ private:
     std::unordered_map<std::string,
         std::unordered_map<int64_t, CandleFootprint>> data_;
 
+    std::unordered_map<std::string, std::unordered_map<int64_t, CandleFootprint>> live_;
+    const CandleFootprint* available(const std::string& market, int64_t start,
+                                    int64_t as_of_ms) const;
     bool loading_ = false;
 
     // Data version - incremented on every on_tick_volume_update

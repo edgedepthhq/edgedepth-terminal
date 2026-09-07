@@ -12,6 +12,50 @@ void FootprintManager::store_footprint(const std::string& symbol, CandleFootprin
     data_[symbol][fp.start_time] = std::move(fp);
 }
 
+void FootprintManager::on_trade(const std::string& market, int64_t ts,
+                                double price, double qty, bool is_buy) {
+    if (ts <= 0 || !std::isfinite(price) || price <= 0 || !std::isfinite(qty) || qty <= 0) return;
+    const int64_t minute = ts / 60000 * 60000;
+    if (get_footprint(market, minute)) return; // Authoritative snapshot wins.
+    auto& minutes = live_[market];
+    int64_t newest = minute;
+    for (const auto& [start, fp] : minutes) newest = std::max(newest, start);
+    if (minute < newest - 9 * 60000) return;
+    // Bound provisional retention; history remains owned by complete snapshots.
+    for (auto it = minutes.begin(); it != minutes.end();) {
+        if (it->first < newest - 9 * 60000) it = minutes.erase(it);
+        else ++it;
+    }
+    auto& fp = minutes[minute];
+    fp.start_time = minute;
+    fp.end_time = std::max(fp.end_time, ts); // Observed-through clock, not a minute-close claim.
+    auto it = std::lower_bound(fp.levels.begin(), fp.levels.end(), price,
+        [](const Level& lv, double p) { return lv.price < p; });
+    if (it == fp.levels.end() || it->price != price) it = fp.levels.insert(it, Level{price});
+    if (is_buy) { it->buy_volume += qty; fp.total_buy += qty; }
+    else { it->sell_volume += qty; fp.total_sell += qty; }
+    it->total_volume += qty;
+    ++it->trade_count;
+    it->delta = it->buy_volume - it->sell_volume;
+    fp.total_volume += qty;
+    fp.delta = fp.total_buy - fp.total_sell;
+    fp.high_price = std::max(fp.high_price, price);
+    if (fp.low_price == 0 || price < fp.low_price) fp.low_price = price;
+    fp.valid = true;
+    fp.version = ++data_version_;
+}
+
+const FootprintManager::CandleFootprint* FootprintManager::available(
+    const std::string& market, int64_t start, int64_t as_of) const {
+    const auto* closed = get_footprint(market, start);
+    if (closed && closed->end_time <= as_of) return closed;
+    auto market_it = live_.find(market);
+    if (market_it == live_.end()) return nullptr;
+    auto it = market_it->second.find(start);
+    if (it == market_it->second.end() || it->second.end_time > as_of) return nullptr;
+    return &it->second;
+}
+
 const FootprintManager::CandleFootprint* FootprintManager::get_footprint(
     const std::string& symbol, int64_t start_time) const
 {
@@ -31,6 +75,7 @@ int FootprintManager::candle_count(const std::string& symbol) const {
 void FootprintManager::clear(const std::string& symbol) {
     ++data_version_;
     data_.erase(symbol);
+    live_.erase(symbol);
     merged_cache_.erase(symbol);
     if (last_symbol_ == symbol) {
         last_start_ = 0;
@@ -60,7 +105,7 @@ const FootprintManager::MergedCache* FootprintManager::get_merged_grouped(
         int64_t base_ms = (candle_ts / 60000) * 60000;
         uint64_t composite_ver = 0;
         for (int b = 0; b < buckets; ++b) {
-            const auto* sub = get_footprint(symbol, base_ms + b * 60000);
+            const auto* sub = available(symbol, base_ms + b * 60000, as_of_ms);
             if (sub && sub->end_time <= as_of_ms) composite_ver += sub->version;
         }
         if (it->second.composite_ver == composite_ver) {
@@ -76,10 +121,12 @@ const FootprintManager::MergedCache* FootprintManager::get_merged_grouped(
     CandleFootprint merged;
     uint64_t composite_ver = 0;
     bool any_data = false;
+    bool observed_trades = false;
     for (int b = 0; b < buckets; ++b) {
-        const auto* sub = get_footprint(symbol, base_ms + b * 60000);
+        const auto* sub = available(symbol, base_ms + b * 60000, as_of_ms);
         if (!sub || sub->end_time > as_of_ms) continue;
         any_data = true;
+        observed_trades |= sub != get_footprint(symbol, base_ms + b * 60000);
         composite_ver += sub->version;
         merged.total_volume += sub->total_volume;
         merged.total_buy    += sub->total_buy;
@@ -99,6 +146,7 @@ const FootprintManager::MergedCache* FootprintManager::get_merged_grouped(
     cache.minimum_volume = imbalance_min_volume;
     cache.stack_levels = stacked_levels;
     cache.provisional = provisional;
+    cache.observed_trades = observed_trades;
     cache.tick_per_row = tick_per_row;
     cache.composite_ver = composite_ver;
 

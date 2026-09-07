@@ -4668,7 +4668,11 @@ void ChartWidget::update_live_heatmap_from_orderbook() {
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
     }
-    reconstructor->update_live_column(timestamp_ms, price_qty);
+    // Deep outliers must not move the finite GPU row window off the market.
+    const double center = !orderbook->bids.empty() && !orderbook->asks.empty()
+        ? (orderbook->bids.begin()->first + orderbook->asks.begin()->first) * 0.5
+        : orderbook->last_price;
+    reconstructor->update_live_column(timestamp_ms, price_qty, center);
 }
 
 void ChartWidget::render_heatmap_tooltip() {
@@ -6724,15 +6728,6 @@ static void draw_fp_imbalance(ImDrawList* draw, const FootprintManager& manager,
 
 void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_x_max) {
     auto& fp_mgr = ctx_.footprint_mgr();
-    const ImVec2 status_pos = ImPlot::GetPlotPos();
-    const char* cadence = "Footprints update after each minute closes";
-    const ImVec2 note(status_pos.x + 12.0f, status_pos.y + 60.0f);
-    const ImVec2 note_size = ImGui::CalcTextSize(cadence);
-    ImPlot::GetPlotDrawList()->AddRectFilled(
-        ImVec2(note.x - 4.0f, note.y - 2.0f),
-        ImVec2(note.x + note_size.x + 4.0f, note.y + note_size.y + 2.0f),
-        ImGui::GetColorU32(Theme::Tokens::PANEL));
-    ImPlot::GetPlotDrawList()->AddText(note, ImGui::GetColorU32(Theme::Tokens::TX2), cadence);
     const auto& timestamps = ctx_.candle_mgr().timestamps();
     if (timestamps.empty() && !ctx_.candle_mgr().has_building_candle()) return;
 
@@ -6827,7 +6822,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
         if (zoomed_out_block) {
             // Use cached merge - no per-frame allocation
             const auto* mc = fp_mgr.get_merged_grouped(
-                pair_.symbol, candle_ts, tf_sec, 0.0, as_of_ms);
+                FootprintManager::market_key(pair_.exchange, pair_.symbol), candle_ts, tf_sec, 0.0, as_of_ms);
             if (!mc) continue;
 
             double delta = mc->delta;
@@ -6889,13 +6884,17 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
 
         // Use cached merge+group - no per-frame vector allocations
         const auto* mc = fp_mgr.get_merged_grouped(
-            pair_.symbol, candle_ts, tf_sec, effective_tpr, as_of_ms);
-        if (show_text && as_of_ms >= candle_ts && as_of_ms - candle_ts < tf_ms_i) {
-            const ImVec2 label = ImPlot::PlotToPixels(candle_center - tf_ms * 0.35, candle_high);
+            FootprintManager::market_key(pair_.exchange, pair_.symbol), candle_ts, tf_sec, effective_tpr, as_of_ms);
+        if (show_text && ((mc && mc->observed_trades) ||
+            (as_of_ms >= candle_ts && as_of_ms - candle_ts < tf_ms_i))) {
+            const ImVec2 label = ImPlot::PlotToPixels(candle_center - tf_ms * 0.35,
+                mc ? std::max(candle_high, mc->high_price) + effective_tpr : candle_high);
             draw_list->AddText(font, fp_font_size * 0.8f,
                 ImVec2(label.x, label.y - fp_font_size),
                 ImGui::GetColorU32(Theme::Tokens::TX2),
-                mc && mc->provisional ? "Partial (closed minutes)" : "Awaiting minute close");
+                mc && mc->observed_trades ? "Live observed (partial)" :
+                mc ? "Partial (closed minutes)" :
+                ctx_.replay_mgr().is_active() ? "Awaiting minute close" : "Awaiting trades");
         }
         if (!mc) continue;
         const auto& grouped = mc->levels;
@@ -7054,6 +7053,17 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
         }
     }
 
+    const ImVec2 status_pos = ImPlot::GetPlotPos();
+    const char* cadence = ctx_.replay_mgr().is_active()
+        ? "Replay footprints: closed minutes"
+        : "Live: observed trades; reconciled after minute close";
+    const ImVec2 note(status_pos.x + 12.0f, status_pos.y + 60.0f);
+    const ImVec2 note_size = ImGui::CalcTextSize(cadence);
+    ImPlot::GetPlotDrawList()->AddRectFilled(
+        ImVec2(note.x - 4.0f, note.y - 2.0f),
+        ImVec2(note.x + note_size.x + 4.0f, note.y + note_size.y + 2.0f),
+        ImGui::GetColorU32(Theme::Tokens::PANEL));
+    ImPlot::GetPlotDrawList()->AddText(note, ImGui::GetColorU32(Theme::Tokens::TX2), cadence);
     ImPlot::PopPlotClipRect();
 }
 
@@ -7068,15 +7078,6 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
 
 void ChartWidget::render_footprint_profile(double visible_x_min, double visible_x_max) {
     auto& fp_mgr = ctx_.footprint_mgr();
-    const ImVec2 status_pos = ImPlot::GetPlotPos();
-    const char* cadence = "Footprints update after each minute closes";
-    const ImVec2 note(status_pos.x + 12.0f, status_pos.y + 60.0f);
-    const ImVec2 note_size = ImGui::CalcTextSize(cadence);
-    ImPlot::GetPlotDrawList()->AddRectFilled(
-        ImVec2(note.x - 4.0f, note.y - 2.0f),
-        ImVec2(note.x + note_size.x + 4.0f, note.y + note_size.y + 2.0f),
-        ImGui::GetColorU32(Theme::Tokens::PANEL));
-    ImPlot::GetPlotDrawList()->AddText(note, ImGui::GetColorU32(Theme::Tokens::TX2), cadence);
     const auto& timestamps = ctx_.candle_mgr().timestamps();
     if (timestamps.empty() && !ctx_.candle_mgr().has_building_candle()) return;
 
@@ -7160,7 +7161,7 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
         // Same as cluster: single delta-colored rectangle per candle
         if (zoomed_out_block) {
             const auto* mc = fp_mgr.get_merged_grouped(
-                pair_.symbol, candle_ts, tf_sec, 0.0, as_of_ms);
+                FootprintManager::market_key(pair_.exchange, pair_.symbol), candle_ts, tf_sec, 0.0, as_of_ms);
             if (!mc) continue;
 
             double delta = mc->delta;
@@ -7221,13 +7222,17 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
             std::ceil(effective_tpr / tick_size_) * tick_size_);
 
         const auto* mc = fp_mgr.get_merged_grouped(
-            pair_.symbol, candle_ts, tf_sec, effective_tpr, as_of_ms);
-        if (show_text && as_of_ms >= candle_ts && as_of_ms - candle_ts < tf_ms_i) {
-            const ImVec2 label = ImPlot::PlotToPixels(candle_center - tf_ms * 0.35, candle_high);
+            FootprintManager::market_key(pair_.exchange, pair_.symbol), candle_ts, tf_sec, effective_tpr, as_of_ms);
+        if (show_text && ((mc && mc->observed_trades) ||
+            (as_of_ms >= candle_ts && as_of_ms - candle_ts < tf_ms_i))) {
+            const ImVec2 label = ImPlot::PlotToPixels(candle_center - tf_ms * 0.35,
+                mc ? std::max(candle_high, mc->high_price) + effective_tpr : candle_high);
             draw_list->AddText(font, fp_font_size * 0.8f,
                 ImVec2(label.x, label.y - fp_font_size),
                 ImGui::GetColorU32(Theme::Tokens::TX2),
-                mc && mc->provisional ? "Partial (closed minutes)" : "Awaiting minute close");
+                mc && mc->observed_trades ? "Live observed (partial)" :
+                mc ? "Partial (closed minutes)" :
+                ctx_.replay_mgr().is_active() ? "Awaiting minute close" : "Awaiting trades");
         }
         if (!mc) continue;
         const auto& grouped = mc->levels;
@@ -7359,6 +7364,17 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
         }
     }
 
+    const ImVec2 status_pos = ImPlot::GetPlotPos();
+    const char* cadence = ctx_.replay_mgr().is_active()
+        ? "Replay footprints: closed minutes"
+        : "Live: observed trades; reconciled after minute close";
+    const ImVec2 note(status_pos.x + 12.0f, status_pos.y + 60.0f);
+    const ImVec2 note_size = ImGui::CalcTextSize(cadence);
+    ImPlot::GetPlotDrawList()->AddRectFilled(
+        ImVec2(note.x - 4.0f, note.y - 2.0f),
+        ImVec2(note.x + note_size.x + 4.0f, note.y + note_size.y + 2.0f),
+        ImGui::GetColorU32(Theme::Tokens::PANEL));
+    ImPlot::GetPlotDrawList()->AddText(note, ImGui::GetColorU32(Theme::Tokens::TX2), cadence);
     ImPlot::PopPlotClipRect();
 }
 
@@ -7403,7 +7419,7 @@ void ChartWidget::render_footprint_settings_popup() {
                 "Thick outlines mark consecutive same-side imbalances.\n"
                 "A missing grouped price breaks a stack. 0 disables stacks.");
             ImGui::TextWrapped("Thin outlines: imbalance. Thick: stack. Sells left, buys right.");
-            ImGui::TextWrapped("Uses available closed 1m buckets. Partial candles can change; missing minutes are not zero volume.");
+            ImGui::TextWrapped("Live cells use observed trades and may be partial after joining or reconnecting. Closed 1m snapshots replace them; replay uses closed minutes.");
         }
         if (footprint_settings_panel_.tab("Display")) {
             ImGui::Checkbox("Imbalance Highlights##fp", &fp.show_imbalances);
@@ -7437,14 +7453,14 @@ void ChartWidget::render_footprint_settings_popup() {
             }
             ImGui::Spacing();
             ImGui::Separator();
-            int cached = fp.candle_count(pair_.symbol);
+            int cached = fp.candle_count(FootprintManager::market_key(pair_.exchange, pair_.symbol));
             ImGui::TextDisabled("Cached candles: %d", cached);
             if (fp.is_loading()) {
                 ImGui::SameLine();
                 ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "(loading...)");
             }
             if (ImGui::SmallButton("Clear Cache##fp")) {
-                fp.clear(pair_.symbol);
+                fp.clear(FootprintManager::market_key(pair_.exchange, pair_.symbol));
             }
         }
         footprint_settings_panel_.end();

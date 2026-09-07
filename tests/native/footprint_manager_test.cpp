@@ -120,6 +120,41 @@ int main() {
     m.clear("A");
     expect(m.has_new_data_since(version) && !read(60, 1, 180000), "clear invalidates data and analysis");
     expect(m.get_merged_grouped("B", 60000, 60, 1, 120000), "clearing one symbol preserves another");
+    Manager live;
+    const auto market = Manager::market_key("binancef", "BTC");
+    const auto other = Manager::market_key("hl", "BTC");
+    auto observed = [&](int64_t as_of, int64_t tf = 60) {
+        return live.get_merged_grouped(market, 60000, tf, 1, as_of);
+    };
+    live.on_trade(market, 61000, 100, 2, true);
+    auto current = observed(61000);
+    expect(current && current->total_buy == 2 && current->observed_trades,
+           "forming 1m footprint includes observed trades before minute close");
+    live.on_trade(market, 62000, 100, 3, false);
+    current = observed(62000);
+    expect(current && current->total_volume == 5 && current->delta == -1,
+           "next trade updates the existing cached footprint and side totals");
+    expect(!observed(61500), "aggregated provisional volume never leaks a later trade into an earlier read");
+    live.on_trade(other, 63000, 100, 99, true);
+    expect(observed(63000)->total_volume == 5, "venues cannot mix provisional volume");
+    live.on_trade(market, 121000, 101, 7, true);
+    current = observed(121000, 300);
+    expect(current && current->total_volume == 12 && current->observed_trades,
+           "forming 5m candle merges observed minutes through rollover");
+    live.store_footprint(market, candle(60000, {{100, 20, 30}}));
+    current = observed(121000, 300);
+    expect(current && current->total_volume == 57 && current->observed_trades,
+           "authoritative close replaces observed volume without double counting");
+    live.on_trade(market, 62000, 100, 999, true);
+    expect(observed(121000)->total_volume == 50 && !observed(121000)->observed_trades,
+           "late trade cannot alter authoritative closed minute");
+    live.store_footprint(market, candle(120000, {{101, 9, 1}}));
+    expect(observed(180000, 300)->total_volume == 60 && !observed(180000, 300)->observed_trades,
+           "all authoritative minutes remove observed marker");
+    live.on_trade(market, 900001, 100, 1, true);
+    expect(!observed(119000), "old provisional minutes expire instead of accumulating forever");
+    live.clear(market);
+    expect(!observed(180000, 300), "clear removes both historical and observed volume");
     std::printf("Footprint direction, thresholds, adjacency, cache and as-of: %s\n", failures ? "FAILED" : "PASS");
     return failures ? 1 : 0;
 }

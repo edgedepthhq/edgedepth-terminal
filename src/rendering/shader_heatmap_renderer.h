@@ -49,7 +49,8 @@ public:
 
     /// Update the live (rightmost) column with current orderbook data.
     void update_live_column(int64_t timestamp_ms,
-                            const std::unordered_map<double, float>& price_qty_map);
+                            const std::unordered_map<double, float>& price_qty_map,
+                            double center_price = 0.0);
 
     /// Finalize a column (server-authoritative, prevents live overwrite).
     void finalize_column(int64_t timestamp_ms,
@@ -107,6 +108,8 @@ public:
                 live_price_qty_.clear();
                 live_timestamp_ms_ = 0;
             }
+            if (ms > 0 && (replay_cutoff_ms_ == 0 || ms < replay_cutoff_ms_))
+                last_sync_ms_ = 0; // Rewind cannot wait through the backfill debounce.
             replay_cutoff_ms_ = ms;
             gpu_dirty_ = true;  // Force re-sync to clip at new cutoff
         }
@@ -180,6 +183,7 @@ private:
         int num_rows = 0;
         float max_value = 0.0f;
         bool finalized = false;
+        std::vector<float> values; // Exact uploaded rows, shared by labels and tooltips.
     };
     std::array<ColumnMeta, RING_SIZE> column_meta_{};
 
@@ -237,6 +241,8 @@ private:
     int find_column_for_time(int64_t timestamp_ms) const;
     int time_to_column_offset(int64_t timestamp_ms) const;
 
+    int64_t gpu_origin_ms_ = 0;
+    double gpu_bucket_size_ = 0.0;
     int64_t time_step_ms_ = 300000; // Detected snapshot interval (default 5min)
 
     // ── Render callback data ────────────────────────────────────────
@@ -303,6 +309,7 @@ private:
     // Live column tracking
     void upload_live_column();
     std::unordered_map<double, float> live_price_qty_;
+    double live_center_price_ = 0.0;
     int live_ring_col_ = -1;
     int64_t live_timestamp_ms_ = 0;
 

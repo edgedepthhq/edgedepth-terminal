@@ -16,18 +16,18 @@ void FootprintManager::request_history(
     if (loading_) return;
 
     // Skip if requested range is already covered by what we have
-    if (pair.symbol == last_symbol_ &&
+    if (market_key(pair.exchange, pair.symbol) == last_symbol_ &&
         start_ms >= last_start_ && end_ms <= last_end_) {
         return;
     }
 
     // Extend the covered range (union of old + new)
-    if (pair.symbol == last_symbol_ && last_start_ > 0) {
+    if (market_key(pair.exchange, pair.symbol) == last_symbol_ && last_start_ > 0) {
         start_ms = std::min(start_ms, last_start_);
         end_ms   = std::max(end_ms, last_end_);
     }
 
-    last_symbol_ = pair.symbol;
+    last_symbol_ = market_key(pair.exchange, pair.symbol);
     last_start_ = start_ms;
     last_end_ = end_ms;
     loading_ = true;
