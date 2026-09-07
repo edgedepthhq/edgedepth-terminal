@@ -360,7 +360,8 @@ void ShaderHeatmapRenderer::finalize_column(
             const double mid = realtime_ && observation_centers_.contains(timestamp_ms)
                 ? observation_centers_.at(timestamp_ms) : (snap_pmin + snap_pmax) * 0.5;
             const double hw = (MAX_ROWS / 2) * native_bucket_size_;
-            const double pmin = std::floor((mid - hw) / native_bucket_size_) * native_bucket_size_;
+            const double grid = native_bucket_size_ * (realtime_ ? bucket_multiplier_ : 1);
+            const double pmin = std::floor((mid - hw) / grid) * grid;
 
             const bool spread = (colormap_type_ == ColormapType::Liquidation);
             const int num_rows = build_column(price_qty_map, pmin, native_bucket_size_, spread);
@@ -407,7 +408,7 @@ int ShaderHeatmapRenderer::build_column(
     int max_row_used = 0;
     for (const auto& [price, qty] : price_qty_map) {
         const int row = static_cast<int>(
-            std::floor((price - price_min) / bucket_size));
+            std::floor((price - price_min) / bucket_size + (realtime_ ? 1e-7 : 0)));
         if (row >= 0 && row < MAX_ROWS) {
             column_build_buf_[row] += qty;
             max_row_used = std::max(max_row_used, row);
@@ -625,7 +626,12 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
         // stair-stepping at large bucket sizes ($50, $100). Only shift when
         // the midpoint drifts beyond 25% of the window from current center.
         double col_price_min;
-        if (highest_col >= 0) {
+        if (realtime_) {
+            // Absolute display-price grid, identical on direct upload and rebuild.
+            // Retiring the oldest observation must not relocate surviving bands.
+            const double grid = native_bucket_size_ * bucket_multiplier_;
+            col_price_min = std::floor((mid_price - half_win) / grid) * grid;
+        } else if (highest_col >= 0) {
             // Use the previous column's price_min as baseline
             const double prev_pmin = column_meta_[highest_col].price_min;
             const double prev_center = prev_pmin + half_win;
@@ -864,8 +870,10 @@ void ShaderHeatmapRenderer::mark_dirty() {
 // at the ramp ceiling. Original quantities and historical rendering stay intact.
 float ShaderHeatmapRenderer::realtime_normalization(double price_min, double price_max) {
     if (replay_cutoff_ms_ < realtime_peak_clock_ms_) realtime_peak_ = 0;
-    if (realtime_peak_ > 0 && replay_cutoff_ms_ >= realtime_peak_clock_ms_ &&
-        replay_cutoff_ms_ - realtime_peak_clock_ms_ < 1000) return realtime_peak_;
+    // Calibrate once for this traversal. New orders, retention and auto-fit
+    // must never recolor already observed history. Explicit fidelity changes
+    // reset this scale; sensitivity remains a user-controlled adjustment.
+    if (realtime_peak_ > 0) return realtime_peak_;
     std::vector<float> values;
     values.reserve(64 * MAX_ROWS);
     const int stride = std::max(1, (ring_count_ + 63) / 64);
@@ -885,9 +893,7 @@ float ShaderHeatmapRenderer::realtime_normalization(double price_min, double pri
     if (!values.empty()) {
         const size_t index = std::min(values.size() - 1, values.size() * 98 / 100);
         std::nth_element(values.begin(), values.begin() + index, values.end());
-        // A bounded once-per-second transition avoids frame-by-frame flashing.
-        realtime_peak_ = realtime_peak_ <= 0 ? values[index] :
-            std::clamp(values[index], realtime_peak_ * 0.8f, realtime_peak_ * 1.25f);
+        realtime_peak_ = values[index];
     }
     realtime_peak_clock_ms_ = replay_cutoff_ms_;
     return realtime_peak_ > 0 ? realtime_peak_ : global_max_qty_;
@@ -1332,7 +1338,13 @@ void ShaderHeatmapRenderer::set_colormap_type(ColormapType type) {
 }
 
 void ShaderHeatmapRenderer::set_bucket_multiplier(int multiplier) {
-    bucket_multiplier_ = std::max(1, multiplier);
+    multiplier = std::max(1, multiplier);
+    if (multiplier == bucket_multiplier_) return;
+    bucket_multiplier_ = multiplier;
+    if (realtime_) {
+        gpu_dirty_ = true; // Row origins are aligned to the selected price grid.
+        realtime_peak_ = 0;
+    }
 }
 
 void ShaderHeatmapRenderer::set_opacity(float opacity) {

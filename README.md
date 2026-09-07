@@ -30,36 +30,31 @@ with the community gateway.*
 
 ### Real-time depth
 
-Choose **RT** in the timeframe menu for observed orderbook history, historical
-best bid/ask steps, the current spread and book on the same price axis, and
-volume-sized trade bubbles. The default view has no candles. Optional trade-price
-line and one-second observed candles are available in the RT controls, alongside
-Pause display and Auto market size. Auto size uses the 75th percentile of received
-trade values over 60 seconds, settles after 32 records, then changes gradually
-every five seconds. Turn it off to set a manual minimum in quote units
-(price times quantity). Bubbles have 7-28px radii, with square-root size scaling
-and stronger signed fill. One bubble remains one received record.
+![Live IOST observed depth with historical bid/ask steps and trade bubbles](assets/terminal-rt-live.png)
 
-Depth keeps the first actual event in each 100ms display bin, up to 1,200 samples
-and two minutes, with 512 levels per side. Source cadence remains event-driven:
-quiet periods hold the last synchronized book; sequence breaks require a fresh
-seed. This sampling setting does not change upstream collection. Trade history
-keeps up to 20,000 received records/two minutes and draws the newest 1,500 qualifying
-records in view. Exchanges may aggregate fills; identical records are not guessed
-to be duplicates. Bubbles use aggressor side and a capped square-root size scale.
+*Local browser build connected to the community gateway's Binance Futures feed.
+Actual observed depth and received trades, with no pre-join depth backfill.*
 
-Zoom spans five seconds to two minutes and controls time only. Price stays fitted
-to eligible visible trades and quote steps. The initial window grows with observed
-history and marks its starting boundary. The RT heatmap uses dark/cyan/yellow/white
-colors and normalizes grouped visible price rows, so remote resting orders do not
-dim the active market. Its upload window follows the observed spread midpoint.
-Depth settings retain the existing price
-fidelity controls. Replay draws only evidence eligible at the playhead; seeking
-clears the previous traversal. An unverified in-buffer book restore waits for a
-fresh seed, and no subsecond history is reconstructed before joining. One-second
-candles are partial observed trades, not complete historical candles. Other
-candle/model overlays are omitted in RT. Standalone feeds and local packs need no
-Pro account; the hosted live view uses the existing Pro UI entitlement.
+Choose **RT** in the timeframe menu to watch observed orderbook history, sampled
+best bid/ask steps and trade bubbles on one price axis. Each bubble's center is
+its received execution price and timestamp; size represents quote notional.
+Quotes and trades are separate streams, so a print can lie outside the sampled
+spread. Bubbles are never moved onto a quote to make them fit.
+
+RT retains up to two minutes of depth in 100ms display bins. Historical price
+groups and the calibrated color scale stay fixed as new data arrives. The price
+axis still auto-fits the visible market. Optional candles, a trade-price line,
+auto/manual bubble thresholds and price fidelity are available in the menus.
+
+Continuous replay and pause work with a recording containing synchronized depth
+and trades. **RT depth after seeking is limited:** history clears, and the view
+waits for a valid source seed and continuous deltas. Current local packs reseed
+from their opening book, so jumping ahead can leave RT depth unavailable. Play
+from the recording's start to inspect its continuous sequence.
+
+See the [RT guide](docs/REALTIME_DEPTH.md) for screenshots, settings, replay steps,
+retention limits and the distinction between quotes and executions. Standalone
+feeds and local packs need no Pro account; hosted live RT uses the Pro view gate.
 
 ### Diagonal and stacked footprints
 

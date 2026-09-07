@@ -2758,11 +2758,17 @@ void ChartWidget::render_controls() {
         ImGui::SetNextItemWidth(155.0f);
         bool changed = ImGui::Combo("Fidelity", &selected, labels, 5);
         heatmap_bucket_multiplier_ = multipliers[selected];
-        changed |= ImGui::Checkbox("Adapt to zoom", &heatmap_adapt_to_zoom_);
-        if (ImGui::IsItemHovered())
-            Theme::tooltip("Group more price rows when zoomed out.\nTurn off for the exact selected grouping.");
+        if (rt_mode_) {
+            ImGui::TextUnformatted("RT keeps the selected price grouping fixed.");
+            ImGui::TextUnformatted("Color scale is fixed. Recalibration recolors the visible history.");
+        } else {
+            changed |= ImGui::Checkbox("Adapt to zoom", &heatmap_adapt_to_zoom_);
+            if (ImGui::IsItemHovered())
+                Theme::tooltip("Group more price rows when zoomed out.\nTurn off for the exact selected grouping.");
+        }
         auto* recon = rt_mode_ ? rt_renderer_.get() : ctx_.heatmap_mgr().get_reconstructor(pair_, heatmap_mode_);
         if (recon) {
+            if (rt_mode_ && ImGui::Button("Recalibrate colors")) recon->recalibrate_realtime_colors();
             if (changed) recon->set_bucket_multiplier(heatmap_bucket_multiplier_);
             ImGui::TextUnformatted("Effective price bucket:");
             ImGui::SameLine();

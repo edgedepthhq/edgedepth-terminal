@@ -248,9 +248,33 @@ int main() {
     assert(r.realtime_normalization(98, 102) == 40); // Remote wall cannot dim active rows.
     const auto unchanged = r.timeline_.at(epoch + 17);
     r.set_bucket_multiplier(2);
-    r.realtime_peak_ = 0;
+    r.sync_gpu_from_timeline();
     assert(r.realtime_normalization(98, 102) == 70); // Percentile of grouped values 20,70.
     assert(r.timeline_.at(epoch + 17) == unchanged); // Brightness never mutates source volume.
+    // New liquidity and a changing price viewport cannot recolor past cells.
+    const float peak = r.realtime_normalization(98, 102);
+    r.set_observation_clock_ms(epoch + 5000);
+    r.finalize_column(epoch + 4017, {{100, 900000}}, false, 104);
+    r.sync_gpu_from_timeline();
+    assert(r.realtime_normalization(0, 1000) == peak);
+    r.recalibrate_realtime_colors();
+    assert(r.realtime_normalization(100, 102) == 900000);
+    // Surviving columns must preserve both metadata and uploaded values across
+    // direct arrivals, rebuilds and retirement of their original predecessor.
+    for (int mult : {1, 2, 5, 10, 20}) {
+        r.clear(); r.configure_realtime(0.0000001); r.set_bucket_multiplier(mult);
+        r.set_observation_clock_ms(epoch + 200000);
+        r.finalize_column(epoch + 17, small_tick, true, 0.00102005);
+        r.sync_gpu_from_timeline();
+        r.finalize_column(epoch + 1017, small_tick, false, 0.00102995);
+        const auto before = r.column_meta_[r.find_column_for_time(epoch + 1050)];
+        r.gpu_dirty_ = true; r.sync_gpu_from_timeline();
+        auto after = r.column_meta_[r.find_column_for_time(epoch + 1050)];
+        assert(before.price_min == after.price_min && before.values == after.values);
+        r.timeline_.erase(epoch + 17); r.gpu_dirty_ = true; r.sync_gpu_from_timeline();
+        after = r.column_meta_[r.find_column_for_time(epoch + 1050)];
+        assert(before.price_min == after.price_min && before.values == after.values);
+    }
     r.clear();
     std::puts("PASS: live depth survives rebuilds, finalization and origin changes; rewind/clear discard it");
 }

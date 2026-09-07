@@ -90,6 +90,7 @@ public:
     enum class ColormapType { Orderbook, Liquidation };
     void set_colormap_type(ColormapType type);
     void set_bucket_multiplier(int multiplier);
+    void recalibrate_realtime_colors() { realtime_peak_ = 0; }
     int get_bucket_multiplier() const { return bucket_multiplier_; }
 
     void set_time_offset_ms(int64_t offset) { time_offset_ms_ = offset; }

@@ -53,7 +53,7 @@ void ChartWidget::render_realtime_settings() {
     if (ImGui::IsItemHovered()) Theme::tooltip("Price x quantity in quote units. One bubble per received record; the exchange may aggregate fills. Radius starts at 7px and is capped at 28px.");
     ImGui::EndDisabled();
     ImGui::TextUnformatted("Depth: 100ms samples, 2 minutes retained");
-    ImGui::TextUnformatted("Price fidelity is set in Layers > Depth settings");
+    ImGui::TextUnformatted("Fixed price fidelity: Layers > Depth settings");
 }
 
 void ChartWidget::on_rewind(int64_t) {
@@ -240,18 +240,24 @@ void ChartWidget::render_realtime() {
         (bubbles > 1500 ? "RT: newest 1,500 qualifying trade records shown" :
          "RT: sampled book held between updates / bubbles are trade records");
     const ImVec2 pos = ImPlot::GetPlotPos();
+    const float note_y = pos.y + (ctx_.replay_mgr().is_active() ? 60.0f : 34.0f);
     if (!rt_samples_.empty() && rt_samples_.front()->timestamp_ms >= limits.X.Min &&
         rt_samples_.front()->timestamp_ms <= std::min(limits.X.Max, double(rt_clock_ms_))) {
         const float start = ImPlot::PlotToPixels(double(rt_samples_.front()->timestamp_ms), 0).x;
-        dl->AddLine(ImVec2(start, pos.y + 60), ImVec2(start, pos.y + ImPlot::GetPlotSize().y),
+        dl->AddLine(ImVec2(start, note_y + 26), ImVec2(start, pos.y + ImPlot::GetPlotSize().y),
             Theme::u32(Theme::Tokens::TX2, 0.45f));
-        dl->AddText(ImVec2(start + 6, pos.y + 52), Theme::u32(Theme::Tokens::TX2), "Observed depth starts here");
+        dl->AddText(ImVec2(start + 6, note_y + 18), Theme::u32(Theme::Tokens::TX2), "Observed depth starts here");
     }
-    dl->AddText(ImVec2(pos.x + 12, pos.y + 34), Theme::u32(Theme::Tokens::TX2), note);
+    dl->AddText(ImVec2(pos.x + 12, note_y), Theme::u32(Theme::Tokens::TX2), note);
     ImPlot::PopPlotClipRect();
 }
 
 void ChartWidget::configure_depth_fidelity(ShaderHeatmapRenderer& renderer) {
+    if (rt_mode_) {
+        // Keep historical price groups fixed as the live price axis auto-fits.
+        renderer.set_bucket_multiplier(heatmap_bucket_multiplier_);
+        return;
+    }
     // Viewport-adaptive bucket multiplier: ensure each heatmap cell
     // is at least min_cell_px pixels tall. This adapts to any coin at
     // any zoom level - BTC on 1m stays at native resolution, LABUSDT
