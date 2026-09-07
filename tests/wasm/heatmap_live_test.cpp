@@ -211,5 +211,46 @@ int main() {
     r.sync_gpu_from_timeline();
     for (const auto& column : r.column_meta_)
         if (column.num_rows) assert(column.timestamp_ms <= epoch + 130017);
+    // Small-tick RT with distant resting orders must retain the active book
+    // through initial batch upload, direct arrival and retention-origin rebuild.
+    r.clear();
+    r.configure_realtime(0.0000001);
+    r.set_observation_clock_ms(epoch + 200000);
+    const std::unordered_map<double, float> small_tick{
+        {0.00001, 1}, {0.0010299, 230000}, {0.0010300, 340000}, {0.02, 1}};
+    r.finalize_column(epoch + 17, small_tick, true, 0.00102995);
+    r.sync_gpu_from_timeline();
+    assert(r.timeline_.at(epoch + 17).at(0.0010299) == 230000);
+    assert(r.get_value_at_price_and_time(0.00102995, epoch + 50) == 230000);
+    r.finalize_column(epoch + 1017, small_tick, false, 0.00102995);
+    assert(r.get_value_at_price_and_time(0.00102995, epoch + 1050) == 230000);
+    assert(r.get_value_at_price_and_time(0.00102995, epoch + 550) == 230000);
+    r.gpu_dirty_ = true; // A delayed batch remains CPU-owned until rebuild.
+    for (int i = 2; i < 135; ++i)
+        r.finalize_column(epoch + i * 1000 + 17, small_tick, false, 0.00102995);
+    r.sync_gpu_from_timeline();
+    assert(r.gpu_origin_ms_ > epoch);
+    assert(r.observation_centers_.size() == r.timeline_.size());
+    for (const auto& [ts, levels] : r.timeline_) {
+        assert(levels.at(0.0010299) == 230000);
+        assert(r.get_value_at_price_and_time(0.00102995, ts + 33) == 230000);
+    }
+    r.set_replay_cutoff_ms(epoch + 100050);
+    r.sync_gpu_from_timeline();
+    assert(r.get_value_at_price_and_time(0.00102995, epoch + 99050) == 230000);
+    assert(r.get_value_at_price_and_time(0.00102995, epoch + 101050) == 0);
+    r.clear();
+    assert(r.observation_centers_.empty());
+    r.configure_realtime(1);
+    r.set_observation_clock_ms(epoch + 1000);
+    r.finalize_column(epoch + 17, {{99, 20}, {100, 30}, {101, 40}, {450, 1000000}}, true, 100);
+    r.sync_gpu_from_timeline();
+    assert(r.realtime_normalization(98, 102) == 40); // Remote wall cannot dim active rows.
+    const auto unchanged = r.timeline_.at(epoch + 17);
+    r.set_bucket_multiplier(2);
+    r.realtime_peak_ = 0;
+    assert(r.realtime_normalization(98, 102) == 70); // Percentile of grouped values 20,70.
+    assert(r.timeline_.at(epoch + 17) == unchanged); // Brightness never mutates source volume.
+    r.clear();
     std::puts("PASS: live depth survives rebuilds, finalization and origin changes; rewind/clear discard it");
 }

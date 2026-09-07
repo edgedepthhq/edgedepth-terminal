@@ -1958,7 +1958,9 @@ SDL_GL_MakeCurrent(g_app.window, g_app.gl_context);
     ImGui::CreateContext();
     ImPlot::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
+    // The renderer owns its capability flags. WebGL cannot apply base-vertex
+    // offsets; the application uses 32-bit indices for dense chart geometry.
+    static_assert(sizeof(ImDrawIdx) == 4);
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 

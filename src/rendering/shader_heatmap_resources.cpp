@@ -218,6 +218,7 @@ bool ShaderHeatmapResources::init() {
 
     // Build colormap textures from HeatmapColormap (reuse existing LUT code)
     build_colormap_texture(colormap_ob_, 0, 1.0f);
+    build_colormap_texture(colormap_rt_, 3, 1.0f);
     build_colormap_texture(colormap_liq_, 1, 1.0f);
     build_colormap_texture(colormap_liq_warm_, 2, 1.0f);
 
@@ -229,6 +230,7 @@ void ShaderHeatmapResources::destroy() {
     if (!initialized_) return;
     if (program_) { glDeleteProgram(program_); program_ = 0; }
     if (vao_) { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
+    if (colormap_rt_) { glDeleteTextures(1, &colormap_rt_); colormap_rt_ = 0; }
     if (colormap_ob_) { glDeleteTextures(1, &colormap_ob_); colormap_ob_ = 0; }
     if (colormap_liq_) { glDeleteTextures(1, &colormap_liq_); colormap_liq_ = 0; }
     if (colormap_liq_warm_) { glDeleteTextures(1, &colormap_liq_warm_); colormap_liq_warm_ = 0; }
@@ -330,6 +332,7 @@ void ShaderHeatmapResources::cache_uniforms() {
 void ShaderHeatmapResources::build_colormap_texture(GLuint& tex, int type, float opacity) {
     uint32_t lut[256];
     auto cm_type = (type == 0) ? HeatmapColormap::Type::Orderbook
+                 : (type == 3) ? HeatmapColormap::Type::RealtimeOrderbook
                  : (type == 2) ? HeatmapColormap::Type::LiquidationWarm
                                : HeatmapColormap::Type::Liquidation;
     HeatmapColormap::build_packed_lut(cm_type, opacity, lut);
@@ -349,7 +352,9 @@ void ShaderHeatmapResources::build_colormap_texture(GLuint& tex, int type, float
 }
 
 void ShaderHeatmapResources::rebuild_colormap(int type, float opacity) {
-    if (type == 0) {
+    if (type == 3) {
+        build_colormap_texture(colormap_rt_, 3, opacity);
+    } else if (type == 0) {
         build_colormap_texture(colormap_ob_, 0, opacity);
     } else if (type == 2) {
         build_colormap_texture(colormap_liq_warm_, 2, opacity);

@@ -8,7 +8,7 @@
  */
 namespace HeatmapColormap {
 
-enum class Type { Orderbook, Liquidation, LiquidationWarm };
+enum class Type { Orderbook, Liquidation, LiquidationWarm, RealtimeOrderbook };
 
 // Liquidation-field colormap selection (Tweaks panel: Ember/Inferno/Magma/Viridis).
 // Routes every Type::Liquidation apply()/LUT build - consumers don't change.

@@ -131,6 +131,30 @@ int main() {
     seed.set_timestamp_ms(20200);
     manager.apply_orderbook_snapshot_from_pb(hl, seed);
     expect(manager.copy_realtime_since(hl, 0, samples) && samples.size() == 2, "full snapshots do not require sequence IDs");
+    RealtimeBubbleScale small_scale, btc_scale;
+    std::deque<Terminal::Trade> small_trades, btc_trades;
+    for (int i = 1; i <= 100; ++i) {
+        Terminal::Trade trade{};
+        trade.timestamp_ms = 60000 + i;
+        trade.price = 0.001; trade.qty = i * 1000; trade.is_buy = i % 2;
+        small_trades.push_back(trade);
+        trade.price = 80000; trade.qty = i * 0.01;
+        btc_trades.push_back(trade);
+    }
+    small_scale.update(small_trades, 60100);
+    btc_scale.update(btc_trades, 60100);
+    expect(std::abs(small_scale.minimum() - 75) < 1e-8, "small-market scale uses quote notional percentile");
+    expect(std::abs(btc_scale.minimum() - 60000) < 1e-8, "major-market scale adapts independently");
+    const double frozen = small_scale.minimum();
+    for (auto& trade : small_trades) trade.qty *= 100;
+    small_scale.update(small_trades, 60100);
+    expect(small_scale.minimum() == frozen, "paused clock cannot rescale bubbles");
+    small_scale.update(small_trades, 65100);
+    expect(small_scale.minimum() == frozen * 1.25, "settled scale limits abrupt market changes");
+    small_scale.update(small_trades, 59000);
+    expect(small_scale.minimum() == 0, "rewind excludes future records from scale");
+    small_scale.update(small_trades, 60100);
+    expect(small_scale.minimum() == 7500, "rewind starts an eligible scale anew");
     if (!failures) std::puts("PASS: RT sequence, clocks, gaps, retention, rewind and trade multiplicity");
     return failures ? 1 : 0;
 }

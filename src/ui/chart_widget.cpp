@@ -875,8 +875,13 @@ void ChartWidget::render_chart() {
             ? ctx_.replay_mgr().interpolated_time_ms()
             : std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count();
-        x_max = double(rt_clock_ms_) + rt_span_ms_ * 0.12;
-        x_min = x_max - rt_span_ms_;
+        // Grow the initial view from actual observations, without painting
+        // the current book backward into the pre-join interval.
+        const double observed_span = rt_samples_.empty() ? 5000.0 :
+            std::max(5000.0, double(rt_clock_ms_ - rt_samples_.front()->timestamp_ms) / 0.88);
+        const double span = std::min(rt_span_ms_, observed_span);
+        x_max = double(rt_clock_ms_) + span * 0.12;
+        x_min = x_max - span;
     }
     // Drawing tools: the ImPlot input-map override must be in place BEFORE
     // BeginPlot (ImPlot reads the map at setup-lock, i.e. the first plot
@@ -893,7 +898,8 @@ void ChartWidget::render_chart() {
         const bool hide_x_labels = has_subplots && chart_type_ != ChartType::TPO;
         ImPlotAxisFlags x_flags = hide_x_labels ? ImPlotAxisFlags_NoTickLabels : ImPlotAxisFlags_None;
         ImPlot::SetupAxis(ImAxis_X1, nullptr, x_flags);
-        ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_Opposite);
+        ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_Opposite |
+            (rt_mode_ ? ImPlotAxisFlags_Lock : ImPlotAxisFlags_None));
         ImPlot::SetupAxisFormat(ImAxis_Y1, fmt_.price_fmt);
 
         // Beyond this density candles and liquidation cells collapse below a
@@ -1021,6 +1027,7 @@ void ChartWidget::render_chart() {
                 }
             }
         }
+        bool rt_empty_prices = false;
         if (rt_mode_) {
             y_min = std::numeric_limits<double>::infinity();
             y_max = -std::numeric_limits<double>::infinity();
@@ -1030,9 +1037,26 @@ void ChartWidget::render_chart() {
                 y_min = std::min(y_min, trade.price);
                 y_max = std::max(y_max, trade.price);
             }
-            if (rt_latest_ && rt_latest_->timestamp_ms <= rt_clock_ms_) {
+            for (size_t i = 0; i < rt_samples_.size(); ++i) {
+                const auto& sample = rt_samples_[i];
+                if (sample->timestamp_ms > rt_clock_ms_ || sample->timestamp_ms > visible_x_max) break;
+                const int64_t until = i + 1 < rt_samples_.size() && !rt_samples_[i + 1]->segment_start
+                    ? rt_samples_[i + 1]->timestamp_ms : sample->timestamp_ms;
+                if (until < visible_x_min) continue;
+                y_min = std::min(y_min, sample->bid);
+                y_max = std::max(y_max, sample->ask);
+            }
+            if (rt_book_valid_ && rt_latest_ && rt_latest_->timestamp_ms <= rt_clock_ms_ &&
+                rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000 && visible_x_max >= rt_clock_ms_) {
                 y_min = std::min(y_min, rt_latest_->bid);
                 y_max = std::max(y_max, rt_latest_->ask);
+            }
+            // Empty navigation keeps the last RT price frame; historical
+            // candle extremes are not observations in this view.
+            if (!std::isfinite(y_min) && last_visible_range_.Y.Min > 0 && rt_was_on_) {
+                rt_empty_prices = true;
+                y_min = last_visible_range_.Y.Min;
+                y_max = last_visible_range_.Y.Max;
             }
         }
         // Fallback
@@ -1069,7 +1093,7 @@ void ChartWidget::render_chart() {
         }
         if (rt_mode_ && std::isfinite(y_min) && std::isfinite(y_max)) {
             const double center = (y_min + y_max) * 0.5;
-            const double half = std::max({(y_max - y_min) * 0.5, tick_size_ * 64.0, center * 0.0001});
+            const double half = std::max({(y_max - y_min) * 0.5, tick_size_ * 16.0, center * 0.0001});
             y_min = center - half;
             y_max = center + half;
         }
@@ -1077,8 +1101,9 @@ void ChartWidget::render_chart() {
         const double y_padding = y_span > 0.0
             ? y_span * 0.08
             : std::max(std::abs(y_min) * 0.001, tick_size_ * 4.0);
-        ImPlot::SetupAxisLimits(ImAxis_Y1, y_min - y_padding, y_max + y_padding,
-                                rt_mode_ && !ctx_.candle_mgr().follow_live() ? ImPlotCond_Once : ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1,
+            rt_empty_prices ? last_visible_range_.Y.Min : y_min - y_padding,
+            rt_empty_prices ? last_visible_range_.Y.Max : y_max + y_padding, ImPlotCond_Always);
         if (!hide_x_labels) {
             // In TPO mode, always use last_visible_range_ for tick generation
             // to avoid stale visible_x_min/max on initial frames

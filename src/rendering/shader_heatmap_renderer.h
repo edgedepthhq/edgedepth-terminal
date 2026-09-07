@@ -55,7 +55,7 @@ public:
 
     /// Finalize a column (server-authoritative, prevents live overwrite).
     void finalize_column(int64_t timestamp_ms,
-                         const std::unordered_map<double, float>& price_qty_map, bool segment_start = false);
+                         const std::unordered_map<double, float>& price_qty_map, bool segment_start = false, double price_center = 0);
 
     // A separate instance for observed subsecond depth; historical candle
     // columns never enter this renderer. Original observation clocks are keys.
@@ -66,6 +66,7 @@ public:
         native_bucket_size_ = tick_size;
     }
     void invalidate_observation(int64_t timestamp_ms) {
+        observation_centers_.erase(timestamp_ms);
         if (realtime_ && timeline_.erase(timestamp_ms)) { gpu_dirty_ = true; last_sync_ms_ = 0; }
     }
     void set_observation_hold(int64_t until_ms) { observation_hold_until_ms_ = until_ms; }
@@ -270,7 +271,11 @@ private:
     int64_t gpu_origin_ms_ = 0;
     double gpu_bucket_size_ = 0.0;
     int64_t time_step_ms_ = 60000; // Interval of the uploaded GPU grid
+    std::map<int64_t, double> observation_centers_;
     bool realtime_ = false;
+    float realtime_normalization(double price_min, double price_max);
+    float realtime_peak_ = 0;
+    int64_t realtime_peak_clock_ms_ = 0;
     int64_t observation_hold_until_ms_ = 0;
     void fill_observation_hold(int previous, int next);
     std::set<int64_t> observation_boundaries_;

@@ -34,7 +34,11 @@ Choose **RT** in the timeframe menu for observed orderbook history, historical
 best bid/ask steps, the current spread and book on the same price axis, and
 volume-sized trade bubbles. The default view has no candles. Optional trade-price
 line and one-second observed candles are available in the RT controls, alongside
-Pause display and the minimum trade value (price times quantity in quote units).
+Pause display and Auto market size. Auto size uses the 75th percentile of received
+trade values over 60 seconds, settles after 32 records, then changes gradually
+every five seconds. Turn it off to set a manual minimum in quote units
+(price times quantity). Bubbles have 7-28px radii, with square-root size scaling
+and stronger signed fill. One bubble remains one received record.
 
 Depth keeps the first actual event in each 100ms display bin, up to 1,200 samples
 and two minutes, with 512 levels per side. Source cadence remains event-driven:
@@ -44,7 +48,12 @@ keeps up to 20,000 received records/two minutes and draws the newest 1,500 quali
 records in view. Exchanges may aggregate fills; identical records are not guessed
 to be duplicates. Bubbles use aggressor side and a capped square-root size scale.
 
-Zoom spans five seconds to two minutes. Depth settings retain the existing price
+Zoom spans five seconds to two minutes and controls time only. Price stays fitted
+to eligible visible trades and quote steps. The initial window grows with observed
+history and marks its starting boundary. The RT heatmap uses dark/cyan/yellow/white
+colors and normalizes grouped visible price rows, so remote resting orders do not
+dim the active market. Its upload window follows the observed spread midpoint.
+Depth settings retain the existing price
 fidelity controls. Replay draws only evidence eligible at the playhead; seeking
 clears the previous traversal. An unverified in-buffer book restore waits for a
 fresh seed, and no subsecond history is reconstructed before joining. One-second

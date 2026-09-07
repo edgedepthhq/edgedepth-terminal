@@ -525,8 +525,19 @@ add_executable(c_based_trader_client
         ${ZSTD_SRC}
 )
 
+# WebGL2 supports 32-bit indices but not base-vertex drawing. Dense RT bubbles
+# can exceed 64K vertices; every ImGui consumer must use the same index layout.
+target_compile_definitions(c_based_trader_client PRIVATE "ImDrawIdx=unsigned int")
+
 # Standalone production depth regression uses the same pinned wire/runtime.
 if(EMSCRIPTEN)
+    add_executable(realtime_mesh_regression EXCLUDE_FROM_ALL
+        tests/wasm/realtime_mesh_test.cpp ${IMGUI_DIR}/imgui.cpp
+        ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
+    target_compile_definitions(realtime_mesh_regression PRIVATE "ImDrawIdx=unsigned int")
+    target_compile_options(realtime_mesh_regression PRIVATE -O1)
+    target_link_options(realtime_mesh_regression PRIVATE -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1)
+    set_target_properties(realtime_mesh_regression PROPERTIES SUFFIX ".js")
     add_executable(realtime_depth_regression EXCLUDE_FROM_ALL
         tests/wasm/realtime_history_test.cpp src/core/orderbook_manager.cpp
         ${PROTO_SRCS} ${PROTOBUF_LITE_SRCS})

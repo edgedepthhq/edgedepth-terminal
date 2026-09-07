@@ -278,6 +278,8 @@ private:
     std::deque<Terminal::Trade> rt_paused_trades_;
     const std::deque<Terminal::Trade>& realtime_trades() const;
     bool rt_subscribed_ = false;
+    bool rt_auto_bubbles_ = true;
+    RealtimeBubbleScale rt_bubble_scale_;
     float rt_min_notional_ = 10000.0f;
     double rt_span_ms_ = 60000.0;
     int64_t rt_clock_ms_ = 0;

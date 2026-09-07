@@ -98,3 +98,35 @@ public:
 private:
     std::deque<Terminal::Trade> trades_;
 };
+
+// A bounded, as-of market scale shared by live, paused and replay rendering.
+// The viewport never enters these statistics. Warm-up can settle once a useful
+// sample exists; subsequent changes are limited to 25 percent every five seconds.
+class RealtimeBubbleScale {
+public:
+    double minimum() const { return minimum_; }
+    void update(const std::deque<Terminal::Trade>& trades, int64_t clock_ms) {
+        if (clock_ms < clock_ms_) { minimum_ = 0; settled_ = false; }
+        if (minimum_ > 0 && clock_ms - clock_ms_ < 5000) return;
+        std::vector<double> values;
+        values.reserve(trades.size());
+        for (const auto& trade : trades) {
+            if (trade.timestamp_ms > clock_ms) break;
+            if (trade.timestamp_ms <= clock_ms - 60000) continue;
+            const double value = trade.price * trade.qty;
+            if (value > 0 && std::isfinite(value)) values.push_back(value);
+        }
+        if (!values.empty()) {
+            const size_t index = (values.size() - 1) * 3 / 4;
+            std::nth_element(values.begin(), values.begin() + index, values.end());
+            minimum_ = minimum_ <= 0 || !settled_ ? values[index] :
+                std::clamp(values[index], minimum_ / 1.25, minimum_ * 1.25);
+            settled_ = values.size() >= 32;
+        }
+        clock_ms_ = clock_ms;
+    }
+private:
+    double minimum_ = 0;
+    int64_t clock_ms_ = 0;
+    bool settled_ = false;
+};

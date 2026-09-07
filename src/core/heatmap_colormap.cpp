@@ -129,6 +129,14 @@ void apply(Type type, float t, uint8_t& r, uint8_t& g, uint8_t& b) {
         return;
     }
 
+    if (type == Type::RealtimeOrderbook) {
+        // Weak liquidity stays dark; high size becomes cyan, yellow, then white.
+        constexpr Stop stops[] = {
+            {0.00f, 8, 13, 18}, {0.08f, 12, 27, 36}, {0.25f, 22, 83, 108},
+            {0.50f, 48, 182, 201}, {0.75f, 218, 217, 95}, {1.00f, 255, 250, 220}};
+        eval_stops(stops, t, r, g, b);
+        return;
+    }
     // Orderbook colormap
     if (t < 0.01f) {
         r = 15; g = 25; b = 45;

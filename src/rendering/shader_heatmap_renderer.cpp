@@ -312,7 +312,7 @@ void ShaderHeatmapRenderer::upload_observed_column(int64_t timestamp_ms,
 
 void ShaderHeatmapRenderer::finalize_column(
     int64_t timestamp_ms,
-    const std::unordered_map<double, float>& price_qty_map, bool segment_start)
+    const std::unordered_map<double, float>& price_qty_map, bool segment_start, double price_center)
 {
     if (native_bucket_size_ <= 0 || price_qty_map.empty()) return;
 
@@ -323,10 +323,12 @@ void ShaderHeatmapRenderer::finalize_column(
         auto it = timeline_.lower_bound(bin);
         if (it != timeline_.end() && it->first < bin + column_interval_ms_) return;
         while (!timeline_.empty() && timeline_.begin()->first <= timestamp_ms - 120000) {
+            observation_centers_.erase(timeline_.begin()->first);
             observation_boundaries_.erase(timeline_.begin()->first);
             timeline_.erase(timeline_.begin());
         }
         if (segment_start) observation_boundaries_.insert(timestamp_ms);
+        if (price_center > 0 && std::isfinite(price_center)) observation_centers_[timestamp_ms] = price_center;
     }
     timeline_[timestamp_ms] = price_qty_map;
     evict_oldest_timeline();
@@ -355,7 +357,8 @@ void ShaderHeatmapRenderer::finalize_column(
                 if (p < snap_pmin) snap_pmin = p;
                 if (p > snap_pmax) snap_pmax = p;
             }
-            const double mid = (snap_pmin + snap_pmax) * 0.5;
+            const double mid = realtime_ && observation_centers_.contains(timestamp_ms)
+                ? observation_centers_.at(timestamp_ms) : (snap_pmin + snap_pmax) * 0.5;
             const double hw = (MAX_ROWS / 2) * native_bucket_size_;
             const double pmin = std::floor((mid - hw) / native_bucket_size_) * native_bucket_size_;
 
@@ -614,7 +617,8 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
         }
         if (snap_pmin == std::numeric_limits<double>::max()) continue;
 
-        const double mid_price = (snap_pmin + snap_pmax) * 0.5;
+        const double mid_price = realtime_ && observation_centers_.contains(ts)
+            ? observation_centers_.at(ts) : (snap_pmin + snap_pmax) * 0.5;
         const double half_win = (MAX_ROWS / 2) * native_bucket_size_;
 
         // "Sticky" centering: keep price_min stable across columns to avoid
@@ -768,6 +772,8 @@ int ShaderHeatmapRenderer::time_to_column_offset(int64_t timestamp_ms) const {
 void ShaderHeatmapRenderer::evict_oldest_timeline() {
     while (timeline_.size() > MAX_TIMELINE_ENTRIES) {
         const auto ts = timeline_.begin()->first;
+        observation_centers_.erase(ts);
+        observation_boundaries_.erase(ts);
         timeline_.erase(timeline_.begin());
         reach_timeline_.erase(ts);  // Keep reach_timeline_ in sync
     }
@@ -803,6 +809,9 @@ int64_t ShaderHeatmapRenderer::display_time_to_bucket(double time_ms) const {
 
 void ShaderHeatmapRenderer::clear() {
     observation_boundaries_.clear();
+    observation_centers_.clear();
+    realtime_peak_ = 0;
+    realtime_peak_clock_ms_ = 0;
     observation_hold_until_ms_ = 0;
     ring_count_ = 0;
     time_step_ms_ = column_interval_ms_;
@@ -848,6 +857,41 @@ void ShaderHeatmapRenderer::mark_dirty() {
 // ═══════════════════════════════════════════════════════════════════════════════
 // Rendering - Phase 3: The GL Callback
 // ═══════════════════════════════════════════════════════════════════════════════
+
+// Sample at most 64 eligible columns and 1024 rows per column. Normalizing
+// grouped visible rows prevents a distant wall or price grouping from washing
+// out the active market. The 98th percentile leaves only the strongest 2 percent
+// at the ramp ceiling. Original quantities and historical rendering stay intact.
+float ShaderHeatmapRenderer::realtime_normalization(double price_min, double price_max) {
+    if (replay_cutoff_ms_ < realtime_peak_clock_ms_) realtime_peak_ = 0;
+    if (realtime_peak_ > 0 && replay_cutoff_ms_ >= realtime_peak_clock_ms_ &&
+        replay_cutoff_ms_ - realtime_peak_clock_ms_ < 1000) return realtime_peak_;
+    std::vector<float> values;
+    values.reserve(64 * MAX_ROWS);
+    const int stride = std::max(1, (ring_count_ + 63) / 64);
+    for (int col = ring_count_ - 1; col >= 0; col -= stride) {
+        const auto& meta = column_meta_[col];
+        if (meta.timestamp_ms > replay_cutoff_ms_ || meta.num_rows <= 0 || meta.values.empty()) continue;
+        for (int row = 0; row < meta.num_rows; row += bucket_multiplier_) {
+            const double lo = meta.price_min + row * meta.price_step;
+            const double hi = lo + bucket_multiplier_ * meta.price_step;
+            if (hi <= price_min || lo >= price_max) continue;
+            float value = 0;
+            for (int end = std::min(row + bucket_multiplier_, meta.num_rows), i = row; i < end; ++i)
+                value += meta.values[i];
+            if (value > 0 && std::isfinite(value)) values.push_back(value);
+        }
+    }
+    if (!values.empty()) {
+        const size_t index = std::min(values.size() - 1, values.size() * 98 / 100);
+        std::nth_element(values.begin(), values.begin() + index, values.end());
+        // A bounded once-per-second transition avoids frame-by-frame flashing.
+        realtime_peak_ = realtime_peak_ <= 0 ? values[index] :
+            std::clamp(values[index], realtime_peak_ * 0.8f, realtime_peak_ * 1.25f);
+    }
+    realtime_peak_clock_ms_ = replay_cutoff_ms_;
+    return realtime_peak_ > 0 ? realtime_peak_ : global_max_qty_;
+}
 
 void ShaderHeatmapRenderer::render_cells(
     int64_t candle_timeframe_ms,
@@ -900,7 +944,7 @@ void ShaderHeatmapRenderer::render_cells(
     u.data_tex = data_texture_;
     u.meta_tex = meta_texture_;
     u.colormap_tex = (colormap_type_ == ColormapType::Orderbook)
-        ? res.colormap_orderbook() : res.colormap_liquidation();
+        ? (realtime_ ? res.colormap_realtime() : res.colormap_orderbook()) : res.colormap_liquidation();
     u.colormap_warm_tex = res.colormap_liquidation_warm();
     u.reach_tex = reach_texture_;  // Phase 2a
 
@@ -939,7 +983,7 @@ void ShaderHeatmapRenderer::render_cells(
     u.bucket_size = static_cast<float>(gpu_bucket_size_);
     u.bucket_multiplier = bucket_multiplier_;
     u.sensitivity = sensitivity;
-    u.max_qty = global_max_qty_;
+    u.max_qty = realtime_ ? realtime_normalization(limits.Y.Min, limits.Y.Max) : global_max_qty_;
     u.color_low = color_low_;
     u.color_peak = color_peak_;
     u.mode = (colormap_type_ == ColormapType::Liquidation) ? 1 : 0;
@@ -1296,7 +1340,7 @@ void ShaderHeatmapRenderer::set_opacity(float opacity) {
     // Rebuild the colormap texture with new opacity baked in for alpha ramp
     auto& res = ShaderHeatmapResources::instance();
     if (res.is_initialized()) {
-        const int type = (colormap_type_ == ColormapType::Liquidation) ? 1 : 0;
+        const int type = (colormap_type_ == ColormapType::Liquidation) ? 1 : (realtime_ ? 3 : 0);
         res.rebuild_colormap(type, opacity_);
     }
 }

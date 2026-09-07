@@ -42,11 +42,16 @@ void ChartWidget::render_realtime_settings() {
     ImGui::Checkbox("Trade-price line", &rt_trade_line_);
     chart_type_ = rt_candles_ ? ChartType::Candles : ChartType::Line;
     ImGui::Checkbox("Trade bubbles", &rt_bubbles_);
+    ImGui::Checkbox("Auto market size", &rt_auto_bubbles_);
+    if (ImGui::IsItemHovered()) Theme::tooltip("Uses the 75th percentile of received trade values over the last 60 seconds. Updates gradually every 5 seconds; independent of zoom. One bubble per record, with no inferred fills.");
+    if (rt_auto_bubbles_) ImGui::Text("Auto minimum: %.4g quote", rt_bubble_scale_.minimum());
+    ImGui::BeginDisabled(rt_auto_bubbles_);
     ImGui::SetNextItemWidth(150);
     ImGui::InputFloat("Minimum trade value", &rt_min_notional_, 1000, 10000, "%.0f");
     if (!std::isfinite(rt_min_notional_)) rt_min_notional_ = 10000;
     rt_min_notional_ = std::max(1.0f, rt_min_notional_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Price x quantity in quote units. One bubble per received record; the exchange may aggregate fills. Radius is capped at 12px.");
+    if (ImGui::IsItemHovered()) Theme::tooltip("Price x quantity in quote units. One bubble per received record; the exchange may aggregate fills. Radius starts at 7px and is capped at 28px.");
+    ImGui::EndDisabled();
     ImGui::TextUnformatted("Depth: 100ms samples, 2 minutes retained");
     ImGui::TextUnformatted("Price fidelity is set in Layers > Depth settings");
 }
@@ -62,6 +67,7 @@ void ChartWidget::on_rewind(int64_t) {
     rt_paused_ = false;
     rt_paused_trades_.clear();
     rt_book_valid_ = false;
+    rt_bubble_scale_ = {};
 }
 
 void ChartWidget::update_realtime() {
@@ -89,7 +95,7 @@ void ChartWidget::update_realtime() {
         if (sample->timestamp_ms <= clock - RealtimeDepthHistory::retention_ms) continue;
         rt_prices_.clear();
         for (const auto& level : sample->levels) rt_prices_[level.price] += float(level.size);
-        rt_renderer_->finalize_column(sample->timestamp_ms, rt_prices_, sample->segment_start);
+        rt_renderer_->finalize_column(sample->timestamp_ms, rt_prices_, sample->segment_start, (sample->bid + sample->ask) * 0.5);
         rt_latest_ = sample;
         rt_samples_.push_back(sample);
         while (rt_samples_.size() > 1200 || rt_samples_.front()->timestamp_ms <= clock - 120000)
@@ -181,21 +187,23 @@ void ChartWidget::render_realtime() {
         }
         flush();
     }
+    if (rt_auto_bubbles_) rt_bubble_scale_.update(trades, rt_clock_ms_);
+    const double minimum = rt_auto_bubbles_ ? rt_bubble_scale_.minimum() : rt_min_notional_;
     int bubbles = 0;
     if (rt_bubbles_) for (auto it = trades.rbegin(); it != trades.rend(); ++it) {
         const auto& trade = *it;
         if (trade.timestamp_ms > rt_clock_ms_ || trade.timestamp_ms > limits.X.Max) continue;
         if (trade.timestamp_ms < limits.X.Min || trade.timestamp_ms <= rt_clock_ms_ - 120000) break;
         const double notional = trade.price * trade.qty;
-        if (notional < rt_min_notional_ || !std::isfinite(notional)) continue;
+        if (!(minimum > 0) || notional < minimum || !std::isfinite(notional)) continue;
         if (++bubbles > 1500) break;
         const ImVec2 point = ImPlot::PlotToPixels(double(trade.timestamp_ms), trade.price);
-        const float radius = std::min(12.0f, 2.5f * float(std::sqrt(notional / rt_min_notional_)));
+        const float radius = std::min(28.0f, 7.0f * float(std::sqrt(notional / minimum)));
         auto color = trade.is_buy ? Theme::Tokens::UP : Theme::Tokens::DOWN;
-        color.w = 0.22f;
-        dl->AddCircleFilled(point, radius, ImGui::GetColorU32(color), 12);
-        color.w = 0.8f;
-        dl->AddCircle(point, radius, ImGui::GetColorU32(color), 12, 1.0f);
+        color.w = 0.72f;
+        dl->AddCircleFilled(point, radius, ImGui::GetColorU32(color), 24);
+        color.w = 1.0f;
+        dl->AddCircle(point, radius, ImGui::GetColorU32(color), 24, 1.0f);
     }
     const bool fresh = rt_book_valid_ && rt_latest_ &&
         rt_latest_->timestamp_ms <= rt_clock_ms_ && rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000;
@@ -232,6 +240,13 @@ void ChartWidget::render_realtime() {
         (bubbles > 1500 ? "RT: newest 1,500 qualifying trade records shown" :
          "RT: sampled book held between updates / bubbles are trade records");
     const ImVec2 pos = ImPlot::GetPlotPos();
+    if (!rt_samples_.empty() && rt_samples_.front()->timestamp_ms >= limits.X.Min &&
+        rt_samples_.front()->timestamp_ms <= std::min(limits.X.Max, double(rt_clock_ms_))) {
+        const float start = ImPlot::PlotToPixels(double(rt_samples_.front()->timestamp_ms), 0).x;
+        dl->AddLine(ImVec2(start, pos.y + 60), ImVec2(start, pos.y + ImPlot::GetPlotSize().y),
+            Theme::u32(Theme::Tokens::TX2, 0.45f));
+        dl->AddText(ImVec2(start + 6, pos.y + 52), Theme::u32(Theme::Tokens::TX2), "Observed depth starts here");
+    }
     dl->AddText(ImVec2(pos.x + 12, pos.y + 34), Theme::u32(Theme::Tokens::TX2), note);
     ImPlot::PopPlotClipRect();
 }
