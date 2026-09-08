@@ -106,6 +106,17 @@ bool RecorderRuntime::load(const std::string& js) {
         view_.liq_observed = tri("liqObserved");
         view_.ob_depth     = tri("obDepth");
         view_.vpvr         = tri("vpvr");
+        if (v.contains("chartMode")) {
+            if (!v["chartMode"].is_string()) return false;
+            const std::string mode = v["chartMode"].get<std::string>();
+            if (mode == "candles") view_.chart_type = 0;
+            else if (mode == "footprint-cluster") view_.chart_type = 1;
+            else if (mode == "footprint-profile") view_.chart_type = 2;
+            else if (mode == "line") view_.chart_type = 4;
+            else if (mode == "tpo") view_.chart_type = 5;
+            else if (mode == "realtime") { view_.chart_type = 4; view_.realtime = true; }
+            else { printf("[Recorder] unsupported chartMode\n"); return false; }
+        }
         if (v.contains("viewSpanMinutes") && v["viewSpanMinutes"].is_number())
             view_.view_span_min = v["viewSpanMinutes"].get<int>();
         has_view_ = true;
@@ -212,7 +223,7 @@ void RecorderRuntime::begin_shot(int i, const AppContext& ctx) {
     }
 
 #ifdef __EMSCRIPTEN__
-    if (s.tf_sec > 0) _set_chart_timeframe(s.tf_sec);
+    if (s.tf_sec > 0 && !view_.realtime) _set_chart_timeframe(s.tf_sec);
 #endif
 
     // Effective speed = scripted × scale, clamped to the transport's range.
@@ -266,8 +277,8 @@ void RecorderRuntime::update(const AppContext& ctx) {
     // Replay ran out (Stopped tears the data context down - a seek cannot
     // revive a pack). Whatever is on screen is the clip's final frame.
     if (rm.state() == ReplayManager::State::Stopped) {
-        phase_ = Phase::Done;
-        printf("[Recorder] replay ended before script - done\n");
+        phase_ = Phase::Error;
+        printf("[Recorder] replay ended before script completed\n");
         return;
     }
 

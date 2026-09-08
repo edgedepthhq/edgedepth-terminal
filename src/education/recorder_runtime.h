@@ -86,6 +86,9 @@ public:
         // depends on how much history the seed served, which is exactly what
         // a scripted shot must not inherit. <=0 = leave the chart alone.
         int view_span_min = -1;
+        // chartMode: candles, line, footprint-cluster, footprint-profile, tpo, realtime.
+        int chart_type = -1;
+        bool realtime = false;
     };
     // Non-null once a script with a "view" object has loaded.
     const ViewOverrides* view() const { return (valid_ && has_view_) ? &view_ : nullptr; }

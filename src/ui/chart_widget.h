@@ -107,6 +107,7 @@ public:
     const char* title() const override { return title_.c_str(); }
 
     void change_timeframe(int new_tf_seconds);
+    void set_chart_type(ChartType type);
 
     // Current chart timeframe in seconds - live source of truth is the
     // CandleManager (the title's tf field lags a frame). Lets the topbar TF

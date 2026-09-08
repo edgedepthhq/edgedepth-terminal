@@ -354,6 +354,23 @@ void ChartWidget::refresh_instrument() {
     renko_sig_size_ = -1.0;
 }
 
+void ChartWidget::set_chart_type(ChartType type) {
+    const ChartType previous = chart_type_;
+    if (rt_mode_) set_rt_mode(false);
+    chart_type_ = type;
+    auto& fp = ctx_.footprint_mgr();
+    fp.enabled = type == ChartType::FootprintCluster || type == ChartType::FootprintProfile;
+    if (type == ChartType::FootprintCluster) fp.mode = FootprintManager::Mode::SellsBuys;
+    if (type == ChartType::FootprintProfile) fp.mode = FootprintManager::Mode::Profile;
+    if (type == ChartType::TPO) { tpo_zoom_pending_ = true; tpo_zoom_frames_ = 3; }
+    if (type == ChartType::Renko || previous == ChartType::Renko) {
+        ctx_.candle_mgr().set_follow_live(true);
+        last_visible_range_.X.Min = last_visible_range_.X.Max = 0.0;
+        last_visible_range_.Y.Min = last_visible_range_.Y.Max = 0.0;
+        renko_view_t0_ms_ = renko_view_t1_ms_ = 0;
+    }
+}
+
 void ChartWidget::update() {
     ProfileScope _ps("ChartUpd");
     if (rt_mode_) capture_realtime_archive();
@@ -363,6 +380,14 @@ void ChartWidget::update() {
         heatmap_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Heatmap, 0}, this);
         heatmap_stream_mgr_ = nullptr;
         heatmap_data_requested_ = false;
+    }
+    // Replay can replace the data context after the view was first applied.
+    // Keep the scripted footprint mode on the current manager as well.
+    if (const auto* view = edu::RecorderRuntime::instance().view()) {
+        if (view->chart_type == static_cast<int>(ChartType::FootprintCluster))
+            ctx_.footprint_mgr().mode = FootprintManager::Mode::SellsBuys;
+        else if (view->chart_type == static_cast<int>(ChartType::FootprintProfile))
+            ctx_.footprint_mgr().mode = FootprintManager::Mode::Profile;
     }
     const bool wants_footprint = chart_type_ == ChartType::FootprintCluster ||
                                  chart_type_ == ChartType::FootprintProfile;
@@ -404,6 +429,8 @@ void ChartWidget::update() {
     // explicitly instead of inheriting whatever this build's defaults are.
     if (!recorder_view_applied_ && edu::RecorderRuntime::instance().active()) {
         if (const auto* v = edu::RecorderRuntime::instance().view()) {
+            if (v->chart_type >= 0) set_chart_type(static_cast<ChartType>(v->chart_type));
+            if (v->realtime) set_rt_mode(true);
             if (v->liq_field >= 0 && liq_dense_field_ != (v->liq_field != 0)) {
                 liq_dense_field_ = v->liq_field != 0;
                 liq_shelf_cache_ts_ = -1;
@@ -2936,24 +2963,7 @@ void ChartWidget::render_controls() {
                 draw_check(d, rp.x + row_w - settings_w - 18.0f, rp.y + 8.0f, 12.0f,
                            Theme::u32(Theme::Tokens::BRAND_TX));
             if (clicked) {
-                const ChartType prev = chart_type_;
-                if (rt_mode_) set_rt_mode(false);
-                chart_type_ = static_cast<ChartType>(idx);
-                auto& fp = ctx_.footprint_mgr();
-                fp.enabled = (idx == 1 || idx == 2);
-                if (idx == 1) fp.mode = FootprintManager::Mode::SellsBuys;
-                if (idx == 2) fp.mode = FootprintManager::Mode::Profile;
-                if (idx == 5) { tpo_zoom_pending_ = true; tpo_zoom_frames_ = 3; }
-                // Renko uses a brick-index X-axis; entering or leaving it switches
-                // the X domain (time <-> brick index). Snap to the live edge and
-                // drop the stale opposite-domain axis limits so nothing renders
-                // off-screen on the first frame after the switch.
-                if (idx == 6 || prev == ChartType::Renko) {
-                    ctx_.candle_mgr().set_follow_live(true);
-                    last_visible_range_.X.Min = last_visible_range_.X.Max = 0.0;
-                    last_visible_range_.Y.Min = last_visible_range_.Y.Max = 0.0;
-                    renko_view_t0_ms_ = renko_view_t1_ms_ = 0;
-                }
+                set_chart_type(static_cast<ChartType>(idx));
                 ImGui::CloseCurrentPopup();
             }
             bool settings_clicked = false;
