@@ -71,6 +71,12 @@ int main() {
         check(flow.total_delta() == -7 && flow.total_trades() == 1, "5m reset uses market time");
         flow.advance_to(302000);
         check(flow.total_delta() == 2, "automatic reset preserves queued future trades");
+        sm.dispatch_trade_impl(key, {10, 4, 602000, true});
+        flow.advance_to(601000);
+        check(flow.total_delta() == 0, "quiet market resets at the chart clock boundary");
+        sm.dispatch_trade_impl(key, {10, 100, 400000, false});
+        flow.advance_to(602000);
+        check(flow.total_delta() == 4, "late records cannot leak across reset boundaries; future queue survives");
         flow.reset();
         check(flow.total_trades() == 0, "rewind resets accumulated flow");
         sm.dispatch_trade_impl(key, {10, 1, 500, true});

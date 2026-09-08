@@ -126,12 +126,17 @@ public:
         while (!pending_.empty() && pending_.front().timestamp_ms <= clock_ms) {
             const auto trade = pending_.front();
             pending_.pop_front();
+            if (last_reset_ms_ && trade.timestamp_ms < last_reset_ms_) continue;
             if (!asof_ms_) asof_ms_ = trade.timestamp_ms;
             if (!last_reset_ms_) last_reset_ms_ = trade.timestamp_ms;
             asof_ms_ = std::max(asof_ms_, trade.timestamp_ms);
             check_auto_reset();
             accumulate(trade);
         }
+        // Quiet markets still cross reset boundaries. Only the chart clock
+        // advances this path, so a paused display remains unchanged.
+        asof_ms_ = std::max(asof_ms_, clock_ms);
+        if (last_reset_ms_) check_auto_reset();
     }
     const auto& levels() const { return levels_; }
     bool reset_after_gap() const { return reset_after_gap_; }
