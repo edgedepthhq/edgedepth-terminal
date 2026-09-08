@@ -205,8 +205,8 @@ ChartWidget::ChartWidget(
 }
 
 ChartWidget::~ChartWidget() {
-    if (rt_subscribed_)
-        ctx_.stream_mgr().unsubscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
+    if (rt_stream_mgr_)
+        rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
     if (heatmap_stream_mgr_)
         heatmap_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Heatmap, 0}, this);
     if (footprint_stream_mgr_)
@@ -3625,7 +3625,13 @@ void ChartWidget::handle_plot_interaction() {
 
         // Detect user interaction → stop following live (a drawing drag is
         // not a pan - the layer suppresses the pan, so keep follow-live)
-        if (ImGui::GetIO().MouseWheel != 0 ||
+        const float wheel = ImGui::GetIO().MouseWheel;
+        if (rt_mode_ && wheel < 0) {
+            rt_span_ms_ = std::clamp(limits.X.Size() *
+                (ctx_.candle_mgr().follow_live() ? 1.0 + ImPlot::GetInputMap().ZoomRate : 1.0),
+                5000.0, 120000.0);
+            ctx_.candle_mgr().set_follow_live(true);
+        } else if (wheel != 0 ||
             (!draw_cap && ImGui::IsMouseDragging(ImGuiMouseButton_Left))) {
             ctx_.candle_mgr().set_follow_live(false);
         }
@@ -5351,6 +5357,15 @@ void ChartWidget::toggle_liq_census() {
 }
 
 void ChartWidget::reset_overlay_subscriptions() {
+    // The old context is still alive here. Release its callbacks before a
+    // replay context can be retired, then bind both depth and flow to the new one.
+    if (rt_stream_mgr_)
+        rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
+    rt_stream_mgr_ = nullptr;
+    rt_subscribed_ = false;
+    rt_flow_.reset();
+    on_rewind(0);
+    if (rt_mode_) set_rt_mode(true);
     // Reset subscription flags so overlays re-subscribe on the new context.
     // Called when replay starts/stops (context swap).
     liq_heatmap_subscribed_ = false;

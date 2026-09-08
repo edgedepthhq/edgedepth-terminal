@@ -76,6 +76,8 @@ private:
     bool link_rt_ = true;
     const RealtimeDOMFrame* rt_frame_ = nullptr; // Bound for this render pass only.
     void render_linked_ladder(const RealtimeDOMFrame& frame);
+    struct LinkedRow { double bid = 0, ask = 0, buy = 0, sell = 0; };
+    std::vector<LinkedRow> linked_rows_;
     bool auto_center_ = true;
     bool show_trade_columns_ = true;
     bool display_usd_ = false;

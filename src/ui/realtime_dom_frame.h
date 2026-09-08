@@ -1,10 +1,13 @@
 #pragma once
 #include "core/realtime_history.h"
 
+class TradeAtPriceAccumulator;
+
 // Chart-owned, main-thread frame. The DOM consumes the same immutable sampled
 // book and absolute screen transform after the chart renders, never a live read.
 struct RealtimeDOMFrame {
     RealtimeDepthHistory::SamplePtr book;
+    const TradeAtPriceAccumulator* flow = nullptr;
     int frame = -1;
     int64_t clock_ms = 0;
     double price_min = 0, price_max = 0;

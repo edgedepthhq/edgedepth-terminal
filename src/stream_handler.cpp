@@ -54,6 +54,23 @@ void StreamManager::unsubscribe_direct(const StreamKey& key, void* owner) {
     }
 }
 
+// Restart only an owned depth subscription. The fresh seed must still pass
+// the orderbook owner's sequence checks; ownership and callbacks are retained.
+bool StreamManager::refresh_orderbook(const StreamKey& key, int64_t now_ms) {
+    if (key.stream_type != Terminal::Stream::Orderbook || ws_ <= 0 ||
+        replay_mode_ || live_subscriptions_paused_ ||
+        (!direct_subs_.contains(key) && !orderbook_subs_.contains(key))) return false;
+    unsigned short state = 0;
+    if (emscripten_websocket_get_ready_state(ws_, &state) != EMSCRIPTEN_RESULT_SUCCESS || state != 1)
+        return false;
+    auto it = depth_refresh_ms_.find(key);
+    if (it != depth_refresh_ms_.end() && now_ms - it->second < 5000) return false;
+    depth_refresh_ms_[key] = now_ms;
+    send_unsubscribe(key);
+    send_subscribe(key);
+    return true;
+}
+
 void StreamManager::subscribe_trades(StreamKey key, StreamHandler<Terminal::Trade> handler) {
     if (trade_subs_.find(key) == trade_subs_.end()) {
         send_subscribe(key);

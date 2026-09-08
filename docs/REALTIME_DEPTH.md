@@ -41,15 +41,16 @@ from a screenshot.
 | Timeframe > RT | Trade bubbles | Show or hide trade markers. |
 | Timeframe > RT | Auto market size | Default on. Minimum is based on the 75th percentile of received quote notionals over 60 seconds. After at least 32 eligible records, the reference stays fixed until explicit recalibration or replay reset. |
 | Timeframe > RT | Recalibrate bubble sizes | Reset the automatic size reference using eligible received records. This deliberately resizes and refilters historical bubbles. |
-| DOM | Link RT | Default on. Use the matching RT chart's sampled book, display clock and exact price-to-screen mapping. Turn off for independent current depth and trade columns. |
+| DOM | Link RT | Default on. Use the matching RT chart's sampled book, display clock and exact price-to-screen mapping. Includes buys, sells, delta and CVD. Turn off for independent centering and reset controls. |
 | Timeframe > RT | Minimum trade value | With auto off, set price times quantity in quote units. For a USDT pair, the threshold is in USDT. Default manual value: 10,000. |
 | Layers > Depth settings | Fidelity | UHD/HD/SD/LD/ULD group 1/2/5/10/20 native price ticks. RT keeps the chosen grouping fixed; candle-mode zoom adaptation is separate. |
 | Layers > Depth settings | Recalibrate colors | Explicitly recalibrate brightness from the currently visible liquidity. This deliberately recolors history; normal feed updates do not. |
-| Chart navigation | Time zoom / Follow | Show five seconds to two minutes; Follow returns to the advancing edge. Price auto-fits eligible visible trades and quote steps. |
+| Chart navigation | Time zoom / Follow | Show five seconds to two minutes. Zoom out resumes Follow at the wider span; pan or zoom in detaches it. Follow also returns to the advancing edge. Price auto-fits eligible visible trades and quote steps. |
 
 Bubbles use square-root radius scaling from 4px to a 16px cap. Values at or above
 16 times the minimum share the cap. Opaque signed fills, restrained shading and
-dark borders reduce pale overlapping clusters. Newer records draw on top, with
+thicker opaque dark borders reduce pale overlapping clusters. Quote lines have
+dark backing so they remain visible over bright liquidity. Newer records draw on top, with
 all centers kept at their received timestamps and prices. Up to 20,000 trade
 records/two minutes are retained, and the newest 1,500 qualifying records in view
 are drawn. Auto size is independent of chart zoom. During warm-up the reference may
@@ -68,15 +69,30 @@ A hidden chart produces a waiting state, not a stale transform.
 Linked mode shows the same immutable sampled book as the RT chart, including
 its 100ms sampling, 512-level-per-side coverage, 15-second freshness boundary,
 live display pause and replay as-of clock. It does not use the independent
-DOM's current read buffer or cumulative trade columns. Sequence failures and
-unverified pack seeks withhold linked depth instead of showing a plausible
-restored book. The header identifies live/replay and paused state.
+DOM's current read buffer. The six columns show buys, bids, price, asks,
+sells and delta. Trade flow advances only through the chart clock. The CVD
+header is received buy quantity minus sell quantity since the latest reset;
+it resets every five minutes of market time, not wall time. It starts when RT
+is enabled and is not a backfilled exchange-session total. CVD stays in base
+quantity when the row display switches to quote value.
 
-Native observed price levels remain at their exact screen Y positions. When
-rows are too dense, only text labels are thinned; depth is not silently grouped.
-Best bid/ask lines retain their exact prices and their quantities remain shown.
-The header also prints both exact quote prices. The Qty / Quote button toggles the visible
-sizes between base quantity and price times quantity.
+At wider price ranges, nearby native ticks are summed into readable rows;
+**Rows N ticks** states the grouping. Both resting depth and traded volume use
+the same row groups. This changes the ladder display only, not historical
+heatmap fidelity or trade coordinates. Best bid/ask lines retain their exact
+prices, also printed in the header. Qty / Quote toggles row amounts between
+base quantity and the sum of each actual price times quantity.
+
+Live depth interruptions request a fresh seed after three seconds of unhealthy
+RT state, with retries no more than once every five seconds per subscription.
+Sequence validation remains strict and the missing interval stays visible.
+Replay never requests live recovery. Unverified pack seeks still withhold depth.
+The header identifies live/replay and paused state.
+
+Pausing freezes CVD and all flow columns along with the chart. Reception stays
+bounded to 20,000 pending trade records. If a long, busy pause exceeds that
+budget, resuming starts fresh totals and displays **reset after gap** instead
+of presenting incomplete accumulation as continuous CVD.
 
 For a simple vertical DOM/tape split, linked mode temporarily hides the matching
 tape so the ladder can use the full right column. Turning linking off or leaving

@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <chrono>
+#include <deque>
 
 struct TradeAtPriceLevel {
     double buy_volume  = 0.0;
@@ -80,12 +81,13 @@ public:
     TradeAtPriceAccumulator(TradeAtPriceAccumulator&&) = delete;
     TradeAtPriceAccumulator& operator=(TradeAtPriceAccumulator&&) = delete;
 
-    void init(const Terminal::Pair& pair, StreamManager& stream_mgr, double tick_size) {
+    void init(const Terminal::Pair& pair, StreamManager& stream_mgr, double tick_size, bool deferred = false) {
+        deferred_ = deferred;
         pair_ = pair;
         stream_mgr_ = &stream_mgr;
         tick_size_ = safe_tick(tick_size);
         levels_ = LevelMap(64, PriceHash(tick_size_), PriceEqual(tick_size_));
-        last_reset_ms_ = now_ms();
+        last_reset_ms_ = deferred_ ? 0 : now_ms();
 
         stream_key_ = {pair, Terminal::Stream::Trades, 0};
         StreamHandler<Terminal::Trade> handler{
@@ -111,7 +113,38 @@ public:
         return it != levels_.end() ? &it->second : nullptr;
     }
 
+    // Deferred mode consumes received records only through the chart clock.
+    // Pausing simply stops advancing it; no live totals leak into a paused DOM.
+    void advance_to(int64_t clock_ms) {
+        if (!deferred_) return;
+        if (pending_gap_) {
+            asof_ms_ = 0;
+            clear_totals();
+            pending_gap_ = false;
+            reset_after_gap_ = true;
+        }
+        while (!pending_.empty() && pending_.front().timestamp_ms <= clock_ms) {
+            const auto trade = pending_.front();
+            pending_.pop_front();
+            if (!asof_ms_) asof_ms_ = trade.timestamp_ms;
+            if (!last_reset_ms_) last_reset_ms_ = trade.timestamp_ms;
+            asof_ms_ = std::max(asof_ms_, trade.timestamp_ms);
+            check_auto_reset();
+            accumulate(trade);
+        }
+    }
+    const auto& levels() const { return levels_; }
+    bool reset_after_gap() const { return reset_after_gap_; }
     void reset() {
+        pending_.clear();
+        pending_gap_ = false;
+        asof_ms_ = 0;
+        clear_totals();
+        reset_after_gap_ = false;
+    }
+
+private:
+    void clear_totals() {
         levels_.clear();
         max_buy_volume_ = 0.0;
         max_sell_volume_ = 0.0;
@@ -119,10 +152,11 @@ public:
         total_buy_ = 0.0;
         total_sell_ = 0.0;
         total_trades_ = 0;
-        last_reset_ms_ = now_ms();
+        last_reset_ms_ = deferred_ ? asof_ms_ : now_ms();
         revision_++;
     }
 
+public:
     // ── Reset mode configuration ────────────────────────────────────────────
 
     void set_reset_mode(AccumulatorResetMode mode, int64_t interval_sec = ResetPresets::FIVE_MIN) {
@@ -138,18 +172,18 @@ public:
     void check_auto_reset() {
         if (reset_mode_ == AccumulatorResetMode::Manual) return;
 
-        int64_t now = now_ms();
+        int64_t now = deferred_ ? asof_ms_ : now_ms();
 
         if (reset_mode_ == AccumulatorResetMode::Periodic) {
             if (reset_interval_ms_ > 0 && (now - last_reset_ms_) >= reset_interval_ms_) {
-                reset();
+                clear_totals();
             }
         } else if (reset_mode_ == AccumulatorResetMode::Session) {
             // Reset at midnight UTC - check if we've crossed a day boundary
             int64_t last_day = last_reset_ms_ / 86400000LL;
             int64_t curr_day = now / 86400000LL;
             if (curr_day > last_day) {
-                reset();
+                clear_totals();
             }
         }
     }
@@ -225,7 +259,29 @@ private:
         return std::round(price / tick_size_) * tick_size_;
     }
 
+    bool deferred_ = false, reset_after_gap_ = false;
+    int64_t asof_ms_ = 0;
+    std::deque<Terminal::Trade> pending_;
+
     void on_trade(const Terminal::Trade& trade) {
+        if (!(trade.price > 0) || !(trade.qty > 0) || trade.timestamp_ms <= 0 ||
+            !std::isfinite(trade.price) || !std::isfinite(trade.qty)) return;
+        if (deferred_) {
+            // Bound the pause backlog without silently presenting partial CVD.
+            // The next advance starts fresh if reception exceeded this budget.
+            if (pending_.size() >= 20000) {
+                pending_.clear();
+                pending_gap_ = true;
+            }
+            auto it = std::upper_bound(pending_.begin(), pending_.end(), trade.timestamp_ms,
+                [](int64_t ts, const Terminal::Trade& t) { return ts < t.timestamp_ms; });
+            pending_.insert(it, trade);
+            return;
+        }
+        accumulate(trade);
+    }
+    bool pending_gap_ = false;
+    void accumulate(const Terminal::Trade& trade) {
         double rounded = round_to_tick(trade.price);
         auto& level = levels_[rounded];
 

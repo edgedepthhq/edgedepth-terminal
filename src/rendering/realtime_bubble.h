@@ -21,6 +21,6 @@ inline void draw(ImDrawList& dl, ImVec2 center, float r, ImVec4 signed_color, Im
     ImGui::ShadeVertsLinearColorGradientKeepAlpha(&dl, first, dl.VtxBuffer.Size,
         ImVec2(center.x - r, center.y - r), ImVec2(center.x + r, center.y + r),
         ImGui::GetColorU32(signed_color), ImGui::GetColorU32(shade));
-    dl.AddCircle(center, r, border, 24, 0.75f);
+    dl.AddCircle(center, r, border, 24, 1.75f);
 }
 }

@@ -60,6 +60,7 @@ public:
 
     void subscribe_direct(const StreamKey& key, void* owner);
     void unsubscribe_direct(const StreamKey& key, void* owner);
+    bool refresh_orderbook(const StreamKey& key, int64_t now_ms);
 
     void subscribe_trades(StreamKey key, StreamHandler<Terminal::Trade> handler);
     void subscribe_candles(const StreamKey& key, StreamHandler<Terminal::Candle> handler);
@@ -152,6 +153,7 @@ public:
     void resume_live_subscriptions();
 
 private:
+    std::map<StreamKey, int64_t> depth_refresh_ms_;
     // The keys this client currently holds a SERVER-SIDE subscription for, each
     // visited exactly once. Pause, resume and reconnect all walk the same set, so
     // a stream can no longer be live on the box but missing from one of them.

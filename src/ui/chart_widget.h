@@ -1,5 +1,6 @@
 #pragma once
 #include "ui/realtime_dom_frame.h"
+#include "core/trade_at_price.h"
 #include "core/realtime_history.h"
 
 #include <implot.h>
@@ -273,6 +274,8 @@ private:
     // (app_shell render_tf_menu). rt_was_on_ edge-detects the toggle so RT
     // re-arms follow-live exactly ONCE on the rising edge (not every frame).
     RealtimeDOMFrame rt_dom_frame_;
+    std::unique_ptr<TradeAtPriceAccumulator> rt_flow_;
+    int64_t rt_unhealthy_since_ms_ = 0;
     bool    rt_mode_    = false;
     bool    rt_was_on_  = false;
     bool rt_candles_ = false, rt_bubbles_ = true, rt_book_valid_ = false;
@@ -281,6 +284,7 @@ private:
     std::deque<Terminal::Trade> rt_paused_trades_;
     const std::deque<Terminal::Trade>& realtime_trades() const;
     bool rt_subscribed_ = false;
+    StreamManager* rt_stream_mgr_ = nullptr;
     bool rt_auto_bubbles_ = true;
     RealtimeBubbleScale rt_bubble_scale_;
     float rt_min_notional_ = 10000.0f;

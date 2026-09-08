@@ -1,5 +1,6 @@
 #include "ui/chart_widget.h"
 #include "core/candle_manager.h"
+#include "core/trade_at_price.h"
 #include "core/orderbook_manager.h"
 #include "core/entitlements.h"
 #include "replayer/replay_manager.h"
@@ -24,13 +25,21 @@ void ChartWidget::set_rt_mode(bool on) {
         rt_paused_ = false;
         heatmap_enabled_ = true;
         rt_span_ms_ = 60000;
+        rt_unhealthy_since_ms_ = 0;
+        if (!rt_flow_) {
+            rt_flow_ = std::make_unique<TradeAtPriceAccumulator>();
+            rt_flow_->init(pair_, ctx_.stream_mgr(), tick_size_, true);
+        }
         ctx_.candle_mgr().set_follow_live(true);
         if (!rt_subscribed_) {
-            ctx_.stream_mgr().subscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
+            rt_stream_mgr_ = &ctx_.stream_mgr();
+            rt_stream_mgr_->subscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
             rt_subscribed_ = true;
         }
     } else if (rt_subscribed_) {
-        ctx_.stream_mgr().unsubscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
+        rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
+        rt_stream_mgr_ = nullptr;
+        rt_flow_.reset();
         rt_subscribed_ = false;
     }
 }
@@ -66,6 +75,8 @@ void ChartWidget::on_rewind(int64_t) {
     // The replay owner restores/replays depth separately. Never keep future
     // samples or GPU cells from the preceding traversal.
     rt_dom_frame_ = {};
+    if (rt_flow_) rt_flow_->reset();
+    rt_unhealthy_since_ms_ = 0;
     rt_renderer_.reset();
     rt_latest_.reset();
     rt_pending_.clear();
@@ -93,6 +104,10 @@ void ChartWidget::update_realtime() {
         ? ctx_.replay_mgr().interpolated_time_ms()
         : std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
+    if (rt_flow_) {
+        rt_flow_->set_tick_size(tick_size_);
+        rt_flow_->advance_to(clock);
+    }
     rt_renderer_->set_observation_clock_ms(clock);
     rt_book_valid_ = ctx_.ob_mgr().copy_realtime_since(pair_, rt_serial_, rt_pending_);
     // Samples past the as-of clock stay pending.
@@ -114,6 +129,13 @@ void ChartWidget::update_realtime() {
         rt_renderer_->invalidate_observation(rt_latest_->timestamp_ms);
         if (!rt_samples_.empty() && rt_samples_.back() == rt_latest_) rt_samples_.pop_back();
         rt_latest_.reset();
+    }
+    const bool healthy = rt_book_valid_ && rt_latest_ && clock - rt_latest_->timestamp_ms <= 15000;
+    if (healthy || ctx_.replay_mgr().is_active()) rt_unhealthy_since_ms_ = 0;
+    else {
+        if (!rt_unhealthy_since_ms_) rt_unhealthy_since_ms_ = clock;
+        if (clock - rt_unhealthy_since_ms_ >= 3000)
+            ctx_.stream_mgr().refresh_orderbook({pair_, Terminal::Stream::Orderbook, 0}, clock);
     }
     rt_renderer_->set_observation_hold(rt_book_valid_ && rt_latest_ &&
         clock - rt_latest_->timestamp_ms <= 15000 ? clock : 0);
@@ -158,8 +180,11 @@ void ChartWidget::render_realtime() {
                 const ImVec2 b = ImPlot::PlotToPixels(double(sample->timestamp_ms), before);
                 const ImVec2 c = ImPlot::PlotToPixels(double(sample->timestamp_ms), after);
                 const ImU32 color = Theme::u32(side ? Theme::Tokens::DOWN : Theme::Tokens::UP);
-                dl->AddLine(a, b, color, 1.25f);
-                dl->AddLine(b, c, color, 1.25f);
+                const ImU32 halo = Theme::u32(Theme::Tokens::BASE);
+                dl->AddLine(a, b, halo, 3.5f);
+                dl->AddLine(b, c, halo, 3.5f);
+                dl->AddLine(a, b, color, 1.5f);
+                dl->AddLine(b, c, color, 1.5f);
             }
         }
         previous_book = sample.get();
@@ -214,7 +239,7 @@ void ChartWidget::render_realtime() {
         RealtimeBubble::draw(*dl, ImPlot::PlotToPixels(double(trade.timestamp_ms), trade.price),
             RealtimeBubble::radius(trade.price * trade.qty, minimum),
             trade.is_buy ? Theme::Tokens::UP : Theme::Tokens::DOWN,
-            Theme::u32(Theme::Tokens::BASE, 0.8f));
+            Theme::u32(Theme::Tokens::BASE));
     }
     const bool fresh = rt_book_valid_ && rt_latest_ &&
         rt_latest_->timestamp_ms <= rt_clock_ms_ && rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000;
@@ -227,6 +252,7 @@ void ChartWidget::render_realtime() {
     rt_dom_frame_.bottom = rt_dom_frame_.top + ImPlot::GetPlotSize().y;
     rt_dom_frame_.synchronized = rt_book_valid_;
     rt_dom_frame_.replay = ctx_.replay_mgr().is_active();
+    rt_dom_frame_.flow = rt_flow_.get();
     rt_dom_frame_.paused = rt_paused_ || ctx_.replay_mgr().is_paused();
     if (fresh && limits.X.Max > rt_clock_ms_) {
         const auto& book = *rt_latest_;
@@ -269,7 +295,11 @@ void ChartWidget::render_realtime() {
             Theme::u32(Theme::Tokens::TX2, 0.45f));
         dl->AddText(ImVec2(start + 6, note_y + 18), Theme::u32(Theme::Tokens::TX2), "Observed depth starts here");
     }
-    dl->AddText(ImVec2(pos.x + 12, note_y), Theme::u32(Theme::Tokens::TX2), note);
+    const ImVec2 note_size = ImGui::CalcTextSize(note);
+    dl->AddRectFilled(ImVec2(pos.x + 8, note_y - 3),
+        ImVec2(pos.x + 16 + note_size.x, note_y + note_size.y + 3),
+        Theme::u32(Theme::Tokens::BASE, 0.9f), 3);
+    dl->AddText(ImVec2(pos.x + 12, note_y), Theme::u32(Theme::Tokens::TX1), note);
     ImPlot::PopPlotClipRect();
 }
 
