@@ -72,6 +72,19 @@ int test_archive_capture() {
     const int depths=EM_ASM_INT({return Module['rtArchive'].state(UTF8ToString($0)).records.filter(r=>r[0]===1).length;},archive.id_.c_str());
     expect(depths==200 && archive.dropped==0,"catch-up drains multiple bounded batches without depth loss");
     expect(archive.prepare_replay(50000),"replay resumes once pending observations have drained");
+    std::deque<Terminal::Trade> displayed{{100,1,1000,true},{100,2,1001,true}};
+    std::deque<Terminal::Trade> recent;
+    for(size_t i=0;i<RealtimeTradeHistory::max_trades;++i)
+        recent.push_back({100,1,int64_t(2000+i),true});
+    expect(!refresh_realtime_trade_tail(displayed,recent,1000,30000) &&
+        displayed.size()==2 && displayed.back().timestamp_ms==1001,
+        "rolling ring exhaustion cannot erase previously displayed tail");
+    displayed={{100,1,22000,true}};
+    recent={{100,2,22001,true},{100,2,22001,true},{100,3,22002,false}};
+    expect(refresh_realtime_trade_tail(displayed,recent,22000,22001) && displayed.size()==3,
+        "fresh snapshot joins identical records without leaking future trades");
+    expect(refresh_realtime_trade_tail(displayed,recent,22000,22001) && displayed.size()==3,
+        "repeated tail refresh preserves multiplicity without duplication");
     const auto generation=archive.generation;
     books.clear_all();seed.set_timestamp_ms(3001);seed.set_last_update_id(300);
     books.apply_orderbook_snapshot_from_pb(pair,seed);
@@ -80,6 +93,13 @@ int test_archive_capture() {
     const auto before_correction=archive.generation;
     archive.update(2000);
     expect(archive.serial_==1 && archive.generation==before_correction,"ordinary replay clock corrections do not erase recorded history");
+    archive.append_trade({100,1,2000,true});
+    EM_ASM({Module['archiveBlocked']=true;});
+    expect(!archive.query(1000,2000,2000,100,1) && !archive.batch_.empty(),
+        "query waits for pending capture instead of claiming an incomplete cutoff");
+    EM_ASM({Module['archiveBlocked']=false;});
+    expect(!archive.query(1000,2000,2000,100,1) && archive.batch_.empty(),
+        "query flushes native records before handing its cutoff to the worker");
     expect(!archive.query(1000,2000,2000,100,1),"rejected query reports failure so navigation can retry");
     return failures;
 }

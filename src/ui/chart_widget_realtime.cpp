@@ -461,7 +461,10 @@ void ChartWidget::update_realtime_archive_view() {
     const bool displayed_grouped = rt_archive_->view_trades_grouped;
     if (rt_archive_->take_view(received_samples, received_trades, received_step)) {
         // Navigation may have changed while a worker query was in flight.
-        if (step != rt_query_step_ || rt_query_multiplier_ != rt_bucket_multiplier_ || (!follow && std::abs(aligned-rt_query_from_)>step)) {
+        const bool tail_already_retired = realtime_live_edge() &&
+            recent_trades.size() >= RealtimeTradeHistory::max_trades &&
+            recent_trades.front().timestamp_ms > rt_query_to_;
+        if (tail_already_retired || step != rt_query_step_ || rt_query_multiplier_ != rt_bucket_multiplier_ || (!follow && std::abs(aligned-rt_query_from_)>step)) {
             rt_archive_->view_trade_count = displayed_count;
             rt_archive_->view_trades_grouped = displayed_grouped;
             rt_query_from_ = 0;
@@ -471,21 +474,24 @@ void ChartWidget::update_realtime_archive_view() {
             rt_archive_trades_.swap(received_trades);
             rt_history_view_ = true;
             rt_loaded_to_ = rt_query_to_; rt_query_step_ = received_step;
+            // Depth delivered while the query ran has already advanced rt_serial_.
+            // Preserve that tail before rebuilding the GPU view.
+            if (realtime_live_edge()) for (const auto& sample : rt_samples_)
+                if (sample->timestamp_ms > rt_loaded_to_ && sample->timestamp_ms <= rt_clock_ms_)
+                    rt_archive_samples_.push_back(sample);
+            while (rt_archive_samples_.size() > 4096) rt_archive_samples_.pop_front();
             rebuild_realtime_view();
         }
     }
     // Join the query's as-of snapshot to the recent source by a strict time
     // boundary. Equal timestamps stay together in the archive snapshot; late
     // records at/before its cutoff appear on the next query, never deduplicated.
-    if (realtime_live_edge() && rt_loaded_to_ > 0) {
-        while (!rt_archive_trades_.empty() && rt_archive_trades_.back().timestamp_ms > rt_loaded_to_)
-            rt_archive_trades_.pop_back();
-        for (const auto& trade : recent_trades)
-            if (trade.timestamp_ms > rt_loaded_to_ && trade.timestamp_ms <= rt_clock_ms_)
-                rt_archive_trades_.push_back(trade);
-    }
+    bool tail_ready = true;
+    if (realtime_live_edge() && rt_loaded_to_ > 0)
+        tail_ready = refresh_realtime_trade_tail(rt_archive_trades_, recent_trades,
+                                                rt_loaded_to_, rt_clock_ms_);
     const double now = emscripten_get_now();
-    if (!rt_archive_->loading && (rt_query_from_==0 || step!=rt_query_step_ || rt_query_multiplier_!=rt_bucket_multiplier_ ||
+    if (!rt_archive_->loading && (!tail_ready || rt_query_from_==0 || step!=rt_query_step_ || rt_query_multiplier_!=rt_bucket_multiplier_ ||
         (!follow && std::abs(aligned-rt_query_from_)>step) || (!rt_paused_ && to>rt_query_to_ && now-rt_query_at_>5000))) {
         if (rt_archive_->query(aligned,to,rt_clock_ms_,step,tick_size_*rt_bucket_multiplier_)) {
             rt_query_from_=aligned;rt_query_to_=to;rt_query_step_=step;rt_query_at_=now;rt_query_multiplier_=rt_bucket_multiplier_;

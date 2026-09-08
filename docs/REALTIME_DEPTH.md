@@ -340,3 +340,23 @@ during reconstruction. These changes are local and still require deployment.
 TUTUSDT pack charts default to LD (10 ticks per RT row); other markets retain
 SD (5 ticks). Depth fidelity remains adjustable. A wider price range still
 reduces row height. The current-price tag stays hidden while replay is loading.
+
+## RT archive tail continuity (2026-09-09, local)
+
+The chart no longer replaces its displayed live tail from a 20,000-trade ring
+that has already passed the archive snapshot cutoff. It retains the current
+view and requests a fresh snapshot immediately instead of waiting five seconds.
+A response whose cutoff is already behind the recent ring is rejected without
+clearing the display. This bounds memory without erasing previously shown trades.
+Queries flush pending native capture before requesting a worker snapshot, and
+view replacement preserves depth observations delivered during the query.
+The archive and recent-ring budgets are unchanged. Very slow storage can delay
+new displayed tail data until a complete replacement is available.
+
+Grouped archives and their raw tails always use the same aggregation, even
+immediately after refresh when their record count falls below the marker limit.
+Grouped quantities include all volume consistently on both sides of the seam.
+
+Both isolated Release builds and focused RT/transport regressions pass. Tests
+cover ring exhaustion, duplicate multiplicity, replay cutoff and capture flush
+ordering. Local only; hosted acceptance still requires deployment.

@@ -21,7 +21,9 @@ struct RealtimeTradeView {
             if (count<capacity) { records[count]=t;low[count]=high[count]=t.price;++count; }
             ++source_count;
         }
-        if (source_count<=capacity) return;
+        // A grouped archive plus its raw live tail must stay grouped even just
+        // after refresh, when fewer than capacity records happen to be present.
+        if (source_count<=capacity && !source_grouped) return;
         grouped = true;
         records.fill({});low.fill(0);high.fill(0);
         const int64_t step = std::max(int64_t(100), ((to-from+74899)/74900)*100);
@@ -29,7 +31,6 @@ struct RealtimeTradeView {
         for (const auto& t : trades) {
             if (t.timestamp_ms < from) continue;
             if (t.timestamp_ms > to) break;
-            if (!source_grouped && t.price*t.qty < minimum) continue;
             const size_t i = size_t(t.timestamp_ms/step-origin)*2 + (t.is_buy?1:0);
             if (i>=capacity) continue;
             auto& b=records[i];

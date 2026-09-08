@@ -25,6 +25,10 @@ int main() {
     expect(view.grouped && view.count==1 && qty==40000,"dense bubble view preserves all loaded volume instead of deleting oldest markers");
     observed.clear();expect(resets==1,"archive observer follows source resets");
     for(int i=0;i<100;++i){execution.timestamp_ms=1000+i;observed.append(execution);}
+    view.build(observed.trades(),0,2000,500,true);
+    double grouped_qty=0;for(size_t i=0;i<view.count;++i)grouped_qty+=view.records[i].qty;
+    expect(view.grouped && view.count==1 && grouped_qty==200,
+        "grouped snapshot and raw tail stay aggregated below the marker limit");
     view.build(observed.trades(),0,2000,1);
     expect(!view.grouped && view.count==100 && view.records[0].timestamp_ms==1000,"detail view restores individual records and original timestamps");
 

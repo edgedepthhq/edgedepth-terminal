@@ -105,6 +105,21 @@ private:
     std::function<void(const Terminal::Trade*)> observer_;
 };
 
+// Replace a snapshot's live tail only when the recent ring still covers the
+// snapshot boundary. Otherwise retain the displayed tail until a fresh query
+// arrives; rebuilding from a truncated ring would erase already shown trades.
+inline bool refresh_realtime_trade_tail(std::deque<Terminal::Trade>& displayed,
+    const std::deque<Terminal::Trade>& recent, int64_t cutoff, int64_t clock) {
+    if (recent.size() >= RealtimeTradeHistory::max_trades &&
+        recent.front().timestamp_ms > cutoff) return false;
+    while (!displayed.empty() && displayed.back().timestamp_ms > cutoff)
+        displayed.pop_back();
+    for (const auto& trade : recent)
+        if (trade.timestamp_ms > cutoff && trade.timestamp_ms <= clock)
+            displayed.push_back(trade);
+    return true;
+}
+
 // A bounded, as-of market scale shared by live, paused and replay rendering.
 // The viewport never enters these statistics. Warm-up can settle once a useful
 // sample exists; thereafter explicit recalibration is required to resize history.

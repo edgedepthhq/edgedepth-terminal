@@ -134,6 +134,9 @@ void RealtimeArchive::update(int64_t clock) {
 void RealtimeArchive::cancel_view() { archive_cancel(id_.c_str()); poll(); }
 bool RealtimeArchive::query(int64_t from,int64_t to,int64_t cutoff,int64_t step,double tick) {
     if(loading||!error.empty())return false;
+    // The worker must receive native capture through this query's cutoff before
+    // taking its snapshot, or the chart would claim an uncaptured seam as loaded.
+    if (!batch_.empty() && !make_room(131072)) return false;
     const bool accepted = archive_query(id_.c_str(),double(from),double(to),double(cutoff),double(step),tick) > 0;
     poll(); return accepted;
 }
