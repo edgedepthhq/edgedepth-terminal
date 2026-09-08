@@ -209,14 +209,16 @@ void OrderbookManager::apply_book_ticker_from_pb(
     OrderbookKey key{pair.exchange, pair.symbol};
     auto& db = get_or_create(key);
     std::lock_guard<std::mutex> lock(db.write_mutex);
-    auto& orderbook = db.write_buf;
-
-    if (!orderbook.is_synchronized()) {
-        return;
-    }
-    // Top-of-book quotes are not depth deltas. Inserting them into the book
-    // can leave ghost levels and falsely advance the full-depth clock.
-    (void)ticker_pb;
+    const auto epoch = realtime_epoch_.load();
+    if (db.quote_epoch != epoch) db.quotes.clear();
+    db.quote_epoch = epoch;
+    if (!realtime_transport_open_.load()) return;
+    Terminal::BookTicker q{};
+    q.best_bid = ticker_pb.best_bid(); q.best_ask = ticker_pb.best_ask();
+    q.best_bid_qty = ticker_pb.best_bid_qty(); q.best_ask_qty = ticker_pb.best_ask_qty();
+    q.timestamp_ms = ticker_pb.timestamp_ms(); q.update_id = ticker_pb.update_id();
+    q.event_time = ticker_pb.event_time();
+    db.quotes.append(q);
 
 }
 
@@ -289,4 +291,13 @@ void OrderbookManager::prune_orderbook(Terminal::Orderbook& orderbook) {
         auto& bids_data = orderbook.bids.data();
         bids_data.erase(bids_data.begin() + MAX_LEVELS, bids_data.end());
     }
+}
+
+Terminal::BookTicker OrderbookManager::realtime_quote(const Terminal::Pair& pair, int64_t clock) const {
+    const auto it = orderbooks_.find({pair.exchange, pair.symbol});
+    if (it == orderbooks_.end()) return {};
+    const auto& db = it->second;
+    std::lock_guard lock(db.write_mutex);
+    if (!realtime_transport_open_.load() || db.quote_epoch != realtime_epoch_.load()) return {};
+    return db.quotes.at(clock);
 }

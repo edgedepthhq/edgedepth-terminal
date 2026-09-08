@@ -114,6 +114,20 @@ int main() {
     manager.swap_buffers();
     expect(manager.get_orderbook(pair)->timestamp_ms == 10017 &&
         manager.get_orderbook(pair)->bids.begin()->first == 100, "ticker cannot rewrite depth state or clock");
+    quote.set_timestamp_ms(10020); quote.set_best_ask(106); quote.set_best_ask_qty(2);
+    manager.apply_book_ticker_from_pb(pair, quote);
+    expect(manager.realtime_quote(pair, 10019).timestamp_ms == 0, "native BBO excludes future evidence");
+    expect(manager.realtime_quote(pair, 10020).best_bid == 105, "native BBO retained independently");
+    quote.set_timestamp_ms(10030); quote.set_best_bid(105.5);
+    manager.apply_book_ticker_from_pb(pair, quote);
+    expect(manager.realtime_quote(pair, 10025).best_bid == 105, "replay cutoff selects prior native BBO");
+    expect(manager.realtime_quote(pair, 25031).timestamp_ms == 0, "stale native BBO withheld");
+    expect(manager.realtime_quote({"binancef", "other"}, 10025).timestamp_ms == 0, "native quote is symbol-specific");
+    const auto frozen_quote = manager.realtime_quote(pair, 10025);
+    quote.set_timestamp_ms(10040); quote.set_best_bid(107); // crossed, rejected
+    manager.apply_book_ticker_from_pb(pair, quote);
+    expect(manager.realtime_quote(pair, 10040).best_bid == 105.5, "crossed native quote rejected");
+    expect(frozen_quote.best_bid == 105, "published quote remains immutable during pause");
     pb::BookUpdate delta;
     delta.set_timestamp_ms(10117); delta.set_first_update_id(99);
     delta.set_last_update_id(102); delta.set_previous_update_id(98);
@@ -128,6 +142,7 @@ int main() {
     expect(manager.copy_realtime_since(pair, 0, samples) && samples.back()->segment_start, "production reseed restores RT");
     manager.set_realtime_transport_open(false);
     manager.set_realtime_transport_open(true);
+    expect(manager.realtime_quote(pair, 10040).timestamp_ms == 0, "reconnect cannot revive old native BBO");
     seed.set_timestamp_ms(10417);
     manager.apply_orderbook_snapshot_from_pb(pair, seed);
     expect(manager.copy_realtime_since(pair, 0, samples) && samples.back()->segment_start,

@@ -7,12 +7,17 @@ class TradeAtPriceAccumulator;
 // book and absolute screen transform after the chart renders, never a live read.
 struct RealtimeDOMFrame {
     RealtimeDepthHistory::SamplePtr book;
+    Terminal::BookTicker quote{};
     const TradeAtPriceAccumulator* flow = nullptr;
     int frame = -1;
     int64_t clock_ms = 0;
     double price_min = 0, price_max = 0;
     float top = 0, bottom = 0;
     bool synchronized = false, paused = false, replay = false;
+
+    bool native_quote() const { return quote.timestamp_ms > 0; }
+    double bid() const { return native_quote() ? quote.best_bid : book->bid; }
+    double ask() const { return native_quote() ? quote.best_ask : book->ask; }
 
     bool projected(int current_frame) const {
         return frame == current_frame && bottom > top && price_max > price_min;

@@ -1,3 +1,4 @@
+#include "types/frame_profiler.h"
 #include "ui/dom_widget.h"
 #include "rendering/theme.h"
 #include "imgui.h"
@@ -832,6 +833,7 @@ void linked_quantity(double value, bool signed_value, char* out, size_t capacity
 }
 
 void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
+    ProfileScope profile("RT DOM");
     if (!frame.projected(ImGui::GetFrameCount())) {
         ImGui::TextWrapped("RT chart is not visible. Show it to align depth.");
         return;
@@ -861,15 +863,17 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
     }
     const auto& book = *frame.book;
     char bid[24], ask[24];
-    snprintf(bid, sizeof(bid), fmt_.price_fmt, book.bid);
-    snprintf(ask, sizeof(ask), fmt_.price_fmt, book.ask);
+    snprintf(bid, sizeof(bid), fmt_.price_fmt, frame.bid());
+    snprintf(ask, sizeof(ask), fmt_.price_fmt, frame.ask());
     ImGui::TextColored(Theme::Tokens::UP, "Bid %s", bid);
     ImGui::SameLine();
     ImGui::TextColored(Theme::Tokens::DOWN, "Ask %s", ask);
     char spread[24];
-    snprintf(spread, sizeof(spread), fmt_.price_fmt, book.ask - book.bid);
-    ImGui::Text("Spread %s / ticks %.0f", spread, (book.ask - book.bid) / tick_size_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Ask minus bid from the same synchronized depth sample. Exact quote prices use the chart scale, even when the spread is smaller than one pixel. Grouped PRICE labels are row centers, not executable quotes.");
+    snprintf(spread, sizeof(spread), fmt_.price_fmt, frame.ask() - frame.bid());
+    ImGui::Text("Spread %s / ticks %.0f", spread, (frame.ask() - frame.bid()) / tick_size_);
+    if (ImGui::IsItemHovered()) Theme::tooltip("Ask minus bid from the selected BBO observation. Native quotes never replace sampled depth quantities. Exact quote prices use the chart scale, even when the spread is smaller than one pixel. Grouped PRICE labels are row centers, not executable quotes.");
+    ImGui::TextDisabled("%s BBO / age %.1fs", frame.native_quote() ? "Native" : "Depth",
+        double(frame.clock_ms - (frame.native_quote() ? frame.quote.timestamp_ms : book.timestamp_ms)) / 1000.0);
     ImGui::TextDisabled("Sample age %.1fs / 100ms bins",
         double(frame.clock_ms - book.timestamp_ms) / 1000.0);
     if (ImGui::IsItemHovered()) Theme::tooltip("Age is measured at the chart clock and freezes on pause. Sampling and the 512-level-per-side retained book are display limits, not a complete exchange event record. Independent ticker and trade arrivals do not replace this sampled book.");
@@ -931,12 +935,20 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
         const double price = first + double(i) * step;
         const float y = frame.price_y(price);
         if (y < top || y > bottom) continue;
-        const auto& row = linked_rows_[i];
-        const double values[] = {row.buy, row.bid, price, row.ask, row.sell, row.buy - row.sell};
         if (row_index((book.bid + book.ask) * 0.5) == int64_t(i))
             dl->AddRectFilled(ImVec2(org.x, y - row_h * 0.5f), ImVec2(org.x + avail.x, y + row_h * 0.5f), Theme::u32(Theme::Tokens::ELEV));
         dl->AddLine(ImVec2(org.x, y + row_h * 0.5f), ImVec2(org.x + avail.x, y + row_h * 0.5f), Theme::u32(Theme::Tokens::BD1, 0.5f));
-        for (int c = 0; c < 6; ++c) {
+    }
+    const float bid_y = frame.price_y(frame.bid()), ask_y = frame.price_y(frame.ask());
+    dl->AddRectFilled(ImVec2(edges[2], ask_y), ImVec2(edges[3], bid_y), Theme::u32(Theme::Tokens::TX2, 0.07f));
+    for (int c = 0; c < 6; ++c) {
+        dl->PushClipRect(ImVec2(edges[c]+1, top), ImVec2(edges[c+1]-1, bottom), true);
+        for (size_t i = 0; i < count; ++i) {
+            const double price = first + double(i) * step;
+            const float y = frame.price_y(price);
+            if (y < top || y > bottom) continue;
+            const auto& row = linked_rows_[i];
+            const double values[] = {row.buy, row.bid, price, row.ask, row.sell, row.buy - row.sell};
             if (c != 2 && values[c] == 0) continue;
             const auto color = c < 2 || (c == 5 && values[c] >= 0) ? Theme::Tokens::UP : Theme::Tokens::DOWN;
             const double maximum = c == 1 || c == 3 ? max_depth : max_flow;
@@ -946,7 +958,6 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
                 // Values have already been converted using each actual trade/level price.
                 linked_quantity(values[c], c == 5, label, sizeof(label), edges[c+1] - edges[c] - 6);
             }
-            dl->PushClipRect(ImVec2(edges[c]+1, top), ImVec2(edges[c+1]-1, bottom), true);
             if (c != 2 && maximum > 0) {
                 const float width = (edges[c+1] - edges[c] - 3) * float(std::abs(values[c]) / maximum);
                 const bool leftward = c < 2;
@@ -955,12 +966,16 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
             }
             const float x = c == 2 ? (edges[c]+edges[c+1]-ImGui::CalcTextSize(label).x)*0.5f : edges[c+1]-ImGui::CalcTextSize(label).x-3;
             dl->AddText(ImVec2(x, y - text_h*0.5f), Theme::u32(c == 2 || c == 1 || c == 3 ? Theme::Tokens::TX1 : color), label);
-            dl->PopClipRect();
         }
+        dl->PopClipRect();
     }
     // Exact-price markers stay in the gutter, never crossing grouped-row text.
     for (int side = 0; side < 2; ++side) {
-        const float y = frame.price_y(side ? book.ask : book.bid);
+        const float y = frame.price_y(side ? frame.ask() : frame.bid());
+        // PRICE column notches align with chart BBO without crossing its text.
+        const auto color = Theme::u32(side ? Theme::Tokens::DOWN : Theme::Tokens::UP);
+        const float notch_x = side ? edges[3] - 4 : edges[2];
+        dl->AddLine(ImVec2(notch_x, y), ImVec2(notch_x + 3, y), color, 1.0f);
         // Separate horizontal halves preserve both colors at subpixel spreads.
         const float x = org.x + (side ? 4.5f : 0.5f);
         dl->AddLine(ImVec2(x, y), ImVec2(x + 3.0f, y),

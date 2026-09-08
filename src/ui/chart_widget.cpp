@@ -300,8 +300,10 @@ ChartWidget::ChartWidget(
 }
 
 ChartWidget::~ChartWidget() {
-    if (rt_stream_mgr_)
+    if (rt_stream_mgr_) {
         rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
+        rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Ticker, 0}, this);
+    }
     if (heatmap_stream_mgr_)
         heatmap_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Heatmap, 0}, this);
     if (footprint_stream_mgr_)
@@ -1140,6 +1142,10 @@ void ChartWidget::render_chart() {
                 rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000 && visible_x_max >= rt_clock_ms_) {
                 y_min = std::min(y_min, rt_latest_->bid);
                 y_max = std::max(y_max, rt_latest_->ask);
+            }
+            if (rt_quote_.timestamp_ms > 0 && visible_x_min <= rt_clock_ms_ && visible_x_max >= rt_clock_ms_) {
+                y_min = std::min(y_min, rt_quote_.best_bid);
+                y_max = std::max(y_max, rt_quote_.best_ask);
             }
             // Empty navigation keeps the last RT price frame; historical
             // candle extremes are not observations in this view.
@@ -5360,8 +5366,10 @@ void ChartWidget::toggle_liq_census() {
 void ChartWidget::reset_overlay_subscriptions() {
     // The old context is still alive here. Release its callbacks before a
     // replay context can be retired, then bind both depth and flow to the new one.
-    if (rt_stream_mgr_)
+    if (rt_stream_mgr_) {
         rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
+        rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Ticker, 0}, this);
+    }
     rt_stream_mgr_ = nullptr;
     rt_subscribed_ = false;
     rt_flow_.reset();

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <array>
 #include "rendering/realtime_bubble.h"
+#include "types/frame_profiler.h"
 
 void ChartWidget::set_rt_mode(bool on) {
     if (on && Entitlements::hosted() && !Entitlements::is_pro() &&
@@ -34,10 +35,12 @@ void ChartWidget::set_rt_mode(bool on) {
         if (!rt_subscribed_) {
             rt_stream_mgr_ = &ctx_.stream_mgr();
             rt_stream_mgr_->subscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
+            rt_stream_mgr_->subscribe_direct({pair_, Terminal::Stream::Ticker, 0}, this);
             rt_subscribed_ = true;
         }
     } else if (rt_subscribed_) {
         rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
+        rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Ticker, 0}, this);
         rt_stream_mgr_ = nullptr;
         rt_flow_.reset();
         rt_subscribed_ = false;
@@ -53,6 +56,8 @@ void ChartWidget::render_realtime_settings() {
     ImGui::Checkbox("Trade-price line", &rt_trade_line_);
     chart_type_ = rt_candles_ ? ChartType::Candles : ChartType::Line;
     ImGui::Checkbox("Trade bubbles", &rt_bubbles_);
+    ImGui::Checkbox("Extend current depth", &rt_extend_depth_);
+    if (ImGui::IsItemHovered()) Theme::tooltip("Projects the last synchronized sampled book into the right margin. This is a held current book, not future orders or recorded history. Turn off to leave the margin clear.");
     ImGui::Checkbox("Auto market size", &rt_auto_bubbles_);
     if (ImGui::IsItemHovered()) Theme::tooltip("Uses the 75th percentile of received trade values over the last 60 seconds. Settles after 32 records and stays fixed until Recalibrate bubble sizes; independent of zoom. One bubble per record, with no inferred fills.");
     if (rt_auto_bubbles_) {
@@ -65,7 +70,7 @@ void ChartWidget::render_realtime_settings() {
     ImGui::InputFloat("Minimum trade value", &rt_min_notional_, 1000, 10000, "%.0f");
     if (!std::isfinite(rt_min_notional_)) rt_min_notional_ = 10000;
     rt_min_notional_ = std::max(1.0f, rt_min_notional_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Price x quantity in quote units. One bubble per received record; the exchange may aggregate fills. Radius starts at 4px and is capped at 16px. Sizes above 16 times the minimum share the cap.");
+    if (ImGui::IsItemHovered()) Theme::tooltip("Price x quantity in quote units. One bubble per received record; the exchange may aggregate fills. Radius starts at 3px and is capped at 12px. Sizes above 16 times the minimum share the cap.");
     ImGui::EndDisabled();
     ImGui::TextUnformatted("Depth: 100ms samples, 2 minutes retained");
     ImGui::TextUnformatted("Fixed price fidelity: Layers > Depth settings");
@@ -75,6 +80,7 @@ void ChartWidget::on_rewind(int64_t) {
     // The replay owner restores/replays depth separately. Never keep future
     // samples or GPU cells from the preceding traversal.
     rt_dom_frame_ = {};
+    rt_quote_ = {};
     if (rt_flow_) rt_flow_->reset();
     rt_unhealthy_since_ms_ = 0;
     rt_renderer_.reset();
@@ -108,6 +114,8 @@ void ChartWidget::update_realtime() {
         rt_flow_->set_tick_size(tick_size_);
         rt_flow_->advance_to(clock);
     }
+    if (clock != rt_clock_ms_ || !ctx_.replay_mgr().is_paused())
+        rt_quote_ = ctx_.ob_mgr().realtime_quote(pair_, clock);
     rt_clock_ms_ = clock;
     rt_renderer_->set_observation_clock_ms(clock);
     rt_book_valid_ = ctx_.ob_mgr().copy_realtime_since(pair_, rt_serial_, rt_pending_);
@@ -148,15 +156,38 @@ const std::deque<Terminal::Trade>& ChartWidget::realtime_trades() const {
 }
 
 void ChartWidget::render_realtime() {
+    ProfileScope profile("RT overlays");
     const auto limits = ImPlot::GetPlotLimits();
     if (!ctx_.candle_mgr().follow_live()) rt_span_ms_ = std::clamp(limits.X.Size(), 5000.0, 120000.0);
     ImDrawList* dl = ImPlot::GetPlotDrawList();
     ImPlot::PushPlotClipRect();
     const auto& trades = realtime_trades();
+    if (rt_extend_depth_ && rt_book_valid_ && rt_latest_ &&
+        rt_latest_->timestamp_ms <= rt_clock_ms_ && rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000 &&
+        limits.X.Max > rt_clock_ms_) {
+        const float edge = std::max(ImPlot::GetPlotPos().x,
+            ImPlot::PlotToPixels(double(rt_clock_ms_), 0).x);
+        const float right = ImPlot::GetPlotPos().x + ImPlot::GetPlotSize().x;
+        double peak = 0;
+        for (const auto& level : rt_latest_->levels)
+            if (level.price >= limits.Y.Min && level.price <= limits.Y.Max) peak = std::max(peak, level.size);
+        const float half_tick = std::max(0.5f, float(tick_size_ / limits.Y.Size() * ImPlot::GetPlotSize().y * 0.5));
+        if (peak > 0) for (const auto& level : rt_latest_->levels) {
+            if (level.price < limits.Y.Min || level.price > limits.Y.Max) continue;
+            const float y = ImPlot::PlotToPixels(0, level.price).y;
+            const auto color = level.price <= rt_latest_->bid ? Theme::Tokens::UP : Theme::Tokens::DOWN;
+            dl->AddRectFilled(ImVec2(edge, y - half_tick), ImVec2(right, y + half_tick),
+                Theme::u32(color, 0.04f + 0.18f * float(std::sqrt(level.size / peak))));
+        }
+        dl->AddLine(ImVec2(edge, ImPlot::GetPlotPos().y),
+            ImVec2(edge, ImPlot::GetPlotPos().y + ImPlot::GetPlotSize().y), Theme::u32(Theme::Tokens::TX2, 0.35f));
+        dl->AddText(ImVec2(edge + 5, ImPlot::GetPlotPos().y + 5), Theme::u32(Theme::Tokens::TX2), "Current depth");
+    }
+
     ImVec2 previous{};
     int64_t previous_ms = 0;
     // Last point per screen pixel bounds line geometry to the plot width.
-    for (const auto& trade : trades) {
+    if (rt_trade_line_ && !rt_candles_) for (const auto& trade : trades) {
         if (trade.timestamp_ms < limits.X.Min || trade.timestamp_ms <= rt_clock_ms_ - 120000) continue;
         if (trade.timestamp_ms > rt_clock_ms_ || trade.timestamp_ms > limits.X.Max) break;
         const ImVec2 point = ImPlot::PlotToPixels(double(trade.timestamp_ms), trade.price);
@@ -245,6 +276,7 @@ void ChartWidget::render_realtime() {
     const bool fresh = rt_book_valid_ && rt_latest_ &&
         rt_latest_->timestamp_ms <= rt_clock_ms_ && rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000;
     rt_dom_frame_.book = rt_latest_;
+    rt_dom_frame_.quote = rt_quote_;
     rt_dom_frame_.frame = ImGui::GetFrameCount();
     rt_dom_frame_.clock_ms = rt_clock_ms_;
     rt_dom_frame_.price_min = limits.Y.Min;
@@ -278,7 +310,7 @@ void ChartWidget::render_realtime() {
                 ImGui::GetColorU32(color), 2.0f);
         }
         for (int side = 0; side < 2; ++side) {
-            const double price = side ? book.ask : book.bid;
+            const double price = side ? rt_dom_frame_.ask() : rt_dom_frame_.bid();
             const float y = ImPlot::PlotToPixels(0, price).y;
             const ImU32 color = Theme::u32(side ? Theme::Tokens::DOWN : Theme::Tokens::UP);
             for (float x = edge; x < right; x += 10) dl->AddLine(ImVec2(x, y), ImVec2(std::min(x + 5, right), y), color);

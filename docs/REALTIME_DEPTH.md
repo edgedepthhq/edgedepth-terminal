@@ -47,9 +47,8 @@ from a screenshot.
 | Layers > Depth settings | Recalibrate colors | Explicitly recalibrate brightness from the currently visible liquidity. This deliberately recolors history; normal feed updates do not. |
 | Chart navigation | Time zoom / Follow | Show five seconds to two minutes. Wheel zoom keeps Following live/replay in both directions. Pan detaches; zoom in then keeps the inspected history. While running, zoom out resumes Follow. Paused history stays detached in both directions. Follow returns to the current display clock without unpausing; use Pause display or the replay transport to resume time. Price auto-fits eligible visible trades and quote steps. |
 
-Bubbles use square-root radius scaling from 4px to a 16px cap. Values at or above
-16 times the minimum share the cap. Opaque signed fills, restrained shading and
-thicker opaque dark borders reduce pale overlapping clusters. Quote lines have
+Bubbles use square-root radius scaling from 3px to a 12px cap. Values at or above
+16 times the minimum share the cap. Flat signed fills and thin dark edges reduce pale overlapping clusters. Quote lines have
 dark backing so they remain visible over bright liquidity. Newer records draw on top, with
 all centers kept at their received timestamps and prices. Up to 20,000 trade
 records/two minutes are retained, and the newest 1,500 qualifying records in view
@@ -77,8 +76,9 @@ is enabled and is not a backfilled exchange-session total. CVD stays in base
 quantity when the row display switches to quote value.
 
 The header prints exact best bid/ask, their spread in price units and native
-ticks, and the sample age at the chart clock. Pause freezes that age with the
-book. A one-tick spread may be smaller than one screen pixel. The two gutter
+ticks, with Native BBO or Depth BBO identifying the quote source. Native
+quotes and sampled depth have separate ages at the chart clock. Pause freezes
+both observations and their ages. A one-tick spread may be smaller than one screen pixel. The two gutter
 markers use separate horizontal halves so both remain identifiable without
 moving either vertically. No minimum visual spread is manufactured.
 
@@ -164,3 +164,20 @@ Sequence breaks and transport interruptions wait for a fresh seed. The initial
 history boundary is marked; no current book is painted into pre-join history.
 Other candle/model overlays are omitted in RT. Feed cadence, recorded coverage
 and display sampling are separate limits.
+
+
+## Native quotes and current-depth projection (2026-09-08)
+
+RT subscribes to Ticker alongside depth. Native BBO stays in a separate bounded
+8,192-observation/two-minute queue under the book write lock, with as-of and
+transport-epoch checks. Chart and DOM share a copied quote at the chart clock;
+pause freezes it. Missing/stale native quotes explicitly fall back to Depth BBO.
+Native BBO never rewrites depth quantities or validates a broken depth sequence.
+Historical quote steps remain sampled-depth observations. PRICE notches show
+exact selected BBO coordinates; readable row centers remain grouped depth.
+Extend current depth defaults on in RT settings and projects the last fresh
+sampled book into the right margin, with a current-depth label and time boundary.
+It is not recorded history or future evidence. RT DOM draws each numeric column
+in one clip scope instead of changing GPU clips for every cell. Optional hidden
+trade lines no longer transform every retained execution. RT overlays and RT DOM
+have separate profiler scopes. No production deployment is implied.

@@ -9,10 +9,10 @@ int main() {
     static_assert(sizeof(ImDrawIdx) == 4);
     ImGui::CreateContext();
     assert(RealtimeBubble::radius(99, 100) == 0);
-    assert(RealtimeBubble::radius(100, 100) == 4);
-    assert(RealtimeBubble::radius(400, 100) == 8);
-    assert(RealtimeBubble::radius(1600, 100) == 16);
-    assert(RealtimeBubble::radius(160000, 100) == 16);
+    assert(RealtimeBubble::radius(100, 100) == 3);
+    assert(RealtimeBubble::radius(400, 100) == 6);
+    assert(RealtimeBubble::radius(1600, 100) == 12);
+    assert(RealtimeBubble::radius(160000, 100) == 12);
     ImDrawListSharedData shared;
     ImDrawList draw(&shared);
     draw._ResetForNewFrame();

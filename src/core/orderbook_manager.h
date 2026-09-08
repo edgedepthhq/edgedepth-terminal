@@ -3,6 +3,7 @@
 #include "pb/messages.pb.h"
 #include "core/double_buffer.h"
 #include "core/realtime_history.h"
+#include "core/realtime_quotes.h"
 #include <unordered_map>
 #include <string>
 #include <mutex>
@@ -95,6 +96,8 @@ public:
         }
     }
 
+    Terminal::BookTicker realtime_quote(const Terminal::Pair& pair, int64_t clock) const;
+
     bool copy_realtime_since(const Terminal::Pair& pair, uint64_t serial,
         std::vector<RealtimeDepthHistory::SamplePtr>& out) const;
     void interrupt_realtime() { realtime_epoch_.fetch_add(1); }
@@ -106,6 +109,8 @@ public:
 private:
     struct ManagedOrderbook : DoubleBufferedOrderbook {
         RealtimeDepthHistory realtime;
+        RealtimeQuotes quotes;
+        uint64_t quote_epoch = 0;
         uint64_t epoch = 0;
     };
     std::atomic<uint64_t> realtime_epoch_{0};
