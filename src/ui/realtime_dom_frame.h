@@ -1,5 +1,6 @@
 #pragma once
 #include "core/realtime_history.h"
+#include <cmath>
 
 class TradeAtPriceAccumulator;
 
@@ -13,6 +14,17 @@ struct RealtimeDOMFrame {
     int64_t clock_ms = 0;
     double price_min = 0, price_max = 0;
     float top = 0, bottom = 0;
+    double native_tick = 0;
+    int bucket_ticks = 1;
+
+    double bucket_size() const { return native_tick * bucket_ticks; }
+    int64_t bucket_index(double price) const {
+        // Same native-tick boundary tolerance as RT heatmap column building.
+        return int64_t(std::floor((price / native_tick + 1e-7) / bucket_ticks));
+    }
+    double bucket_center(int64_t index) const {
+        return (double(index) + 0.5) * bucket_size();
+    }
     bool synchronized = false, paused = false, replay = false;
 
     bool native_quote() const { return quote.timestamp_ms > 0; }

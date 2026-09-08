@@ -279,6 +279,8 @@ private:
 
     int64_t gpu_origin_ms_ = 0;
     double gpu_bucket_size_ = 0.0;
+    // RT GPU prices are offsets near the book, avoiding large-price float loss.
+    double gpu_price_origin_ = 0.0;
     int64_t time_step_ms_ = 60000; // Interval of the uploaded GPU grid
     std::map<int64_t, double> observation_centers_;
     bool realtime_ = false;

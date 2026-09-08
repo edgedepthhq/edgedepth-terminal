@@ -502,7 +502,7 @@ void ShaderHeatmapRenderer::upload_column(
 
     // Upload metadata for this column
     float meta[4] = {
-        static_cast<float>(price_min),
+        static_cast<float>(price_min - gpu_price_origin_),
         static_cast<float>(num_rows),
         max_value,
         flags  // 0=empty, 1=valid, 2=live
@@ -548,6 +548,12 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
 
     gpu_origin_ms_ = timeline_.begin()->first;
     gpu_bucket_size_ = native_bucket_size_;
+    gpu_price_origin_ = 0;
+    if (realtime_) {
+        const auto center = observation_centers_.lower_bound(timeline_.begin()->first);
+        if (center != observation_centers_.end()) gpu_price_origin_ = center->second;
+        else if (!timeline_.begin()->second.empty()) gpu_price_origin_ = timeline_.begin()->second.begin()->first;
+    }
     const bool apply_spread = (colormap_type_ == ColormapType::Liquidation);
     global_max_qty_ = 0.01f;
     std::fill(prev_column_carry_.begin(), prev_column_carry_.end(), 0.0f);
@@ -724,7 +730,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
 
         // Write metadata into staging buffer
         const size_t meta_offset = static_cast<size_t>(col) * 4;
-        meta_staging_[meta_offset + 0] = static_cast<float>(col_price_min);
+        meta_staging_[meta_offset + 0] = static_cast<float>(col_price_min - gpu_price_origin_);
         meta_staging_[meta_offset + 1] = static_cast<float>(num_rows);
         meta_staging_[meta_offset + 2] = col_max;
         meta_staging_[meta_offset + 3] = column_flags(ts);  // flags: valid
@@ -799,7 +805,7 @@ void ShaderHeatmapRenderer::fill_observation_hold(int previous, int next) {
         upload_column(col, source.num_rows, source.price_min, source.price_step, source.max_value, 4.0f);
         column_meta_[col] = source; // Retain the original observation clock.
         const size_t offset = size_t(col) * 4;
-        meta_staging_[offset] = float(source.price_min);
+        meta_staging_[offset] = float(source.price_min - gpu_price_origin_);
         meta_staging_[offset + 1] = float(source.num_rows);
         meta_staging_[offset + 2] = source.max_value;
         meta_staging_[offset + 3] = 4.0f; // Held state between proven contiguous events.
@@ -827,6 +833,7 @@ void ShaderHeatmapRenderer::clear() {
     ring_count_ = 0;
     time_step_ms_ = column_interval_ms_;
     gpu_origin_ms_ = 0;
+    gpu_price_origin_ = 0;
     snapshot_count_ = 0;
     first_seen_ts_ = 0;
     live_ring_col_ = -1;
@@ -988,8 +995,8 @@ void ShaderHeatmapRenderer::render_cells(
         (limits.X.Min - static_cast<double>(oldest_ts)) / 1000.0);
     u.viewport_time_max = static_cast<float>(
         (limits.X.Max - static_cast<double>(oldest_ts)) / 1000.0);
-    u.viewport_price_min = static_cast<float>(limits.Y.Min);
-    u.viewport_price_max = static_cast<float>(limits.Y.Max);
+    u.viewport_price_min = static_cast<float>(limits.Y.Min - gpu_price_origin_);
+    u.viewport_price_max = static_cast<float>(limits.Y.Max - gpu_price_origin_);
 
     // Sequential ring buffer - column 0 = oldest, column ring_count-1 = newest.
     u.time_step = static_cast<float>(time_step_ms_) / 1000.0f;
@@ -1077,7 +1084,7 @@ void ShaderHeatmapRenderer::render_labels(int64_t, float sensitivity) const {
         if (ts < limits.X.Min - time_step_ms_ / 2 || ts > limits.X.Max + time_step_ms_ / 2) continue;
         if (replay_cutoff_ms_ > 0 && meta.timestamp_ms > replay_cutoff_ms_) continue;
         // Match the shader's float metadata and per-column aggregation origin.
-        const double pmin = static_cast<float>(meta.price_min);
+        const double pmin = gpu_price_origin_ + static_cast<float>(meta.price_min - gpu_price_origin_);
         const double step = static_cast<float>(meta.price_step);
         const double bucket = step * bucket_multiplier_;
         if (bucket <= 0) continue;
@@ -1293,7 +1300,7 @@ float ShaderHeatmapRenderer::get_value_at_price_and_time(
     if (replay_cutoff_ms_ > 0 && meta.timestamp_ms > replay_cutoff_ms_) return 0;
     const double step = static_cast<float>(meta.price_step);
     if (step <= 0) return 0;
-    const int row = static_cast<int>(std::floor((price-static_cast<float>(meta.price_min))/step));
+    const int row = static_cast<int>(std::floor((price - gpu_price_origin_ - static_cast<float>(meta.price_min - gpu_price_origin_))/step));
     if (row < 0) return 0;
     const int first = row / bucket_multiplier_ * bucket_multiplier_;
     float qty = 0;

@@ -400,7 +400,7 @@ void DOMWidget::render() {
     }
 
     ImGui::Checkbox("Link RT", &link_rt_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Shares the matching RT chart's depth, trade-flow clock and price positions. Readable tick groups on zoom out; best quotes keep their exact prices. Turn off for independent centering and reset controls.");
+    if (ImGui::IsItemHovered()) Theme::tooltip("Shares the matching RT chart's depth, trade-flow clock and price positions. Rows use heatmap fidelity; hover thin bands for values or zoom the price axis in. Turn off for independent centering and reset controls.");
     if (link_rt_ && rt_frame_) {
         render_linked_ladder(*rt_frame_);
         ImGui::End();
@@ -843,7 +843,7 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
         frame.replay ? "Replay" : "Live", frame.paused ? " paused" : "");
     ImGui::SameLine();
     if (ImGui::SmallButton(display_usd_ ? "Quote" : "Qty")) display_usd_ = !display_usd_;
-    if (ImGui::IsItemHovered()) Theme::tooltip("Resting depth and received trade volume at the chart clock. CVD is buy quantity minus sell quantity, reset every 5 minutes of market time. Zooming groups nearby ticks into readable rows.");
+    if (ImGui::IsItemHovered()) Theme::tooltip("Resting depth and received trade volume at the chart clock. CVD is buy quantity minus sell quantity, reset every 5 minutes of market time. Rows use the heatmap fidelity. Thin rows retain their bars; hover for numbers or zoom the price axis in.");
     if (frame.flow) {
         char cvd[24];
         // CVD stays in base units: multiplying a session total by today's price
@@ -871,7 +871,7 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
     char spread[24];
     snprintf(spread, sizeof(spread), fmt_.price_fmt, frame.ask() - frame.bid());
     ImGui::TextDisabled("Spread %s", spread);
-    if (ImGui::IsItemHovered()) Theme::tooltip("The difference between the best ask and bid. PRICE rows are grouped for readability; the bid and ask above show the exact quotes.");
+    if (ImGui::IsItemHovered()) Theme::tooltip("The difference between the best ask and bid. PRICE rows show heatmap bucket centers; the bid and ask above show the exact quotes.");
 
     const ImVec2 org = ImGui::GetCursorScreenPos();
     const ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -880,7 +880,11 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
     const float top = std::max(org.y + header_h, frame.top);
     const float bottom = std::min(org.y + avail.y, frame.bottom);
     if (bottom <= top || avail.x <= 0) return;
-    const float price_w = std::max(ImGui::CalcTextSize(bid).x, ImGui::CalcTextSize(ask).x) + 10;
+    if (frame.native_tick <= 0 || frame.bucket_ticks < 1) return;
+    const auto center_fmt = PriceFormatter::from_tick_and_step(frame.native_tick * 0.1, 1);
+    char center_label[32];
+    center_fmt.format_price(center_label, sizeof(center_label), frame.price_max);
+    const float price_w = ImGui::CalcTextSize(center_label).x + 10;
     // Reserve a gutter for exact-price quote markers, clear of all numbers.
     const float quote_gutter = 8.0f;
     const float columns_x = org.x + quote_gutter;
@@ -888,13 +892,16 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
     const float edges[] = {columns_x, columns_x + col_w, columns_x + col_w * 2,
         columns_x + col_w * 2 + price_w, columns_x + col_w * 3 + price_w,
         columns_x + col_w * 4 + price_w, org.x + avail.x};
-    const float tick_h = float(tick_size_ / (frame.price_max - frame.price_min) * (frame.bottom - frame.top));
-    const double ticks_per_row = std::max(1.0, std::ceil(double(text_h + 5) / tick_h));
-    const double step = tick_size_ * ticks_per_row;
-    const double first = std::floor(frame.price_min / step) * step;
-    const size_t count = size_t(std::ceil((frame.price_max - first) / step)) + 1;
+    const double step = frame.bucket_size();
+    const int64_t first_bucket = frame.bucket_index(frame.price_min);
+    const int64_t last_bucket = frame.bucket_index(frame.price_max);
+    if (last_bucket - first_bucket > 16384) {
+        ImGui::TextWrapped("Zoom the price axis in to show the linked depth rows.");
+        return;
+    }
+    const size_t count = size_t(last_bucket - first_bucket + 1);
     linked_rows_.assign(count, {});
-    const auto row_index = [&](double price) { return int64_t(std::llround((price - first) / step)); };
+    const auto row_index = [&](double price) { return frame.bucket_index(price) - first_bucket; };
     const auto value = [&](double qty, double price) { return display_usd_ ? qty * price : qty; };
     for (const auto& level : book.levels) {
         const auto idx = row_index(level.price);
@@ -922,33 +929,35 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
             Theme::u32(Theme::Tokens::TX2), names[c]);
         dl->PopClipRect();
     }
-    char grouping[48]; snprintf(grouping, sizeof(grouping), "Rows %.0f ticks / centers", ticks_per_row);
-    dl->AddText(ImVec2(org.x, org.y + text_h + 3), Theme::u32(Theme::Tokens::TX2), grouping);
     const float row_h = float(step / (frame.price_max - frame.price_min) * (frame.bottom - frame.top));
+    const bool show_numbers = row_h >= text_h + 3;
+    char grouping[96]; snprintf(grouping, sizeof(grouping), "%d ticks / centers%s", frame.bucket_ticks,
+        show_numbers ? "" : " / hover");
+    dl->AddText(ImVec2(org.x, org.y + text_h + 3), Theme::u32(Theme::Tokens::TX2), grouping);
     dl->PushClipRect(ImVec2(org.x, top), ImVec2(org.x + avail.x, bottom), true);
     for (size_t i = 0; i < count; ++i) {
-        const double price = first + double(i) * step;
+        const double price = frame.bucket_center(first_bucket + int64_t(i));
         const float y = frame.price_y(price);
-        if (y < top || y > bottom) continue;
+        if (y + row_h * 0.5f < top || y - row_h * 0.5f > bottom) continue;
         if (row_index((book.bid + book.ask) * 0.5) == int64_t(i))
             dl->AddRectFilled(ImVec2(org.x, y - row_h * 0.5f), ImVec2(org.x + avail.x, y + row_h * 0.5f), Theme::u32(Theme::Tokens::ELEV));
-        dl->AddLine(ImVec2(org.x, y + row_h * 0.5f), ImVec2(org.x + avail.x, y + row_h * 0.5f), Theme::u32(Theme::Tokens::BD1, 0.5f));
+        if (show_numbers) dl->AddLine(ImVec2(org.x, y + row_h * 0.5f), ImVec2(org.x + avail.x, y + row_h * 0.5f), Theme::u32(Theme::Tokens::BD1, 0.5f));
     }
     const float bid_y = frame.price_y(frame.bid()), ask_y = frame.price_y(frame.ask());
     dl->AddRectFilled(ImVec2(edges[2], ask_y), ImVec2(edges[3], bid_y), Theme::u32(Theme::Tokens::TX2, 0.07f));
     for (int c = 0; c < 6; ++c) {
         dl->PushClipRect(ImVec2(edges[c]+1, top), ImVec2(edges[c+1]-1, bottom), true);
         for (size_t i = 0; i < count; ++i) {
-            const double price = first + double(i) * step;
+            const double price = frame.bucket_center(first_bucket + int64_t(i));
             const float y = frame.price_y(price);
-            if (y < top || y > bottom) continue;
+            if (y + row_h * 0.5f < top || y - row_h * 0.5f > bottom) continue;
             const auto& row = linked_rows_[i];
             const double values[] = {row.buy, row.bid, price, row.ask, row.sell, row.buy - row.sell};
             if (c != 2 && values[c] == 0) continue;
             const auto color = c < 2 || (c == 5 && values[c] >= 0) ? Theme::Tokens::UP : Theme::Tokens::DOWN;
             const double maximum = c == 1 || c == 3 ? max_depth : max_flow;
             char label[24];
-            if (c == 2) snprintf(label, sizeof(label), fmt_.price_fmt, price);
+            if (c == 2) center_fmt.format_price(label, sizeof(label), price);
             else {
                 // Values have already been converted using each actual trade/level price.
                 linked_quantity(values[c], c == 5, label, sizeof(label), edges[c+1] - edges[c] - 6);
@@ -956,13 +965,33 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
             if (c != 2 && maximum > 0) {
                 const float width = (edges[c+1] - edges[c] - 3) * float(std::abs(values[c]) / maximum);
                 const bool leftward = c < 2;
-                dl->AddRectFilled(ImVec2(leftward ? edges[c+1] - width : edges[c], y - row_h * 0.5f + 1),
-                    ImVec2(leftward ? edges[c+1] : edges[c] + width, y + row_h * 0.5f - 1), Theme::u32(color, c == 1 || c == 3 ? 0.35f : 0.16f));
+                dl->AddRectFilled(ImVec2(leftward ? edges[c+1] - width : edges[c], y - row_h * 0.5f),
+                    ImVec2(leftward ? edges[c+1] : edges[c] + width, y + row_h * 0.5f), Theme::u32(color, c == 1 || c == 3 ? 0.35f : 0.16f));
             }
+            if (!show_numbers) continue;
             const float x = c == 2 ? (edges[c]+edges[c+1]-ImGui::CalcTextSize(label).x)*0.5f : edges[c+1]-ImGui::CalcTextSize(label).x-3;
             dl->AddText(ImVec2(x, y - text_h*0.5f), Theme::u32(c == 2 || c == 1 || c == 3 ? Theme::Tokens::TX1 : color), label);
         }
         dl->PopClipRect();
+    }
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    if (ImGui::IsWindowHovered() && mouse.x >= org.x && mouse.x < org.x + avail.x &&
+        mouse.y >= top && mouse.y < bottom) {
+        const double price = frame.price_min + (frame.bottom - mouse.y) /
+            (frame.bottom - frame.top) * (frame.price_max - frame.price_min);
+        const auto idx = row_index(price);
+        if (idx >= 0 && size_t(idx) < count) {
+            Theme::begin_tooltip();
+            const auto& row = linked_rows_[size_t(idx)];
+            char lo[32], hi[32];
+            fmt_.format_price(lo, sizeof(lo), double(first_bucket + idx) * step);
+            fmt_.format_price(hi, sizeof(hi), double(first_bucket + idx + 1) * step);
+            ImGui::Text("Bucket [%s, %s)", lo, hi);
+            ImGui::Text("Current depth: bids %.6g / asks %.6g", row.bid, row.ask);
+            ImGui::Text("5m flow: buys %.6g / sells %.6g", row.buy, row.sell);
+            ImGui::TextUnformatted(display_usd_ ? "Quote value" : "Base quantity");
+            Theme::end_tooltip();
+        }
     }
     // Exact-price markers stay in the gutter, never crossing grouped-row text.
     for (int side = 0; side < 2; ++side) {

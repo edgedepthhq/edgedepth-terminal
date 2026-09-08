@@ -302,6 +302,7 @@ private:
     bool rt_candles_ = false, rt_bubbles_ = true, rt_book_valid_ = false;
     bool rt_paused_ = false, rt_trade_line_ = false;
     bool rt_extend_depth_ = true;
+    bool rt_auto_price_ = true;
     Terminal::BookTicker rt_quote_{};
     std::deque<RealtimeDepthHistory::SamplePtr> rt_samples_;
     std::deque<Terminal::Trade> rt_paused_trades_;

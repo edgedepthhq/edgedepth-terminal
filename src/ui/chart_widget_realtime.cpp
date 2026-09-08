@@ -27,6 +27,7 @@ void ChartWidget::set_rt_mode(bool on) {
     if (on) {
         chart_type_ = ChartType::Line;
         rt_candles_ = false;
+        rt_auto_price_ = true;
         rt_paused_ = false;
         heatmap_enabled_ = true;
         rt_span_ms_ = 60000;
@@ -60,6 +61,8 @@ void ChartWidget::render_realtime_settings() {
     ImGui::Checkbox("1s observed candles", &rt_candles_);
     ImGui::Checkbox("Trade-price line", &rt_trade_line_);
     chart_type_ = rt_candles_ ? ChartType::Candles : ChartType::Line;
+    ImGui::Checkbox("Auto-fit price", &rt_auto_price_);
+    if (ImGui::IsItemHovered()) Theme::tooltip("Turn off to zoom or drag the price axis. Linked DOM rows keep the same heatmap prices. Turn on to fit observed prices again.");
     ImGui::Checkbox("Trade bubbles", &rt_bubbles_);
     ImGui::Checkbox("Extend current depth", &rt_extend_depth_);
     if (ImGui::IsItemHovered()) Theme::tooltip("Projects the last synchronized sampled book into the right margin. This is a held current book, not future orders or recorded history. Turn off to leave the margin clear.");
@@ -296,6 +299,8 @@ void ChartWidget::render_realtime() {
     rt_dom_frame_.quote = rt_quote_;
     rt_dom_frame_.frame = ImGui::GetFrameCount();
     rt_dom_frame_.clock_ms = rt_clock_ms_;
+    rt_dom_frame_.native_tick = rt_renderer_ ? rt_renderer_->get_native_bucket_size() : 0;
+    rt_dom_frame_.bucket_ticks = rt_renderer_ ? rt_renderer_->get_bucket_multiplier() : rt_bucket_multiplier_;
     rt_dom_frame_.price_min = limits.Y.Min;
     rt_dom_frame_.price_max = limits.Y.Max;
     rt_dom_frame_.top = ImPlot::GetPlotPos().y;

@@ -1019,7 +1019,7 @@ void ChartWidget::render_chart() {
         ImPlotAxisFlags x_flags = hide_x_labels ? ImPlotAxisFlags_NoTickLabels : ImPlotAxisFlags_None;
         ImPlot::SetupAxis(ImAxis_X1, nullptr, x_flags);
         ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_Opposite |
-            (rt_mode_ ? ImPlotAxisFlags_Lock : ImPlotAxisFlags_None));
+            (rt_mode_ && rt_auto_price_ ? ImPlotAxisFlags_Lock : ImPlotAxisFlags_None));
         ImPlot::SetupAxisFormat(ImAxis_Y1, fmt_.price_fmt);
 
         // Beyond this density candles and liquidation cells collapse below a
@@ -1225,7 +1225,7 @@ void ChartWidget::render_chart() {
         const double y_padding = y_span > 0.0
             ? y_span * 0.08
             : std::max(std::abs(y_min) * 0.001, tick_size_ * 4.0);
-        ImPlot::SetupAxisLimits(ImAxis_Y1,
+        if (!rt_mode_ || rt_auto_price_) ImPlot::SetupAxisLimits(ImAxis_Y1,
             rt_empty_prices ? last_visible_range_.Y.Min : y_min - y_padding,
             rt_empty_prices ? last_visible_range_.Y.Max : y_max + y_padding, ImPlotCond_Always);
         if (!hide_x_labels) {

@@ -67,6 +67,20 @@ int main() {
     dense.price_max = 78990;
     expect(std::abs(dense.price_y(78865.4) - dense.price_y(78865.5) - 0.5f) < 0.001f,
         "subpixel spread is never widened to a readable row");
+    for (int mult : {1, 2, 5, 10, 20}) {
+        dense.native_tick = 0.00001; dense.bucket_ticks = mult;
+        const double boundary = 20000 * dense.bucket_size();
+        expect(dense.bucket_index(boundary) == 20000, "exact boundary belongs to next heatmap bucket");
+        expect(dense.bucket_index(boundary - dense.native_tick) == 19999,
+            "preceding native tick remains in previous heatmap bucket");
+        expect(dense.bucket_index(boundary + (mult - 1) * dense.native_tick) == 20000,
+            "all native ticks aggregate into the same fidelity bucket");
+        dense.price_min = boundary - 10 * dense.bucket_size();
+        dense.price_max = boundary + 10 * dense.bucket_size();
+        expect(std::abs(dense.price_y(dense.bucket_center(20000)) -
+            (dense.price_y(boundary) + dense.price_y(boundary + dense.bucket_size())) * 0.5f) < 0.001f,
+            "DOM center lies halfway between heatmap boundaries at every fidelity");
+    }
     // Clearly synthetic unit fixture. Never a product capture.
     Terminal::Orderbook book;
     book.snapshot = true;

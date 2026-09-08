@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <memory>
+#include "ui/realtime_dom_frame.h"
 
 static GLuint bound = 0, next_id = 0;
 static std::unordered_map<GLuint, std::vector<float>> metadata;
@@ -34,6 +35,37 @@ void glTexSubImage2D(GLenum, GLint, GLint x, GLint, GLsizei w, GLsizei h, GLenum
 int main() {
     auto renderer = std::make_unique<ShaderHeatmapRenderer>();
     auto& r = *renderer;
+    {
+        auto fixture = std::make_unique<ShaderHeatmapRenderer>();
+        auto& r = *fixture;
+        // The production column builder and DOM must agree on TUT and BTC bucket sums,
+        // including decimal boundaries at every fidelity.
+        for (const auto [tick_size, first_tick] : {std::pair{0.00001, 19000}, std::pair{0.1, 788600}, std::pair{0.01, 7886000}})
+        for (int mult : {1, 2, 5, 10, 20}) {
+            r.clear(); r.configure_realtime(tick_size); r.set_bucket_multiplier(mult);
+            std::unordered_map<double, float> levels;
+            for (int tick = first_tick; tick < first_tick + 200; ++tick) levels[tick * tick_size] = float(tick % 7 + 1);
+            r.finalize_column(1000, levels, true, (first_tick + 100) * tick_size);
+            r.sync_gpu_from_timeline();
+            RealtimeDOMFrame frame;
+            frame.native_tick = r.get_native_bucket_size(); frame.bucket_ticks = r.get_bucket_multiplier();
+            const auto& meta = r.column_meta_[0];
+            for (int row = 0; row < meta.num_rows; row += mult) {
+                const double lower = meta.price_min + row * frame.native_tick;
+                const auto bucket = frame.bucket_index(lower);
+                double dom = 0, heatmap = 0;
+                for (const auto& [price, qty] : levels) if (frame.bucket_index(price) == bucket) dom += qty;
+                for (int j = row; j < std::min(row + mult, meta.num_rows); ++j) heatmap += meta.values[j];
+                assert(dom == heatmap);
+                // Float GPU offsets must stay well below a screen pixel even
+                // at 100 pixels/native tick, for BTC 0.1 and 0.01 tick fixtures.
+                const double gpu_lower = r.gpu_price_origin_ + metadata[r.meta_texture_][0] +
+                    row * double(float(tick_size));
+                assert(std::abs(gpu_lower - lower) / tick_size * 100 < 0.01);
+                assert(std::abs(frame.bucket_center(bucket) - (lower + frame.bucket_size() * 0.5)) < 1e-10);
+            }
+        }
+    }
     r.native_bucket_size_ = 1;
     const std::unordered_map<double,float> history{{100,2},{101,3}};
     const std::unordered_map<double,float> live{{100,17},{101,29}};
