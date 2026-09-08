@@ -4,10 +4,10 @@ Select **RT** in the chart's timeframe menu. The default view combines observed
 resting liquidity, historical best bid/ask steps and received trade records.
 It opens without candles. The right gutter shows the current fresh book.
 
-![Live IOST RT depth and trade bubbles](../assets/terminal-rt-live.png)
+![Live SOPH RT depth and trade bubbles](../assets/terminal-rt-live.png)
 
-*Real IOST/USDT market data through the community gateway, captured from a local
-browser build. The gateway requests Binance depth at 100ms; this is not a
+*Real SOPH/USDT market data through the community gateway, captured from a local
+browser build on 8 September 2026, with linked DOM delta and CVD. The gateway requests Binance depth at 100ms; this is not a
 measurement of the hosted feed's cadence or performance.*
 
 ## Reading a bubble outside the spread

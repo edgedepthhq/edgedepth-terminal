@@ -20,6 +20,9 @@ These are captures of the actual terminal. The open-source renderer supports
 these views; the data source determines which layers have coverage. Hosted
 market data and history access are separate from the open-source license.
 
+Screenshots use landscape framing. Select an image to inspect the original
+at full size.
+
 ### Full workspace
 
 ![Terminal workspace with chart, watchlist, depth ladder and trade tape](assets/screenshot.png)
@@ -30,10 +33,11 @@ with the community gateway.*
 
 ### Real-time depth
 
-![Live IOST observed depth with historical bid/ask steps and trade bubbles](assets/terminal-rt-live.png)
+![Live SOPH observed depth, trade bubbles and linked DOM with delta and CVD](assets/terminal-rt-live.png)
 
 *Local browser build connected to the community gateway's Binance Futures feed.
-Actual observed depth and received trades, with no pre-join depth backfill.*
+SOPH/USDT capture from 8 September 2026 with the linked six-column DOM, delta
+and CVD. Actual observed depth and received trades, with no pre-join depth backfill.*
 
 Choose **RT** in the timeframe menu to watch observed orderbook history, sampled
 best bid/ask steps and trade bubbles on one price axis. Each bubble's center is
@@ -60,7 +64,7 @@ feeds and local packs need no Pro account; hosted live RT uses the Pro view gate
 
 ![Recorded TUT footprint with diagonal 3:1 imbalances and three-level stacks](assets/terminal-diagonal-stacks.png)
 
-*Actual local TUT v2 replay capture, paused after 07:02 UTC on 9 August 2026.
+*Actual local TUT v2 replay capture, paused at 07:03:53 UTC on 9 August 2026.
 Comparison is Diagonal, ratio 3:1, stack levels 3, with Imbalance Highlights
 on. Thick green outlines identify consecutive qualifying buy imbalances.
 Only closed-minute volume available at the replay clock is displayed.*
