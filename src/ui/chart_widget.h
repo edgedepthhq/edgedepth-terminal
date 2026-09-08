@@ -308,6 +308,7 @@ private:
     std::deque<RealtimeDepthHistory::SamplePtr> rt_archive_samples_;
     std::deque<Terminal::Trade> rt_archive_trades_;
     RealtimeTradeView rt_trade_view_;
+    bool realtime_live_edge() const;
     bool rt_history_view_ = false;
     uint64_t rt_archive_generation_ = 0;
     int64_t rt_query_from_ = 0, rt_query_to_ = 0, rt_query_step_ = 0;

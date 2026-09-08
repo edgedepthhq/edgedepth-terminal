@@ -287,3 +287,13 @@ It contained initial session-history controls but lacked the final dense-volume
 label and was not the final build previously verified. Rebuild the canonical
 Release target before copying deployment assets; a current source commit does
 not establish that an existing build directory is current.
+
+## RT interaction and continued depth (2026-09-08)
+
+Clicks, small pointer jitter and vertical gestures keep RT Follow. A deliberate
+horizontal drag over 12px detaches it; Shift selection retains its own behavior.
+Panning alone does not select archive storage. Recent views continue to use live
+working data, and archived views containing the live clock append new depth and
+trades even while detached. Queries refresh as their eligible end advances.
+Current-depth projection and quiet holds follow the visible live edge, not the
+Follow latch. Fully historical views do not project the current book backward.

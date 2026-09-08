@@ -25,3 +25,10 @@ inline double realtime_price_half_span(double low, double high, double tick, int
     return std::max({(high - low) * 0.5, tick * std::max(1, grouping) * 24.0,
                      center * 0.0005});
 }
+
+inline bool realtime_pan_detaches(float dx, float dy) {
+    return std::abs(dx) > 12.0f && std::abs(dx) > std::abs(dy);
+}
+inline bool realtime_view_has_live_edge(bool following, double right, int64_t clock) {
+    return following || right >= double(clock);
+}

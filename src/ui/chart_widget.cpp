@@ -1265,7 +1265,7 @@ void ChartWidget::render_chart() {
         }
         if (rt_mode_ && rt_renderer_ && heatmap_enabled_) {
             configure_depth_fidelity(*rt_renderer_);
-            rt_renderer_->render_cells(rt_renderer_->get_column_interval_ms(), heatmap_sensitivity_, false, rt_extend_depth_ && !rt_history_view_);
+            rt_renderer_->render_cells(rt_renderer_->get_column_interval_ms(), heatmap_sensitivity_, false, rt_extend_depth_ && (!rt_history_view_ || realtime_live_edge()));
         }
         // 1.5 Liquidation timeline heatmap (the predictive shader map) -- ENABLED 2026-06-27.
         //     Re-enabled on the L1 footprint-located estimator field (peaky + persistent on the
@@ -3760,7 +3760,9 @@ void ChartWidget::handle_plot_interaction() {
         // Panning owns history inspection. Wheel zoom keeps an existing follow
         // latch; zoom out may resume it only while the display is running.
         const float wheel = ImGui::GetIO().MouseWheel;
-        if (!draw_cap && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+        if (!draw_cap && ImGui::IsMouseDragging(ImGuiMouseButton_Left) &&
+            (!rt_mode_ || realtime_pan_detaches(ImGui::GetMouseDragDelta(ImGuiMouseButton_Left).x,
+                                                ImGui::GetMouseDragDelta(ImGuiMouseButton_Left).y))) {
             ctx_.candle_mgr().set_follow_live(false);
         } else if (!draw_cap && rt_mode_ && wheel != 0) {
             const auto zoom = realtime_zoom(limits.X.Size(), wheel,

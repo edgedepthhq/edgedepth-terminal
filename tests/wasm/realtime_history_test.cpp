@@ -46,6 +46,12 @@ int main() {
            "quiet SD market fits at least 48 grouped depth rows");
     expect(realtime_price_half_span(90, 110, 0.01, 5) == 10,
            "volatile market still fits the full observed move");
+    expect(!realtime_pan_detaches(3, 2), "click jitter preserves RT follow");
+    expect(!realtime_pan_detaches(4, 40), "vertical gesture preserves RT follow");
+    expect(realtime_pan_detaches(30, 4), "intentional horizontal pan detaches RT follow");
+    expect(realtime_view_has_live_edge(false, 1100, 1000), "detached viewport containing now keeps depth advancing");
+    expect(!realtime_view_has_live_edge(false, 900, 1000), "past viewport does not project current depth into history");
+    expect(realtime_view_has_live_edge(true, 900, 1000), "follow tolerates previous-frame viewport bounds");
     double fresh_span = 60000;
     for (int i=0;i<5;++i) fresh_span = realtime_zoom(fresh_span,-1,0.1,true,false).span_ms;
     expect(fresh_span > 90000, "fresh session can zoom out repeatedly without a coverage clamp");

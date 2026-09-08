@@ -1,4 +1,5 @@
 #include "ui/chart_widget.h"
+#include "ui/realtime_navigation.h"
 #include "core/candle_manager.h"
 #include "core/display_time_zone.h"
 #include "core/trade_at_price.h"
@@ -155,10 +156,10 @@ void ChartWidget::update_realtime() {
         if (sample->timestamp_ms <= clock - RealtimeDepthHistory::retention_ms) continue;
         rt_prices_.clear();
         for (const auto& level : sample->levels) rt_prices_[level.price] += float(level.size);
-        if (!rt_history_view_ || ctx_.candle_mgr().follow_live()) rt_renderer_->finalize_column(sample->timestamp_ms, rt_prices_, sample->segment_start, (sample->bid + sample->ask) * 0.5);
+        if (!rt_history_view_ || realtime_live_edge()) rt_renderer_->finalize_column(sample->timestamp_ms, rt_prices_, sample->segment_start, (sample->bid + sample->ask) * 0.5);
         rt_latest_ = sample;
         rt_samples_.push_back(sample);
-        if (rt_history_view_ && ctx_.candle_mgr().follow_live() && sample->timestamp_ms > rt_loaded_to_)
+        if (rt_history_view_ && realtime_live_edge() && sample->timestamp_ms > rt_loaded_to_)
             rt_archive_samples_.push_back(sample);
         while (rt_archive_samples_.size() > 4096) rt_archive_samples_.pop_front();
         while (rt_samples_.size() > RealtimeDepthHistory::max_samples || rt_samples_.front()->timestamp_ms <= clock - RealtimeDepthHistory::retention_ms)
@@ -167,7 +168,7 @@ void ChartWidget::update_realtime() {
     if (!rt_book_valid_ && rt_latest_) {
         // Discard the final sampling bin on interruption rather than carrying
         // it through an invalid sequence inside that bin.
-        if (!rt_history_view_ || ctx_.candle_mgr().follow_live()) rt_renderer_->invalidate_observation(rt_latest_->timestamp_ms);
+        if (!rt_history_view_ || realtime_live_edge()) rt_renderer_->invalidate_observation(rt_latest_->timestamp_ms);
         if (!rt_samples_.empty() && rt_samples_.back() == rt_latest_) rt_samples_.pop_back();
         if (!rt_archive_samples_.empty() && rt_archive_samples_.back() == rt_latest_)
             rt_archive_samples_.pop_back();
@@ -180,7 +181,7 @@ void ChartWidget::update_realtime() {
         if (clock - rt_unhealthy_since_ms_ >= 3000)
             ctx_.stream_mgr().refresh_orderbook({pair_, Terminal::Stream::Orderbook, 0}, clock);
     }
-    rt_renderer_->set_observation_hold(!rt_history_view_ && rt_book_valid_ && rt_latest_ &&
+    rt_renderer_->set_observation_hold((!rt_history_view_ || realtime_live_edge()) && rt_book_valid_ && rt_latest_ &&
         clock - rt_latest_->timestamp_ms <= 15000 ? clock : 0);
 
 }
@@ -197,7 +198,7 @@ void ChartWidget::render_realtime() {
     ImDrawList* dl = ImPlot::GetPlotDrawList();
     ImPlot::PushPlotClipRect();
     const auto& trades = realtime_trades();
-    if (heatmap_enabled_ && rt_extend_depth_ && !rt_history_view_ && rt_book_valid_ && rt_latest_ &&
+    if (heatmap_enabled_ && rt_extend_depth_ && (!rt_history_view_ || realtime_live_edge()) && rt_book_valid_ && rt_latest_ &&
         rt_latest_->timestamp_ms <= rt_clock_ms_ && rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000 &&
         limits.X.Max > rt_clock_ms_) {
         const float edge = std::max(ImPlot::GetPlotPos().x,
@@ -412,6 +413,10 @@ void ChartWidget::rebuild_realtime_view() {
     }
 }
 
+bool ChartWidget::realtime_live_edge() const {
+    return realtime_view_has_live_edge(ctx_.candle_mgr().follow_live(), last_visible_range_.X.Max, rt_clock_ms_);
+}
+
 void ChartWidget::update_realtime_archive_view() {
     if (!rt_archive_ || !rt_renderer_ || rt_clock_ms_<=0) return;
     if (rt_archive_generation_ != rt_archive_->generation) {
@@ -425,7 +430,7 @@ void ChartWidget::update_realtime_archive_view() {
     const auto& recent_trades = rt_paused_ ? rt_paused_trades_ : ctx_.candle_mgr().realtime_trades().trades();
     const bool trades_retired = recent_trades.size() == RealtimeTradeHistory::max_trades &&
         recent_trades.front().timestamp_ms > from && rt_archive_->first < recent_trades.front().timestamp_ms;
-    const bool history = to > from && (!follow || trades_retired || to-from > 290000 || from < rt_clock_ms_ - 290000);
+    const bool history = to > from && (trades_retired || to-from > 290000 || from < rt_clock_ms_ - 290000);
     if (!history) {
         int64_t discarded_step=100;
         rt_archive_->take_view(rt_archive_samples_, rt_archive_trades_, discarded_step);
@@ -448,7 +453,7 @@ void ChartWidget::update_realtime_archive_view() {
     // Join the query's as-of snapshot to the recent source by a strict time
     // boundary. Equal timestamps stay together in the archive snapshot; late
     // records at/before its cutoff appear on the next query, never deduplicated.
-    if (follow && rt_loaded_to_ > 0) {
+    if (realtime_live_edge() && rt_loaded_to_ > 0) {
         while (!rt_archive_trades_.empty() && rt_archive_trades_.back().timestamp_ms > rt_loaded_to_)
             rt_archive_trades_.pop_back();
         for (const auto& trade : recent_trades)
@@ -457,7 +462,7 @@ void ChartWidget::update_realtime_archive_view() {
     }
     const double now = emscripten_get_now();
     if (!rt_archive_->loading && (rt_query_from_==0 || step!=rt_query_step_ || rt_query_multiplier_!=rt_bucket_multiplier_ ||
-        (!follow && std::abs(aligned-rt_query_from_)>step) || (follow && !rt_paused_ && to>rt_query_to_ && now-rt_query_at_>5000))) {
+        (!follow && std::abs(aligned-rt_query_from_)>step) || (!rt_paused_ && to>rt_query_to_ && now-rt_query_at_>5000))) {
         if (rt_archive_->query(aligned,to,rt_clock_ms_,step,tick_size_*rt_bucket_multiplier_)) {
             rt_query_from_=aligned;rt_query_to_=to;rt_query_step_=step;rt_query_at_=now;rt_query_multiplier_=rt_bucket_multiplier_;
         }

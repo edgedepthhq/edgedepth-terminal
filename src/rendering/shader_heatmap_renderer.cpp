@@ -955,7 +955,9 @@ void ShaderHeatmapRenderer::render_cells(
         const double data_cols_in_view = viewport_time_span /
             static_cast<double>(time_step_ms_);
         const double pixels_per_col = plot_size.x / data_cols_in_view;
-        if (pixels_per_col < 0.3) return;  // Sub-pixel columns: avoid aliasing artifacts
+        // RT overview bins already aggregate observed depth. Suppressing the
+        // entire texture on a narrow plot leaves only floating quote lines.
+        if (!realtime_ && pixels_per_col < 0.3) return;
     }
 
     // Get framebuffer scale for HiDPI
