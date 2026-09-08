@@ -4,7 +4,6 @@
 #include <pb/messages.pb.h>
 #include <zstd.h>
 #include <algorithm>
-#include <chrono>
 #include <nlohmann/json.hpp>
 
 void FootprintManager::request_history(
@@ -14,15 +13,11 @@ void FootprintManager::request_history(
     if (!sm) return;
 
     // Don't fire new requests while one is already in flight
-    const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-    const bool same_market = market_key(pair.exchange, pair.symbol) == last_symbol_;
-    if (loading_ && same_market && now - last_request_ms_ < 5000) return;
+    if (loading_) return;
 
     // Skip if requested range is already covered by what we have
     if (market_key(pair.exchange, pair.symbol) == last_symbol_ &&
-        start_ms >= last_start_ && end_ms <= last_end_ &&
-        now - last_request_ms_ < 5000) {
+        start_ms >= last_start_ && end_ms <= last_end_) {
         return;
     }
 
@@ -36,7 +31,6 @@ void FootprintManager::request_history(
     last_start_ = start_ms;
     last_end_ = end_ms;
     loading_ = true;
-    last_request_ms_ = now;
 
     nlohmann::json req;
     req["method"] = "get_footprint_history";

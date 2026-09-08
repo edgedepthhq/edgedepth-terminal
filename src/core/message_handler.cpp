@@ -881,7 +881,7 @@ void MessageHandler::handle_volume_profile_message(
         return;
     }
 
-    vpvr_mgr->on_profile_response(pair, *resp_pb);
+    vpvr_mgr->on_profile_response(pair.symbol, *resp_pb);
 }
 
 // ── TPO (Time Price Opportunity / Market Profile) ───────────────────────────

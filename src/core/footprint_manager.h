@@ -180,5 +180,4 @@ private:
     std::string last_symbol_;
     int64_t last_start_ = 0;
     int64_t last_end_   = 0;
-    int64_t last_request_ms_ = 0;
 };

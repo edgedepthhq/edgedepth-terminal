@@ -218,34 +218,34 @@ void test_pro_reach_follows_the_backend_injected_lookback() {
     reset_state();
     Entitlements::current() = Entitlements::Tier::Pro;
 
-    // Default reach is 30 days back, up to the live edge.
-    expect_i64(Entitlements::replay_start_floor_ms(kNow), kNow - 30 * kDay, "the default pro floor is 30d");
+    // Default Pro reach is 90 days back, up to the live edge.
+    expect_i64(Entitlements::replay_start_floor_ms(kNow), kNow - 90 * kDay, "the default Pro floor is 90d");
     expect_i64(Entitlements::replay_end_ceil_ms(kNow), kNow, "pro reaches the live edge");
-    expect_true(Entitlements::range_replayable(kNow - 20 * kDay, kNow - 19 * kDay, kNow),
-                "a range inside the 30d reach is replayable");
-    expect_true(!Entitlements::range_replayable(kNow - 40 * kDay, kNow - 39 * kDay, kNow),
-                "a range beyond the 30d reach is refused");
+    expect_true(Entitlements::range_replayable(kNow - 71 * kDay, kNow - 70 * kDay, kNow),
+                "a range inside the 90d Pro reach is replayable");
+    expect_true(!Entitlements::range_replayable(kNow - 100 * kDay, kNow - 99 * kDay, kNow),
+                "a range beyond the 90d Pro reach is refused");
     // Nobody replays the future, whatever their tier.
     expect_true(!Entitlements::range_replayable(kNow - kHour, kNow + kHour, kNow),
                 "a range ending in the future is refused");
     expect_true(!Entitlements::time_replayable(kNow + 1, kNow), "a future timestamp is not replayable");
 
-    // THE regression this constant exists for: the archive backfill reaches ~71
-    // days back and staff tokens are minted at 90d, but a hard-coded 30d refused
-    // the click. Raising the injected lookback must open the reach immediately.
-    const int64_t deep = kNow - 71 * kDay;
+    // Research and staff carry a deeper signed claim that tracks the corpus.
+    // Raising the injected lookback must open it immediately without changing
+    // the default Pro offer.
+    const int64_t deep = kNow - 300 * kDay;
     expect_true(!Entitlements::time_replayable(deep, kNow),
-                "a 71-day-old point is out of reach at the 30d default");
-    Entitlements::pro_lookback_ms() = 90 * kDay;
+                "a 300-day-old point is out of reach at the 90d Pro default");
+    Entitlements::pro_lookback_ms() = 414 * kDay;
     expect_true(Entitlements::time_replayable(deep, kNow),
-                "the same point is in reach once the backend raises the lookback");
-    expect_i64(Entitlements::replay_start_floor_ms(kNow), kNow - 90 * kDay, "the floor follows the lookback");
-    expect_true(Entitlements::pro_lookback_days() == 90, "the day count follows the lookback");
-    expect_eq(Entitlements::archive_label(), "90d archive", "the scrubber caption follows the lookback");
+                "the same point is in reach once the backend supplies the full-record claim");
+    expect_i64(Entitlements::replay_start_floor_ms(kNow), kNow - 414 * kDay, "the floor follows the signed lookback");
+    expect_true(Entitlements::pro_lookback_days() == 414, "the day count follows the signed lookback");
+    expect_eq(Entitlements::archive_label(), "414d archive", "the scrubber caption follows the signed lookback");
 
     Entitlements::pro_lookback_ms() = Entitlements::PRO_REPLAY_LOOKBACK_MS;
-    expect_true(Entitlements::pro_lookback_days() == 30, "the default reach is 30 days");
-    expect_eq(Entitlements::archive_label(), "30d archive", "the default caption reads 30d");
+    expect_true(Entitlements::pro_lookback_days() == 90, "the default Pro reach is 90 days");
+    expect_eq(Entitlements::archive_label(), "90d archive", "the default caption reads 90d");
     Entitlements::current() = Entitlements::Tier::Free;
     expect_eq(Entitlements::archive_label(), "free window", "free advertises the window, not a depth");
 
@@ -254,7 +254,7 @@ void test_pro_reach_follows_the_backend_injected_lookback() {
     for (const auto t : {Entitlements::Tier::Pro, Entitlements::Tier::Research,
                          Entitlements::Tier::Admin}) {
         Entitlements::current() = t;
-        expect_i64(Entitlements::replay_start_floor_ms(kNow), kNow - 30 * kDay,
+        expect_i64(Entitlements::replay_start_floor_ms(kNow), kNow - 90 * kDay,
                    "every pro-or-better tier shares the pro floor");
         expect_i64(Entitlements::replay_end_ceil_ms(kNow), kNow,
                    "every pro-or-better tier reaches the live edge");

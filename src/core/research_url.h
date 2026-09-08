@@ -20,6 +20,10 @@
 // variant. Optional &mfields=feature.a,feature.b pre-checks reading rows; the
 // URL never carries thresholds, so it cannot bypass the frozen validator or
 // the confirm gate on the web side.
+//
+// TWO handoffs live in this file: the pointed minute above ("Find moments like
+// this") and the dragged MOVE at the bottom ("Investigate this move"), which
+// carries the outcome ladder and horizon list shared with the web door.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include <cstdint>
@@ -112,6 +116,118 @@ inline std::string moment_live_url(const std::string& symbol_raw,
                       normalize_symbol(symbol_raw) + ",now";
     if (!mfields.empty()) url += "&mfields=" + mfields;
     return url;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Outcome-first handoff: shift-drag a move, ask what preceded moves like it.
+//
+// The ladder and the horizon list below are the SHARED contract with the web
+// door and the engine route (outcome_first_query.v1). Two shapes that look
+// like details and are not:
+//   - magnitude is a FRACTION (0.10 for ten percent), never a percentage.
+//   - horizon is a closed SUFFIX ("4h"), never ISO 8601 ("PT4H").
+// Do not add a rung or a horizon here alone; all three sides move together.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// The outcome ladder, ascending. Down moves stop at 1.00 because a return
+// cannot fall past total loss.
+inline constexpr double kOutcomeLadder[] = {0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.10,
+                                            0.15,  0.20,  0.30,  0.50, 1.00, 2.00, 4.00};
+inline constexpr double kOutcomeLadderDownCap = 1.00;
+
+struct OutcomeHorizon {
+    const char* suffix;
+    int64_t minutes;
+};
+inline constexpr OutcomeHorizon kOutcomeHorizons[] = {{"30m", 30},   {"1h", 60},    {"4h", 240},
+                                                      {"24h", 1440}, {"72h", 4320}, {"7d", 10080}};
+
+// The dragged range reduced to a target the engine already counts. When ok is
+// false every other field is meaningless and the caller renders the menu item
+// disabled; direction and horizon are always readable strings, never null.
+struct MoveSnap {
+    bool ok = false;
+    const char* direction = "";
+    double magnitude = 0.0;
+    const char* horizon = "";
+    int64_t start_minute_ms = 0;
+};
+
+// Snap a dragged range onto the outcome grammar. PURE: no ImGui, no chart, no
+// Emscripten, so tests/native/research_url_test.cpp pins it with a host g++.
+//
+// kind is always "reached" (the extreme inside the range, not where it
+// finished). Magnitude snaps DOWN to the rung at or below the excursion and
+// the horizon snaps UP to the closed horizon at or above the span: that
+// pairing is what guarantees the dragged move is a member of the population it
+// opens, the same self-validation the commonality seeds rely on. Snapping the
+// other way would open a population the move itself fails to join.
+//
+// start_minute_ms floors to 60000, NEVER to the chart timeframe (the trap at
+// the top of this file: a 4H chart floors a click to a 4-hour boundary).
+inline MoveSnap snap_move(int64_t start_ms, int64_t end_ms, double start_close, double end_close,
+                          double max_high, double min_low) {
+    MoveSnap none{};
+    if (start_ms <= 0 || end_ms <= start_ms) return none;
+    if (!(start_close > 0.0)) return none;         // zero, negative or NaN anchor
+    if (end_ms - start_ms < kMinuteMs) return none;  // a sub-minute drag addresses no minute
+
+    // Direction is where the range FINISHED (last close against first close);
+    // the magnitude below is how far it REACHED in that direction.
+    const bool up = end_close > start_close;
+
+    const double excursion = up ? (max_high / start_close - 1.0) : (1.0 - min_low / start_close);
+    double rung = 0.0;
+    for (const double r : kOutcomeLadder) {
+        if (!up && r > kOutcomeLadderDownCap) break;
+        if (!(r <= excursion)) break;  // ladder ascends; NaN excursion falls out here
+        rung = r;
+    }
+    if (rung <= 0.0) return none;  // under the smallest rung: not a move this door can count
+
+    // The span is measured in MINUTES between the anchor minute and the last
+    // minute the drag touched, because that is the grid the engine counts on:
+    // the horizon clock starts at the anchor minute, and the extreme sits in
+    // some minute at or before floor(end). Measuring raw milliseconds instead
+    // would name a horizon that is short of the move whenever the drag starts
+    // mid-minute, and cost it membership of its own population.
+    const int64_t span_ms = floor_minute_ms(end_ms) - floor_minute_ms(start_ms);
+    const char* horizon = nullptr;
+    for (const OutcomeHorizon& h : kOutcomeHorizons) {
+        if (h.minutes * kMinuteMs >= span_ms) {
+            horizon = h.suffix;
+            break;
+        }
+    }
+    if (!horizon) return none;  // longer than the closed list's 7d
+
+    return MoveSnap{true, up ? "up" : "down", rung, horizon, floor_minute_ms(start_ms)};
+}
+
+// "up 10% in 4h" - the menu shortcut column, so the snap rule is readable
+// before the click rather than a surprise on the web side. Empty when !ok.
+inline std::string move_label(const MoveSnap& snap) {
+    if (!snap.ok) return std::string();
+    char buf[48];
+    snprintf(buf, sizeof(buf), "%s %g%% in %s", snap.direction, snap.magnitude * 100.0,
+             snap.horizon);
+    return std::string(buf);
+}
+
+// The outcome-first handoff URL, shared byte-for-byte with the web door
+// (OF1 section 3b). Nothing here is executable: the page renders a
+// confirmation row and waits for the user's run action.
+inline std::string outcome_first_url(const std::string& symbol_raw, const MoveSnap& snap,
+                                     const char* scope = "sector",
+                                     const char* base = "https://edgedepth.com") {
+    if (!snap.ok) return std::string();
+    char target[64];
+    // kind is always "reached"; magnitude goes over as the fraction it is.
+    snprintf(target, sizeof(target), "reached,%s,%g,%s", snap.direction, snap.magnitude,
+             snap.horizon);
+    return std::string(base) + "/research/workbench?source=record&study=outcome-first&entry=terminal" +
+           "&target=" + target + "&symbol=" + normalize_symbol(symbol_raw) +
+           "&at=" + iso_utc(snap.start_minute_ms) + "&scope=" + scope;
 }
 
 }  // namespace research_url

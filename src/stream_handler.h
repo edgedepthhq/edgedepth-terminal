@@ -115,13 +115,6 @@ public:
         int64_t timeframe = 60
     ) const;
 
-    void request_historical_liq_heatmap(
-        const Terminal::Pair& pair,
-        int64_t start_time_ms,
-        int64_t end_time_ms,
-        int64_t timeframe
-    ) const;
-
     void request_candles_before(const Terminal::Pair &pair, int64_t timeframe, int64_t before_timestamp_ms,
                                 size_t count) const;
 

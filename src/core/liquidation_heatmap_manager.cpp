@@ -402,7 +402,7 @@ void LiquidationHeatmapManager::finalize_timeline_column(
     const pb::LiquidationHeatmapUpdate& update_pb)
 {
     const LiqHeatmapKey key{pair.exchange, pair.symbol};
-    // Cache the live proto too, so get_band_history (discrete bands) and mask-rebuild
+    // Cache the live proto too, so the mask-rebuild
     // include live updates, not just the historical batch.
     {
         auto& protos = raw_timeline_protos_[key];
@@ -525,61 +525,6 @@ bool LiquidationHeatmapManager::has_timeline_data(const Terminal::Pair& pair) co
     const LiqHeatmapKey key{pair.exchange, pair.symbol};
     auto it = timeline_heatmaps_.find(key);
     return it != timeline_heatmaps_.end() && it->second->has_data();
-}
-
-const std::vector<LiquidationHeatmapManager::BandTrack>&
-LiquidationHeatmapManager::get_band_history(const Terminal::Pair& pair, uint8_t mask) {
-    const LiqHeatmapKey key{pair.exchange, pair.symbol};
-    auto& cache = band_history_cache_[key];
-    const auto pit = raw_timeline_protos_.find(key);
-    if (pit == raw_timeline_protos_.end() || pit->second.empty()) { cache.clear(); return cache; }
-
-    // The backend RailTracker ships the AUTHORITATIVE rail lifecycle on the latest snapshot's
-    // `rails` list: each rail is one episode at a (side, price) level, formed_ms → consumed_ms
-    // (the first LAST-PRICE wick-through; 0 = still pending/standing). Each rail also carries a
-    // per-leverage peak breakdown (peak_5x..100x); we sum ONLY the tiers enabled in `mask` so the
-    // LIQ LEV toggle isolates e.g. the fragile near-price 100x cluster from the structural low-lev
-    // levels. The list is cumulative, so the latest snapshot holds the full picture.
-    const pb::LiquidationHeatmapUpdate& latest = pit->second.rbegin()->second;
-    const int64_t latest_ts = latest.timestamp_ms();
-    // Rebuild when a NEW snapshot arrives (rails change ~1/min) OR the leverage mask changes - both
-    // alter per-rail magnitude/visibility, so a stale cache would silently ignore a toggle.
-    if (latest_ts != 0 && band_history_ts_[key] == latest_ts && band_history_mask_[key] == mask) return cache;
-    band_history_ts_[key] = latest_ts;
-    band_history_mask_[key] = mask;
-    cache.clear();
-    cache.reserve(latest.rails_size());
-    for (int i = 0; i < latest.rails_size(); ++i) {
-        const pb::LiqRail& r = latest.rails(i);
-        if (r.price() <= 0.0) continue;
-        // Sum the enabled leverage tiers (mask bits 0x01=5x .. 0x20=100x). If the snapshot predates
-        // per-tier rails (all tier fields 0 - e.g. older/archive baked data), fall back to the
-        // blended peak_usd so rails still show (unfiltered) rather than vanishing.
-        const double tier_all = r.peak_5x_usd() + r.peak_10x_usd() + r.peak_25x_usd()
-                              + r.peak_50x_usd() + r.peak_75x_usd() + r.peak_100x_usd();
-        double peak;
-        if (tier_all <= 0.0) {
-            peak = r.peak_usd();                       // no per-tier info → blended fallback
-        } else {
-            peak = 0.0;
-            if (mask & 0x01) peak += r.peak_5x_usd();
-            if (mask & 0x02) peak += r.peak_10x_usd();
-            if (mask & 0x04) peak += r.peak_25x_usd();
-            if (mask & 0x08) peak += r.peak_50x_usd();
-            if (mask & 0x10) peak += r.peak_75x_usd();
-            if (mask & 0x20) peak += r.peak_100x_usd();
-            if (peak <= 0.0) continue;                 // per-tier present but none enabled → drop rail
-        }
-        BandTrack b;
-        b.price      = r.price();
-        b.first_ms   = r.formed_ms();
-        b.consume_ms = r.consumed_ms();   // 0 = pending (still standing → draws to the live edge)
-        b.last_ms    = latest_ts;
-        b.peak_usd   = peak;
-        b.last_usd   = peak;
-        cache.push_back(b);
-    }
-    return cache;
 }
 
 void LiquidationHeatmapManager::mark_timeline_dirty(const Terminal::Pair& pair) {

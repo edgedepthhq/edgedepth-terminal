@@ -38,4 +38,10 @@ add_terminal_native_test(double_buffer_test double_buffer_test.cpp)
 add_terminal_native_test(tpo_manager_test tpo_manager_test.cpp)
 add_terminal_native_test(indicator_series_test indicator_series_test.cpp)
 
+# The terminal is a pricing entry point. Keep retired plan windows and universe
+# counts from reappearing independently in its four displayed offer surfaces.
+add_test(
+    NAME product_copy_contract
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_LIST_DIR}/product_copy_contract.cmake)
+
 add_terminal_native_test(footprint_manager_test footprint_manager_test.cpp)

@@ -24,7 +24,6 @@ class VolumeProfileResponse;
 }
 
 class StreamManager;
-namespace Terminal { struct Pair; }
 
 class VolumeProfileManager {
 public:
@@ -64,17 +63,17 @@ public:
 
     // Called by ChartWidget when visible X range changes (debounced internally).
     // stream_mgr used to send the WS request.
-    void request_profile(const Terminal::Pair& pair,
+    void request_profile(const std::string& symbol,
                          int64_t start_ms, int64_t end_ms,
                          double tick_per_row,
                          StreamManager* stream_mgr);
 
     // Called by MessageHandler when VolumeProfileResponse arrives.
-    void on_profile_response(const Terminal::Pair& pair,
+    void on_profile_response(const std::string& symbol,
                              const pb::VolumeProfileResponse& resp);
 
     // Read by ChartWidget during render. Returns nullptr if no valid profile.
-    const ProfileData* get_profile(const Terminal::Pair& pair) const;
+    const ProfileData* get_profile(const std::string& symbol) const;
 
     // Invalidate cached profile - forces re-request on next chart render.
     // Used on replay rewind to discard stale future volume data.
@@ -96,9 +95,7 @@ public:
     void  set_enabled(bool v)     { enabled_ = v; }
 
 private:
-    std::unordered_map<std::string, std::unordered_map<std::string, ProfileData>> profiles_;
-    std::string last_exchange_, last_symbol_;
-    double last_tick_per_row_ = 0.0;
+    std::unordered_map<std::string, ProfileData> profiles_;
 
     // Config state
     Mode  mode_         = Mode::Standard;

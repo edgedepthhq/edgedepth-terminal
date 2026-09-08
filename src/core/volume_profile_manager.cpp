@@ -16,7 +16,7 @@ static int64_t now_ms() {
 }
 
 void VolumeProfileManager::request_profile(
-    const Terminal::Pair& pair,
+    const std::string& symbol,
     int64_t start_ms, int64_t end_ms,
     double tick_per_row,
     StreamManager* stream_mgr)
@@ -28,9 +28,7 @@ void VolumeProfileManager::request_profile(
     if (now - last_request_time_ms_ < kDebounceMs) return;
 
     // Check if range changed significantly
-    if (last_exchange_ == pair.exchange && last_symbol_ == pair.symbol &&
-        last_tick_per_row_ == tick_per_row && now - last_request_time_ms_ < 5000 &&
-        last_start_ms_ != 0 && last_end_ms_ != 0) {
+    if (last_start_ms_ != 0 && last_end_ms_ != 0) {
         double range = static_cast<double>(last_end_ms_ - last_start_ms_);
         double start_delta = std::abs(static_cast<double>(start_ms - last_start_ms_));
         double end_delta = std::abs(static_cast<double>(end_ms - last_end_ms_));
@@ -40,9 +38,6 @@ void VolumeProfileManager::request_profile(
         }
     }
 
-    last_exchange_ = pair.exchange;
-    last_symbol_ = pair.symbol;
-    last_tick_per_row_ = tick_per_row;
     last_request_time_ms_ = now;
     last_start_ms_ = start_ms;
     last_end_ms_ = end_ms;
@@ -52,8 +47,8 @@ void VolumeProfileManager::request_profile(
     req["method"] = "get_volume_profile";
     req["data"] = {
         {"pair", {
-            {"exchange", pair.exchange},
-            {"symbol", pair.symbol}
+            {"exchange", "binancef"},
+            {"symbol", symbol}
         }},
         {"start_time", start_ms},
         {"end_time", end_ms},
@@ -64,10 +59,10 @@ void VolumeProfileManager::request_profile(
 }
 
 void VolumeProfileManager::on_profile_response(
-    const Terminal::Pair& pair,
+    const std::string& symbol,
     const pb::VolumeProfileResponse& resp)
 {
-    ProfileData& pd = profiles_[pair.exchange][pair.symbol];
+    ProfileData& pd = profiles_[symbol];
     pd.poc = resp.poc();
     pd.vah = resp.vah();
     pd.val = resp.val();
@@ -96,19 +91,17 @@ void VolumeProfileManager::on_profile_response(
 }
 
 const VolumeProfileManager::ProfileData*
-VolumeProfileManager::get_profile(const Terminal::Pair& pair) const
+VolumeProfileManager::get_profile(const std::string& symbol) const
 {
-    auto exchange = profiles_.find(pair.exchange);
-    if (exchange == profiles_.end()) return nullptr;
-    auto it = exchange->second.find(pair.symbol);
-    if (it == exchange->second.end() || !it->second.valid) return nullptr;
+    auto it = profiles_.find(symbol);
+    if (it == profiles_.end() || !it->second.valid) return nullptr;
     return &it->second;
 }
 
 void VolumeProfileManager::invalidate(const std::string& symbol) {
-    for (auto& [exchange, symbols] : profiles_) {
-        auto it = symbols.find(symbol);
-        if (it != symbols.end()) it->second.valid = false;
+    auto it = profiles_.find(symbol);
+    if (it != profiles_.end()) {
+        it->second.valid = false;
     }
     // Reset debounce so next render triggers a fresh request
     last_request_time_ms_ = 0;
@@ -117,8 +110,8 @@ void VolumeProfileManager::invalidate(const std::string& symbol) {
 }
 
 void VolumeProfileManager::invalidate_all() {
-    for (auto& [exchange, symbols] : profiles_) {
-        for (auto& [symbol, pd] : symbols) pd.valid = false;
+    for (auto& [sym, pd] : profiles_) {
+        pd.valid = false;
     }
     last_request_time_ms_ = 0;
     last_start_ms_ = 0;

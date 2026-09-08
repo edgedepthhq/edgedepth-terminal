@@ -5,6 +5,7 @@
 #include "upsell_modal.h"
 
 #include "imgui.h"
+#include <cstdio>
 #include <nlohmann/json.hpp>
 #include "../rendering/theme.h"
 #include "../core/entitlements.h"
@@ -66,26 +67,27 @@ UpsellModal& UpsellModal::instance() {
 // Default contextual subline for a gate (overridden by open()'s `detail`).
 static const char* default_subline(UpsellModal::Trigger t, bool login) {
     using T = UpsellModal::Trigger;
-    if (login) return "Replay a full free day from any account - or go Pro for the full 30-day archive, up to the live edge.";
+    if (login) return "Replay a full Free day from any account, then review Pro and Research when you need deeper history.";
     switch (t) {
         case T::Range:
         case T::Preset:     return "Free replays one archived day (shown below). Anything newer or older is Pro.";
         case T::Speed:      return "Free replay plays up to 2\xc3\x97. Pro plays up to 4\xc3\x97.";
-        case T::Symbol:     return "Free replay covers 6 majors. Pro replays all 550+ symbols.";
+        case T::Symbol:     return "Free replay covers 6 majors. Pro replays every recorded pair.";
         case T::Layer:      return "The Liquidation Field is free. Levels, Observed and per-tier LIQ-LEV isolation are Pro layers.";
         case T::Events:     return "This archived event is outside the free recent window.";
         case T::Lesson:     return "This lesson is available to Pro subscribers.";
         case T::Daily:      return "You've used all 6 free replays for today - they reset at 00:00 UTC.";
         case T::ServerTier: return "That replay is outside your free window.";
         case T::Research:   return "Reading the record at a past minute is a Pro feature. The live read (this minute) stays free.";
-        default:            return "A free replay day is included daily. Pro unlocks the full 30-day archive, all symbols, and every layer.";
+        default:            return "A Free replay day is included. Pro unlocks deeper replay, every recorded pair and every layer.";
     }
 }
 
 static const char* modal_headline(UpsellModal::Trigger t, bool login) {
     if (login) return "Log in to replay";
     if (t == UpsellModal::Trigger::Research) return "Investigate past moments with Pro";
-    return "Replay any moment of the last 30 days";
+    if (t == UpsellModal::Trigger::Range) return "Replay this exact moment";
+    return "Unlock more of the recorded market";
 }
 
 void UpsellModal::open(Trigger t, const char* detail, const char* layer) {
@@ -264,7 +266,11 @@ void UpsellModal::render_modal_body() {
         ImGui::Unindent(15.0f);
         ImGui::Dummy(ImVec2(0.0f, 4.0f));
     };
-    bullet("30-day tick replay across all 660+ pairs, up to 4\xc3\x97");
+    char replay_proof[128];
+    snprintf(replay_proof, sizeof(replay_proof),
+             "%d-day tick replay across every recorded pair, up to 4\xc3\x97",
+             Entitlements::pro_lookback_days());
+    bullet(replay_proof);
     bullet("Full archive, replay layers, lessons, scanner and alerts");
 
     if (!login_variant_) {

@@ -325,26 +325,6 @@ void StreamManager::request_historical_heatmap(const Terminal::Pair &pair, const
     send_message(request.dump());
 }
 
-void StreamManager::request_historical_liq_heatmap(
-    const Terminal::Pair& pair,
-    int64_t start_time_ms,
-    int64_t end_time_ms,
-    int64_t timeframe) const {
-    json request = {
-        {"method", "get_historical_liq_heatmap"},
-        {"data", {
-                {"pair", {
-                    {"exchange", pair.exchange},
-                    {"symbol", pair.symbol}
-                }},
-                {"timeframe", timeframe},
-                {"start_time", start_time_ms},
-                {"end_time", end_time_ms}
-        }}
-    };
-    send_message(request.dump());
-}
-
 
 template<typename T>
 void StreamManager::unsubscribe_impl(

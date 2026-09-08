@@ -171,7 +171,7 @@ public:
     // Convenience: single symbol replay from a specific time
     void request_replay_from(const std::string& symbol, int64_t timestamp_ms, float speed = 1.0f, int64_t timeframe_seconds = 300);
 
-    // Archive replay (for historical events beyond the 30-day live window). Boots
+    // Archive replay (for historical events beyond the rolling plan window). Boots
     // an archived market-event session: POST /replay/session/archive {event_id} →
     // join (same WS join path as NATS). `symbol` is for client-side display/context
     // (control-bar caption); the backend resolves event_id → archive_path + window.

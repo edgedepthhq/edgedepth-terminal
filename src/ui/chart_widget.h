@@ -32,6 +32,7 @@ class ReplayManager;
 #include "core/volume_profile_manager.h"
 #include "core/tpo_manager.h"
 #include "core/symbol_metadata.h"
+#include "core/research_url.h"  // MoveSnap: the shift-drag snapped to the outcome ladder
 #include "rendering/liq_field_renderer.h"
 #include "ui/drawing/drawing_layer.h"
 #include "ui/settings_panel.h"
@@ -82,6 +83,7 @@ constexpr bool ct_allows_time_overlays(ChartType t) {
 
 class ChartWidget : public Widget {
 public:
+    static bool selection_escape_consumed(int frame) { return selection_escape_frame_ == frame; }
     // The pair this chart draws. A replay of a different symbol replaces the
     // chart, and the exit rebuild has to restore the pair that was live.
     [[nodiscard]] const Terminal::Pair& pair() const { return pair_; }
@@ -173,10 +175,15 @@ public:
     // Replay time-range selection (Shift+drag on chart)
     struct ReplaySelection {
         bool active = false;
+        bool dragged = false;
+        bool cancelled = false;
+        int64_t press_ms = 0;
         int64_t start_ms = 0;
         int64_t end_ms = 0;
     };
     ReplaySelection replay_selection_;
+    bool selection_popup_was_open_ = false;
+    static inline int selection_escape_frame_ = -1;
     int64_t context_menu_time_ms_ = 0;  // Captured at right-click, used by popup
     // The right-clicked MINUTE (60000-floored), captured in the same block as
     // context_menu_time_ms_. NEVER reuse context_menu_time_ms_ for research:
@@ -185,6 +192,17 @@ public:
     // minute-addressed research read (the spec's named trap).
     int64_t context_menu_minute_ms_ = 0;
     double  context_menu_price_ = 0.0;  // Price under cursor, captured at right-click
+
+    // The shift-drag selection read as a MOVE and snapped to the outcome
+    // ladder, captured at right-click beside the two timestamps above so the
+    // menu says the same thing for as long as it is open. Renko has no
+    // selection and clears it. See research_url::snap_move.
+    struct SelectedMove {
+        research_url::MoveSnap snap{};
+        int64_t range_minutes = 0;  // the dragged length, for the usage event
+    };
+    SelectedMove context_menu_move_;
+    SelectedMove read_selected_move() const;
 
     // Measure tool (right-click "Measure from here"): anchor + live readout that
     // follows the cursor (dPrice, d%, elapsed, candle count) until click/Esc.
@@ -315,9 +333,6 @@ private:
     int64_t heatmap_loaded_timeframe_ = 0;
     float heatmap_sensitivity_ = 1.0f;
     std::chrono::steady_clock::time_point last_heatmap_rebuild_;
-    std::chrono::steady_clock::time_point last_liq_heatmap_scroll_load_time_;
-    int64_t liq_heatmap_data_boundary_ms_ = 0;  // Stop requesting older than this
-    int64_t liq_heatmap_prev_available_min_ = 0; // Track if data boundary was reached
     ImPlotRect last_rebuilt_range_{0, 0, 0, 0};
     bool viewport_initialized_ = false;
 
@@ -334,9 +349,6 @@ private:
 
     // ─── Liquidation Heatmap Overlay ─────────────────────────────────────
     bool recorder_view_applied_ = false;  // CLIP_FACTORY: script view overrides, one-shot
-    bool liq_heatmap_enabled_ = true;
-    bool liq_heatmap_subscribed_ = false;
-    bool liq_timeline_requested_ = false;
     bool liq_extend_levels_ = false;     // V3: OFF - backend EMA provides persistence, forward-fill smears bands
 
     // ─── Liq Heatmap Visual Controls (MMT-style) ────────────────────────
@@ -572,12 +584,8 @@ private:
     void render_pattern_overlay(double visible_x_min, double visible_x_max);
 
     // Liquidation heatmap overlay
-    void render_liquidation_heatmap(double visible_x_min, double visible_x_max);
     void render_liq_timeline();
     // The Field itself lives in liq_field_ (rendering/liq_field_renderer.h).
-    void request_liq_heatmap_data();
-    void update_liq_heatmap_scroll();
-    void toggle_liquidation_heatmap();
     void render_liq_profile();   // right-edge sidebar histogram (Profile:: renderer, mirrors VPVR)
     void render_liq_observed();  // WS4 Observed markers - real @forceOrder dots (drawn over candles)
     void toggle_liq_census();    // "Liq Levels HL" - subscribe/unsubscribe stream 34 (census)
@@ -619,9 +627,6 @@ private:
     void handle_volume(const Terminal::Volume& vol);
     struct CVDWickData { double cvd_high; double cvd_low; };
     std::unordered_map<int64_t, CVDWickData> cvd_wick_cache_;
-    void subscribe_chart_streams();
-    void unsubscribe_chart_streams();
-    StreamManager* chart_stream_mgr_ = nullptr;
     bool volume_subscribed_ = false;
     int64_t volume_sub_tf_ms_ = 0;  // Timeframe (ms) of current Volume subscription
 

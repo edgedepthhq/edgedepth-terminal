@@ -5,7 +5,6 @@
 #include <cstdlib>
 #include "stream_handler.h"
 #include "core/trade_at_price.h"
-#include "core/data_queues.h"
 
 static std::vector<nlohmann::json> sent;
 static unsigned short ready_state = 1;
@@ -23,34 +22,6 @@ static void check(bool value, const char* message) {
     if (!value) { std::fprintf(stderr, "%s\n", message); std::exit(1); }
 }
 int main() {
-    {
-        StreamManager live(1), replay(0);
-        replay.set_replay_mode(true);
-        QueueBacklogCounters counters;
-        DispatchQueue pending(counters);
-        live.set_dispatch_queue(&pending);
-        const StreamKey key{{"binancef", "btcusdt"}, Terminal::Stream::Stats, 300000};
-        int retired_calls = 0, current_calls = 0;
-        StreamHandler<Terminal::Stat> retired{&retired_calls,
-            [](void* owner, const Terminal::Stat&) { ++*static_cast<int*>(owner); }};
-        live.subscribe_stats(key, retired);
-        live.dispatch_stat(key, {}); // queued before the context changes
-        live.pause_live_subscriptions();
-        // The owner releases the original manager, never whichever manager the
-        // shared AppContext happens to point to after the swap.
-        live.unsubscribe_stats(key, retired.widget_ptr);
-        replay.subscribe_stats(key, retired);
-        replay.unsubscribe_stats(key, retired.widget_ptr);
-        live.subscribe_stats(key, {&current_calls, retired.callback});
-        live.resume_live_subscriptions();
-        std::vector<PendingDispatch> items;
-        pending.drain(items);
-        for (auto& item : items) item.execute(live);
-        check(retired_calls == 0 && current_calls == 1,
-              "late stats target the current owner after live/replay teardown");
-        live.unsubscribe_stats(key, &current_calls);
-    }
-
     {
         StreamManager sm(1);
         int owner = 0;

@@ -1445,8 +1445,9 @@ void main_loop() {
         // A drawing-tool Esc (cancel placement/deselect, consumed by the chart's
         // DrawingLayer during the widget pass above) must not ALSO stop a
         // running replay - the replay Esc handler reads the raw key.
-        if (!g_app.drawing_mgr ||
-            !g_app.drawing_mgr->escape_consumed(ImGui::GetFrameCount()))
+        if ((!g_app.drawing_mgr ||
+             !g_app.drawing_mgr->escape_consumed(ImGui::GetFrameCount())) &&
+            !ChartWidget::selection_escape_consumed(ImGui::GetFrameCount()))
             g_app.replay_mgr->process_keyboard_shortcuts();
         // In embedded lesson mode the React chrome owns the transport - don't
         // render the native ImGui control bar (it would stack under the React one).
@@ -1571,6 +1572,18 @@ void main_loop() {
 }
 
 extern "C" {
+    // A modifier may have been pressed while a surrounding web control had
+    // focus. Browser mouse events carry its current state even when SDL never
+    // received that keydown. Queue it before SDL's mouse press is processed.
+    EMSCRIPTEN_KEEPALIVE
+    void sync_pointer_modifiers(int ctrl, int shift, int alt, int super) {
+        ImGuiIO& io = ImGui::GetIO();
+        io.AddKeyEvent(ImGuiMod_Ctrl, ctrl != 0);
+        io.AddKeyEvent(ImGuiMod_Shift, shift != 0);
+        io.AddKeyEvent(ImGuiMod_Alt, alt != 0);
+        io.AddKeyEvent(ImGuiMod_Super, super != 0);
+    }
+
     // Set the primary chart's timeframe (seconds). Called by the embedded host
     // (lesson Explore / studio) via Module.__set_chart_timeframe. Runs on the main
     // thread between frames - same change_timeframe path the live topbar uses.
@@ -2035,10 +2048,18 @@ SDL_GL_MakeCurrent(g_app.window, g_app.gl_context);
         var canvas = Module.canvas;
         // Focus immediately
         canvas.focus();
-        // Re-focus on any click anywhere in the page
-        document.addEventListener('mousedown', function() {
+        // Only canvas clicks focus the terminal. Surrounding web inputs keep
+        // their focus, and mouse modifiers repair keydowns missed while away.
+        var syncModifiers = function(event) {
+            Module['_sync_pointer_modifiers'](
+                event.ctrlKey, event.shiftKey, event.altKey, event.metaKey);
+        };
+        canvas.addEventListener('mousedown', function(event) {
+            syncModifiers(event);
             canvas.focus();
-        });
+        }, true);
+        canvas.addEventListener('mousemove', syncModifiers, true);
+        canvas.addEventListener('mouseup', syncModifiers, true);
     });
     // Clip recorder support probe - once at boot. Negotiates the MediaRecorder
     // container (vp9 → vp8 → webm → mp4); a failed probe renders the transport's

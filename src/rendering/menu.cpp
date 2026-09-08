@@ -569,7 +569,7 @@ void render_symbol_picker_popup(
                          g_symbol_picker.sort_ascending != g_symbol_picker.prev_sort_asc);
 
     // Live ticker/scanner drift only forces a rebuild every 2s - re-sorting
-    // ~660 symbols with per-element manager lookups several times a second was
+    // Hundreds of symbols with per-element manager lookups several times a second was
     // the picker's real cost (immediate-mode redraw is already clipped/cheap).
     const int64_t now_ms_pick = static_cast<int64_t>(ImGui::GetTime() * 1000.0);
     bool data_drift = (now_ms_pick - g_symbol_picker.last_data_rebuild_ms > 2000) &&

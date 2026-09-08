@@ -2,6 +2,7 @@
 
 #include "rendering/theme.h"
 #include "replayer/replay_manager.h"
+#include "core/entitlements.h"
 
 #include <nlohmann/json.hpp>
 
@@ -534,16 +535,23 @@ void ReplayLibraryWidget::render() {
         ImGui::TextColored(
             Theme::Tokens::TX2,
             "Your local terminal starts recording today. EdgeDepth has already "
-            "been recording 660+ markets for months.");
+            "been recording every supported Binance perp for months.");
         ImGui::PopTextWrapPos();
+        char replay_offer[96];
+        snprintf(replay_offer, sizeof(replay_offer),
+                 "Pro lets you replay any moment from the last %d days.",
+                 Entitlements::pro_lookback_days());
         ImGui::TextColored(
             Theme::Tokens::TX3,
-            "Pro lets you replay any moment from the last 30 days.");
+            "%s", replay_offer);
         ImGui::PushStyleColor(ImGuiCol_Button, Theme::Tokens::BRAND);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Theme::Tokens::BRAND_TX);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, Theme::Tokens::BRAND);
         ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::BRAND_INK);
-        if (ImGui::Button("Unlock 30-day replay", ImVec2(176.0f, 28.0f))) {
+        char replay_cta[64];
+        snprintf(replay_cta, sizeof(replay_cta), "Unlock %d-day replay",
+                 Entitlements::pro_lookback_days());
+        if (ImGui::Button(replay_cta, ImVec2(176.0f, 28.0f))) {
             edrl_open_url(
                 "https://edgedepth.com/pricing?utm_source=terminal&"
                 "utm_medium=replay_library&utm_campaign=oss_time_travel");

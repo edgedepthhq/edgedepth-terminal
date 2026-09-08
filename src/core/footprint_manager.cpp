@@ -10,35 +10,6 @@ void FootprintManager::store_footprint(const std::string& symbol, CandleFootprin
     fp.valid = !fp.levels.empty();
     fp.version = ++data_version_;
     data_[symbol][fp.start_time] = std::move(fp);
-    // Continuous community snapshots must not grow this cache without bound.
-    // Evict least recently supplied buckets, so scrolling into an older range
-    // can still load it. Missing buckets remain gaps and can be requested again.
-    size_t cells = 0, buckets = 0;
-    for (const auto& [market, minutes] : data_) {
-        buckets += minutes.size();
-        for (const auto& [start, value] : minutes) cells += value.levels.size();
-    }
-    while (cells > 250000 || buckets > 4096) {
-        auto oldest_market = data_.end();
-        int64_t oldest_start = 0;
-        uint64_t oldest_version = std::numeric_limits<uint64_t>::max();
-        for (auto market = data_.begin(); market != data_.end(); ++market) {
-            for (const auto& [start, value] : market->second) {
-                if (value.version < oldest_version) {
-                    oldest_market = market;
-                    oldest_start = start;
-                    oldest_version = value.version;
-                }
-            }
-        }
-        if (oldest_market == data_.end()) break;
-        cells -= oldest_market->second.at(oldest_start).levels.size();
-        oldest_market->second.erase(oldest_start);
-        // Merged candles can reference several minute buckets.
-        merged_cache_.erase(oldest_market->first);
-        if (oldest_market->second.empty()) data_.erase(oldest_market);
-        --buckets;
-    }
 }
 
 void FootprintManager::on_trade(const std::string& market, int64_t ts,

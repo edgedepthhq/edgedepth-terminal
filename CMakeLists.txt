@@ -583,6 +583,7 @@ set(COMMON_COMPILE_FLAGS
 # `Module.__name`.
 set(WASM_EXPORTED_FUNCTIONS
         _main
+        _sync_pointer_modifiers
         __education_on_lesson_fetch
         __edu_cmd_continue
         __edu_cmd_back

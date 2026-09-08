@@ -453,7 +453,7 @@ namespace {
                 char reach[32];
                 snprintf(reach, sizeof(reach), "FULL %d DAYS", Entitlements::pro_lookback_days());
                 ent_row("Replay window",   reach,            Tokens::BRAND_TX);
-                ent_row("Replay symbols",  "ALL 550+ PAIRS", Tokens::BRAND_TX);
+                ent_row("Replay symbols",  "ALL RECORDED",   Tokens::BRAND_TX);
                 ent_row("Archived events", "ALL ARCHIVED",   Tokens::BRAND_TX);
                 ent_row("Guided courses",  "FULL CATALOG",   Tokens::BRAND_TX);
             } else {

@@ -55,20 +55,18 @@ enum class Tier : uint8_t { Free, Trader, Pro, Research, Admin };
 inline constexpr int64_t FREE_WINDOW_START_AGE_MS = 72LL * 3600LL * 1000LL;         // legacy band: earliest start
 inline constexpr int64_t FREE_WINDOW_END_AGE_MS   = 48LL * 3600LL * 1000LL;         // legacy band: latest end
 inline constexpr int64_t FREE_WINDOW_MAX_SPAN_MS  = 24LL * 3600LL * 1000LL;         // one day
-inline constexpr int64_t PRO_REPLAY_LOOKBACK_MS   = 30LL * 24LL * 3600LL * 1000LL;  // 30d (DEFAULT, not a ceiling)
+inline constexpr int64_t PRO_REPLAY_LOOKBACK_MS   = 90LL * 24LL * 3600LL * 1000LL;  // 90d (DEFAULT, not a ceiling)
 
 // Pro lookback is a DEFAULT the backend can raise. Accounts whose replay token
-// carries a signed maxLookbackDays claim get more (staff + research subscribers
-// are minted at 90d; internal/replay_session/handler.go bounds any claim by
-// maxReplayLookback = 90d). Hard-coding 30d here made the client refuse clicks the
-// backend would have served: the cryptohftdata backfill reaches 2026-05-15, ~71
-// days back, and was unreachable from the UI ("Replay locked - beyond the 30-day
-// archive") even for admin.
+// carries a signed maxLookbackDays claim get more (Research and staff track the
+// full recorded corpus). Hard-coding 30d here made Free viewers see an obsolete
+// Pro offer even after Pro moved to 90 days. Keep the default aligned with Pro;
+// deeper signed claims still override it for Research and staff.
 //
 // The host injects window.__EDGEDEPTH_REPLAY_LOOKBACK_DAYS__ from the SAME number
 // it mints into the token, so the client affordance and server enforcement cannot
 // disagree - exactly how the free window is already resolved. Absent or invalid
-// leaves 30d, so an ordinary Pro user sees their real reach and never fires a
+// leaves 90d, so an ordinary Pro user sees their real reach and never fires a
 // doomed POST.
 inline int64_t& pro_lookback_ms()   { static int64_t v = PRO_REPLAY_LOOKBACK_MS; return v; }
 inline int      pro_lookback_days() { return static_cast<int>(pro_lookback_ms() / (24LL * 3600LL * 1000LL)); }
@@ -204,7 +202,7 @@ inline void detect() {
     // Backend-authoritative replay reach (window.__EDGEDEPTH_REPLAY_LOOKBACK_DAYS__),
     // set by the host from the SAME number it mints into the replay token.
     // Clamped to [1, kMaxLookbackDaysSanity]; anything absent or absurd leaves
-    // the 30d default rather than advertising reach the backend will refuse.
+    // the 90d Pro default rather than advertising reach the backend will refuse.
     //
     // The bound used to be 90, mirroring handler.go's old maxReplayLookback.
     // That constant was doing two jobs, safety bound AND the research tier's
@@ -270,7 +268,7 @@ inline bool is_free() { return current() == Tier::Free; }
 inline bool is_authenticated() { return is_pro() || !user_email().empty(); }
 
 // ── Replay window for the current tier ───────────────────────────────────────
-// Earliest replayable START. Pro = now−30d. Free = the resolved free-window start
+// Earliest replayable START. Pro = now−90d by default. Free = the resolved free-window start
 // (backend archived-day when known, else the client's own today-2 calendar day).
 inline int64_t replay_start_floor_ms(int64_t now_ms) {
     if (is_pro()) return now_ms - pro_lookback_ms();

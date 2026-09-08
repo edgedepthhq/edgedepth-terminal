@@ -2442,10 +2442,10 @@ bool ReplayManager::render_chart_context_menu(
             ImGui::PopStyleColor();
             if (ImGui::IsItemHovered())
                 Theme::tooltip("Free replay covers 6 majors (%s).\n"
-                                  "Pro replays all 660+ symbols.",
+                                  "Pro replays every recorded pair.",
                                   Entitlements::free_symbols_label());
         } else if (Entitlements::is_pro()) {
-            // Pro, but this point is older than the 30-day archive. No free-day
+            // Pro, but this point is older than the account's replay window. No free-day
             // rescue applies; just say why.
             ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::WARN);
             char lock_lbl[64], lock_tip[96];
@@ -2460,24 +2460,27 @@ bool ReplayManager::render_chart_context_menu(
             if (ImGui::IsItemHovered())
                 Theme::tooltip("%s", lock_tip);
         } else {
-            // Free tier, free symbol, clicked outside the free day. Redesign 1f:
-            // the free-day rescue (teal + 24H), a locked "this moment" row
-            // (amber + PRO tag), then an inset panel that explains the lock with
-            // a mini 30-day timeline and the upgrade CTA. Backend re-verifies.
-            char offer[64];
-            snprintf(offer, sizeof(offer), "Replay %s: your free day",
+            // Free tier, free symbol, clicked outside the Free day. Keep the
+            // context menu about actions: one available replay and one clearly
+            // locked exact-minute replay. The spacious modal owns the offer.
+            char free_hint[64];
+            snprintf(free_hint, sizeof(free_hint), "%s \xc2\xb7 24H",
                      Entitlements::free_window_short_label().c_str());
             ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::BRAND_TX);
             // Same navigation, same refusal: disable rather than render a dead row.
-            if (ImGui::MenuItem(offer, "24H", false, focused_replay_nav_allowed())) {
+            if (ImGui::MenuItem("Replay your free day", free_hint, false,
+                                focused_replay_nav_allowed())) {
                 int64_t fw_s = 0, fw_e = 0;
                 Entitlements::free_window_range(now_ms(), fw_s, fw_e);
                 open_focused_replay(symbol, fw_s, fw_e, fw_s);
                 initiated = true;
             }
             ImGui::PopStyleColor();
+            if (ImGui::IsItemHovered())
+                Theme::tooltip("Opens the full Free replay day: %s.",
+                               Entitlements::free_window_label().c_str());
 
-            // Locked "replay this moment" row: amber-tinted, lock + bordered PRO tag.
+            // Locked exact-minute row: amber-tinted, lock + bordered PRO tag.
             {
                 ImDrawList* dl = ImGui::GetWindowDrawList();
                 const ImVec2 rp = ImGui::GetCursorScreenPos();
@@ -2489,82 +2492,23 @@ bool ReplayManager::render_chart_context_menu(
                 const float cy = rp.y + rh * 0.5f;
                 draw_mini_lock(dl, ImVec2(rp.x + 13.0f, cy), 9.0f, Theme::u32(Theme::Tokens::WARN));
                 dl->AddText(ImVec2(rp.x + 26.0f, cy - ImGui::GetFontSize() * 0.5f),
-                            Theme::u32(Theme::Tokens::TX1), "Replay this moment");
+                            Theme::u32(Theme::Tokens::TX1), "Replay this exact moment");
                 const ImVec2 tsz = ImGui::CalcTextSize("PRO");
                 const float tw = tsz.x + 12.0f, tx = rp.x + rw - tw - 8.0f, ty = cy - 8.0f;
                 dl->AddRect(ImVec2(tx, ty), ImVec2(tx + tw, ty + 16.0f),
                             Theme::u32(Theme::Tokens::WARN, 0.60f), 2.0f, 0, 1.0f);
                 dl->AddText(ImVec2(tx + 6.0f, ty + (16.0f - tsz.y) * 0.5f),
                             Theme::u32(Theme::Tokens::WARN), "PRO");
-                if (rclk) ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Range);
+                if (rclk) {
+                    char detail[192];
+                    snprintf(detail, sizeof(detail),
+                             "This exact chart minute is outside your Free replay day. "
+                             "Pro unlocks %d-day replay across every recorded pair.",
+                             Entitlements::pro_lookback_days());
+                    ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Range, detail);
+                }
             }
 
-            // Inset hint panel (darker bg-0 box): reason + mini timeline + CTAs.
-            // Height derived from the wrapped copy so the CTAs never clip.
-            char hbuf[256];
-            snprintf(hbuf, sizeof(hbuf),
-                     "Free replay covers %s on the 6 majors. Pro replays any moment "
-                     "of the last 30 days, on all 660+ pairs.",
-                     Entitlements::free_window_label().c_str());
-            const float pw = ImGui::GetContentRegionAvail().x;
-            const float text_h = ImGui::CalcTextSize(hbuf, nullptr, false, pw - 24.0f).y;
-            const float child_h = 112.0f + text_h;
-            ImGui::PushStyleColor(ImGuiCol_ChildBg, Theme::Tokens::BASE);
-            ImGui::PushStyleColor(ImGuiCol_Border, Theme::Tokens::BD2);
-            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 0.0f);
-            ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 10));
-            ImGui::BeginChild("##rlockhint", ImVec2(-1.0f, child_h), true,
-                              ImGuiWindowFlags_NoScrollbar);
-            {
-                ImDrawList* cdl = ImGui::GetWindowDrawList();
-                ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::WARN);
-                ImGui::TextUnformatted("OUTSIDE YOUR FREE WINDOW");
-                ImGui::PopStyleColor();
-                ImGui::Dummy(ImVec2(0, 4));
-                // The explanation copy is sans (var(--font-sans) in the design);
-                // the surrounding menu chrome is mono (pushed by the caller).
-                ImGui::PushFont(Theme::Fonts::ui());
-                ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::TX2);
-                ImGui::TextWrapped("%s", hbuf);
-                ImGui::PopStyleColor();
-                ImGui::PopFont();
-                ImGui::Dummy(ImVec2(0, 8));
-                // mini 30-day timeline: track + amber free-day slice + white tick.
-                const ImVec2 bp = ImGui::GetCursorScreenPos();
-                const float bw = ImGui::GetContentRegionAvail().x, bh = 5.0f;
-                cdl->AddRectFilled(bp, ImVec2(bp.x + bw, bp.y + bh), Theme::u32(Theme::Tokens::BD2));
-                cdl->AddRectFilled(ImVec2(bp.x + bw * 0.93f, bp.y), ImVec2(bp.x + bw, bp.y + bh),
-                                   Theme::u32(Theme::Tokens::WARN));
-                cdl->AddRectFilled(ImVec2(bp.x + bw * 0.40f, bp.y - 2.0f),
-                                   ImVec2(bp.x + bw * 0.40f + 1.5f, bp.y + bh + 2.0f),
-                                   Theme::u32(Theme::Tokens::TX1));
-                const float ly = bp.y + bh + 6.0f;
-                const ImU32 lc = Theme::u32(Theme::Tokens::TX3);
-                cdl->AddText(ImVec2(bp.x, ly), lc, "-30D");
-                const ImVec2 mmsz = ImGui::CalcTextSize("THIS MOMENT");
-                cdl->AddText(ImVec2(bp.x + (bw - mmsz.x) * 0.5f, ly), lc, "THIS MOMENT");
-                const float nw = ImGui::CalcTextSize("NOW").x;
-                cdl->AddText(ImVec2(bp.x + bw - nw, ly), lc, "NOW");
-                ImGui::Dummy(ImVec2(bw, bh + 22.0f));
-                ImGui::PushStyleColor(ImGuiCol_Button, Theme::Tokens::BRAND);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Theme::Tokens::BRAND_TX);
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, Theme::Tokens::BRAND);
-                ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::BRAND_INK);
-                if (ImGui::Button("See Pro: $20/mo billed yearly"))
-                    ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Range);
-                ImGui::PopStyleColor(4);
-                ImGui::SameLine(0.0f, 10.0f);
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Theme::Tokens::ELEV);
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, Theme::Tokens::ELEV);
-                ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::TX3);
-                if (ImGui::Button("Not now")) ImGui::CloseCurrentPopup();
-                ImGui::PopStyleColor(4);
-            }
-            ImGui::EndChild();
-            ImGui::PopStyleVar(3);
-            ImGui::PopStyleColor(2);
         }
 
         // Replay an EXACT window → the same focused viewer. The window is a
@@ -3504,7 +3448,7 @@ void ReplayManager::render_replay_launcher() {
         else     ImGui::Text("Free replay: %s \xc2\xb7 new window daily.", Entitlements::free_symbols_label());
         ImGui::PopStyleColor();
 
-        // ── 30-day rail: RECENT (locked) · FREE band (hero) · ARCHIVE (locked)
+        // ── replay rail: RECENT (locked) · FREE band (hero) · ARCHIVE (locked)
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
         const float rail_h = 48.0f;
         const ImVec2 r0 = ImGui::GetCursorScreenPos();

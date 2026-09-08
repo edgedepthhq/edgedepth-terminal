@@ -52,8 +52,6 @@ public:
     // level: when it first appeared, when it was last significant, and its peak USD - for
     // the enabled leverage tiers only. This is the data behind the discrete band-lines
     // (NOT the GPU field). Cached; rebuilt when proto count or leverage mask changes.
-    struct BandTrack { double price = 0; int64_t first_ms = 0; int64_t last_ms = 0; int64_t consume_ms = 0; double peak_usd = 0; double last_usd = 0; };
-    const std::vector<BandTrack>& get_band_history(const Terminal::Pair& pair, uint8_t mask);
 
     // ─── Observed @forceOrder events (WS4 "Observed" chart layer) ─────────
     // Discrete REAL liquidations, time-ordered per symbol - the fact layer
@@ -116,11 +114,7 @@ private:
     std::map<LiqHeatmapKey, std::map<int64_t, pb::LiquidationHeatmapUpdate>> raw_timeline_protos_;
     static constexpr size_t kMaxCachedProtos = 4000; // Match backend's 4000 candle limit
 
-    // Cache for get_band_history's return value - rebuilt from the latest snapshot's backend rails
     // list only when that snapshot's timestamp changes (~1/min), NOT every render frame.
-    std::map<LiqHeatmapKey, std::vector<BandTrack>> band_history_cache_;
-    std::map<LiqHeatmapKey, int64_t> band_history_ts_;   // latest snapshot ts the cache was built for
-    std::map<LiqHeatmapKey, uint8_t> band_history_mask_; // leverage mask the cache was built for (rebuild on toggle)
 
     // Rebuild timeline GPU heatmap from cached raw protos with current settings
     void rebuild_timeline(const LiqHeatmapKey& key);

@@ -155,13 +155,6 @@ int main() {
     expect(!observed(119000), "old provisional minutes expire instead of accumulating forever");
     live.clear(market);
     expect(!observed(180000, 300), "clear removes both historical and observed volume");
-    Manager bounded;
-    for (int64_t i = 1; i <= 4097; ++i) bounded.store_footprint("budget", candle(i*60000, {{100, 1, 1}}));
-    expect(bounded.candle_count("budget") == 4096 && !bounded.get_footprint("budget", 60000),
-           "continuous closed-minute snapshots have a bounded cache");
-    bounded.store_footprint("budget", candle(60000, {{100, 2, 3}}));
-    expect(bounded.get_footprint("budget", 60000) && !bounded.get_footprint("budget", 120000),
-           "an evicted historical minute can be fetched again");
     std::printf("Footprint direction, thresholds, adjacency, cache and as-of: %s\n", failures ? "FAILED" : "PASS");
     return failures ? 1 : 0;
 }
