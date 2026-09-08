@@ -11,6 +11,8 @@
 
 class OrderbookWidget : public Widget {
 public:
+    workspace::Json save_settings() const override;
+    void load_settings(const workspace::Json& settings) override;
     OrderbookWidget(const Terminal::Pair &pair, const AppContext& ctx, const PriceFormatter& fmt, size_t depth = 25);
     ~OrderbookWidget() override;
 

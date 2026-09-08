@@ -13,6 +13,20 @@ namespace Indicators {
         void add_indicator(std::unique_ptr<IndicatorBase> indicator);
         // Get indicator by index
         IndicatorBase* get_indicator(size_t index);
+        const IndicatorBase* get_indicator(size_t index) const { return indicators[index].get(); }
+        workspace::Json save_layout() const {
+            return {{"pinned", pinned_}, {"active", active_tab_},
+                    {"collapsed", collapsed_}, {"hidden", pane_hidden_}};
+        }
+        void load_layout(const workspace::Json& j) {
+            workspace::read(j, "collapsed", collapsed_);
+            workspace::read(j, "hidden", pane_hidden_);
+            workspace::read(j, "active", active_tab_, 0, indicators.empty() ? 0 : indicators.size() - 1);
+            auto it = j.find("pinned");
+            if (it != j.end() && it->is_array() && it->size() == pinned_.size())
+                for (size_t i = 0; i < pinned_.size(); ++i)
+                    if ((*it)[i].is_boolean()) pinned_[i] = (*it)[i].get<bool>();
+        }
         // Get indicator by type (type-safe!)
         template<typename T>
         T* get_indicator_of_type() {

@@ -33,6 +33,7 @@
 #include "core/liquidation_heatmap_manager.h"
 #include "core/url_router.h"
 #include "core/education_boot.h"
+#include "core/workspace_manager.h"
 #include "core/usage_emit.h"
 #include "core/entitlements.h"
 #include "core/display_time_zone.h"
@@ -846,6 +847,7 @@ void maybe_start_pack_replay() {
     if (url.empty()) return;
 
     g_app.replay_mgr->request_pack_replay(url, EducationBoot::instance().pack_symbol(), 1.0f);
+    g_app.replay_mgr->set_pack_checkpoint(EducationBoot::instance().pack_checkpoint_ms());
     started = true;
 }
 
@@ -1421,6 +1423,11 @@ void main_loop() {
     Menu::resolve_widget_add_request(g_app.widgets, g_app.app_ctx);
     resolve_live_flow_widget_rebuild();  // same safety requirement
     resolve_instrument_metadata_rebind();
+    workspace::tick(g_app.widgets, g_app.app_ctx,
+        {g_initial_route.exchange, g_initial_route.symbol},
+        g_init_complete && !EducationBoot::instance().is_embedded() &&
+        !EducationBoot::instance().is_pack() && !g_app.replay_mgr->is_active() &&
+        !g_live_flow_rebuild.armed && !ClipRecorder::focus_active());
     LayoutManager::render_dockspace(nullptr,
         g_initial_route.exchange, g_initial_route.symbol);
     g_profiler.end("Shell+Dock");

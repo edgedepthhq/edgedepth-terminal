@@ -59,6 +59,7 @@ public:
     // same boot main.cpp did); a still-active session just seeks to the window
     // start. Box event mode falls back to the seek path either way.
     void cmd_restart();
+    void cmd_release_checkpoint() { release_checkpoint_ = true; }
 
 private:
     EventRuntime() = default;
@@ -85,6 +86,7 @@ private:
     bool  pending_seek_deliberate_ = false;
     bool  pending_skip_ = false;
     int   pending_skip_seconds_ = 0;       // signed: negative = backward
+    bool release_checkpoint_ = false;
     bool  pending_restart_ = false;        // "watch again" (see cmd_restart)
 
     // One-shot deep-link seek (?event=…&t=…, EducationBoot::event_seek_to_ms):

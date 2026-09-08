@@ -44,6 +44,9 @@ namespace Indicators {
             snprintf(buf, size, "%.2f", value);
         }
 
+        workspace::Json save_settings() const override {
+            return {{"fast", fast_}, {"slow", slow_}, {"signal", signal_period_}};
+        }
     private:
         int fast_, slow_, signal_period_;
         int64_t timeframe_seconds_ = 300;

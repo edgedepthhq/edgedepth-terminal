@@ -203,6 +203,10 @@ void EducationBoot::detect() {
             pack_symbol_ = parts[1];
             pack_embedded_ = (parts[2] == "1");
             pack_realtime_ = (parts[4] == "1");
+            pack_checkpoint_ms_ = static_cast<int64_t>(EM_ASM_DOUBLE({
+                const t = window.__EDGEDEPTH_PACK__?.checkpointMs;
+                return Number.isSafeInteger(t) && t > 0 && t < 4102444800000 ? t : 0;
+            }));
             pack_seek_to_ms_ = parts[3].empty() ? 0 : std::strtoll(parts[3].c_str(), nullptr, 10);
             std::transform(pack_symbol_.begin(), pack_symbol_.end(), pack_symbol_.begin(),
                            [](unsigned char c) { return std::tolower(c); });

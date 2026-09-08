@@ -189,6 +189,14 @@ public:
     // Per-frame pack engine driver - call from the main loop alongside
     // flush_pending_skip (no-op outside pack mode).
     void tick_pack_engine();
+    // Optional host-controlled checkpoint for local pack review. It limits both
+    // frame delivery and navigation until the host explicitly releases it.
+    void set_pack_checkpoint(int64_t ms) { pack_checkpoint_ms_ = ms; }
+    int64_t pack_checkpoint_ms() const { return pack_checkpoint_ms_; }
+    void release_pack_checkpoint() {
+        if (seek_ceiling_ms_ == pack_checkpoint_ms_) seek_ceiling_ms_ = 0;
+        pack_checkpoint_ms_ = 0;
+    }
     bool is_pack_mode() const { return pack_mode_; }
 
     // ─── Usage instrumentation (design §3) ───────────────────────────────
@@ -419,6 +427,7 @@ private:
     // replay time while armed. Owned per frame by LessonRuntime; self-expires
     // when the per-frame pushes stop (see seek_ceiling_active).
     static constexpr int64_t kSeekCeilingTTLMs = 500;
+    int64_t pack_checkpoint_ms_ = 0;
     int64_t seek_ceiling_ms_ = 0;
     int64_t seek_ceiling_set_wall_ms_ = 0;
     int64_t last_seek_time_ms_ = 0;    // Debounce seeks

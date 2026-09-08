@@ -377,6 +377,7 @@ void ChartWidget::set_chart_type(ChartType type) {
 
 void ChartWidget::update() {
     ProfileScope _ps("ChartUpd");
+    update_reference_context();
     if (rt_mode_) capture_realtime_archive();
     if (heatmap_stream_mgr_ &&
         (!heatmap_enabled_ || !ct_allows_time_overlays(chart_type_) ||
@@ -1468,6 +1469,7 @@ void ChartWidget::render_chart() {
         // handle_plot_interaction so captures_mouse() gates the chart's own
         // handlers the same frame. (The input-map override is applied in
         // begin_frame, before BeginPlot - too late to matter from here.)
+        render_reference_context();
         drawing_layer_.render_in_plot(ctx_, fmt_,
                                       ct_allows_time_overlays(chart_type_),
                                       tf_sec);
@@ -2582,7 +2584,8 @@ void ChartWidget::render_controls() {
     };
 
     // Layer on-count drives the badge and the layers-menu header.
-    const int layers_on = (liq_dense_field_ ? 1 : 0)
+    const int layers_on = (session_vwap_ ? 1 : 0) + (previous_day_ ? 1 : 0) +
+        (previous_week_ ? 1 : 0) + (vwap_anchor_ms_ ? 1 : 0) + (liq_dense_field_ ? 1 : 0)
                         + (liq_profile_enabled_ ? 1 : 0) + (liq_observed_enabled_ ? 1 : 0)
                         + (liq_census_enabled_ ? 1 : 0)
                         + (heatmap_enabled_ ? 1 : 0) + (vpvr_enabled_ ? 1 : 0);
@@ -3065,6 +3068,37 @@ void ChartWidget::render_controls() {
             return clicked;
         };
 
+        layer_section("REFERENCE CONTEXT");
+        if (layer_row("Session VWAP (UTC)", session_vwap_, false)) {
+            session_vwap_ = !session_vwap_; reference_update_time_ = -1;
+        }
+        if (layer_row("Previous day high / low / close", previous_day_, false)) {
+            previous_day_ = !previous_day_; reference_update_time_ = -1;
+        }
+        if (layer_row("Previous week high / low / close", previous_week_, false)) {
+            previous_week_ = !previous_week_; reference_update_time_ = -1;
+        }
+        if (ImGui::TreeNode("Reference details")) {
+            ImGui::TextWrapped("VWAP uses completed chart candles: HLC3 weighted by base volume. Session resets at 00:00 UTC; week starts Monday.");
+            ImGui::TextWrapped("Right-click a candle to anchor VWAP. Missing bars stop VWAP and hide incomplete day/week levels.");
+            ImGui::TreePop();
+        }
+        if (vwap_anchor_ms_ && ImGui::Button("Clear anchored VWAP")) {
+            vwap_anchor_ms_ = 0; anchored_vwap_data_.clear();
+        }
+        if ((session_vwap_ && !session_vwap_data_.complete) ||
+            (vwap_anchor_ms_ && !anchored_vwap_data_.complete) ||
+            (previous_day_ && !previous_day_data_.complete) ||
+            (previous_week_ && !previous_week_data_.complete)) {
+            ImGui::TextWrapped("Reference history incomplete. Load context or scroll back. Coarse candles may not align to the period or anchor.");
+            ImGui::BeginDisabled(ctx_.candle_mgr().is_loading());
+            if (ImGui::Button("Load reference history")) {
+                // Bounded, explicit read, ending at the observed replay clock.
+                ctx_.candle_mgr().request_historical(20160, reference_asof_);
+            }
+            ImGui::EndDisabled();
+        }
+        if (!ct_allows_time_overlays(chart_type_)) ImGui::TextWrapped("Reference overlays appear on time-based chart views.");
         layer_section("LIQUIDATIONS");
 
         // Liquidation Heatmap = the client Field (free).
@@ -3980,6 +4014,9 @@ void ChartWidget::handle_plot_interaction() {
             }
         }
 
+        if (ImGui::MenuItem("Anchor VWAP here")) {
+            vwap_anchor_ms_ = context_menu_time_ms_; reference_update_time_ = -1;
+        }
         // Measure ruler - anchor here; readout follows the cursor (click/Esc clears).
         if (ImGui::MenuItem("Measure from here")) {
             measure_.active = true;
@@ -4174,7 +4211,6 @@ void ChartWidget::populate_volume_data(Indicators::VolumeIndicator* vol_ind) con
 }
 
 void ChartWidget::add_volume_indicator() {
-    if (ctx_.candle_mgr().empty()) return;
     if (indicator_mgr_.has_indicator_of_type<Indicators::VolumeIndicator>()) return;
 
     auto volume_ind = std::make_unique<Indicators::VolumeIndicator>();
@@ -4197,7 +4233,6 @@ void ChartWidget::update_volume_indicators() {
 }
 
 void ChartWidget::add_cvd_indicator() {
-    if (ctx_.candle_mgr().empty()) return;
     if (indicator_mgr_.has_indicator_of_type<Indicators::CVDIndicator>()) return;
 
     auto cvd_ind = std::make_unique<Indicators::CVDIndicator>();
@@ -4277,7 +4312,6 @@ void ChartWidget::handle_stat_for_chart(const Terminal::Stat& stat) {
 }
 
 void ChartWidget::add_funding_rate_indicator() {
-    if (ctx_.candle_mgr().empty()) return;
     if (indicator_mgr_.has_indicator_of_type<Indicators::FundingRateIndicator>()) return;
 
     // Request historical funding data if we haven't already
@@ -4322,7 +4356,6 @@ void ChartWidget::update_funding_indicator() {
 // ═══ OI Indicator ═══
 
 void ChartWidget::add_oi_indicator() {
-    if (ctx_.candle_mgr().empty()) return;
     if (indicator_mgr_.has_indicator_of_type<Indicators::OIIndicator>()) return;
 
     // Request historical OI if we haven't already
@@ -4460,7 +4493,6 @@ void ChartWidget::update_vpin_indicator() {
 }
 
 void ChartWidget::add_rsi_indicator(int period) {
-    if (ctx_.candle_mgr().empty()) return;
     if (indicator_mgr_.has_indicator_of_type<Indicators::RSIIndicator>()) return;
 
     auto rsi_ind = std::make_unique<Indicators::RSIIndicator>(period);
@@ -4472,7 +4504,6 @@ void ChartWidget::add_rsi_indicator(int period) {
 }
 
 void ChartWidget::add_macd_indicator(int fast, int slow, int signal) {
-    if (ctx_.candle_mgr().empty()) return;
     if (indicator_mgr_.has_indicator_of_type<Indicators::MACDIndicator>()) return;
 
     auto macd_ind = std::make_unique<Indicators::MACDIndicator>(fast, slow, signal);

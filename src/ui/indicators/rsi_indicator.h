@@ -46,6 +46,7 @@ namespace Indicators {
             snprintf(buf, size, "%.1f", value);
         }
 
+        workspace::Json save_settings() const override { return {{"period", period_}}; }
     private:
         int period_;
         std::vector<double> times_;

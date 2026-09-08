@@ -110,6 +110,7 @@ public:
     // the ?pack=<url>&packsym=<symbol> query params (standalone dev boots with
     // the native transport). The replay is auto-started by main.cpp
     // maybe_start_pack_replay() via ReplayManager::request_pack_replay.
+    int64_t pack_checkpoint_ms() const { return pack_checkpoint_ms_; }
     bool is_pack() const { return mode_ == Mode::Pack; }
     bool pack_realtime() const { return pack_realtime_; }
     const std::string& pack_url() const { return pack_url_; }
@@ -170,6 +171,7 @@ private:
     std::string pack_symbol_;
     std::string recorder_json_;  // stringified __EDGEDEPTH_RECORDER__ (or empty)
     bool pack_embedded_ = false;
+    int64_t pack_checkpoint_ms_ = 0;
     bool pack_realtime_ = false;
     int64_t pack_seek_to_ms_ = 0;  // pack start-at / deep-link (0 = none)
     bool event_seek_to_start_ = true;

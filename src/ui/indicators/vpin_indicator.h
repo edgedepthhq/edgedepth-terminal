@@ -74,6 +74,13 @@ namespace Indicators {
         bool has_settings() const override { return true; }
         void render_settings() override;
 
+        workspace::Json save_settings() const override {
+            return {{"regime", regime_coloring_}, {"imbalance", show_imbalance_}};
+        }
+        void load_settings(const workspace::Json& j) override {
+            workspace::read(j, "regime", regime_coloring_);
+            workspace::read(j, "imbalance", show_imbalance_);
+        }
     private:
         std::vector<Series::VPINPoint> pts_;   // ascending ts_ms (SeriesCache order)
 

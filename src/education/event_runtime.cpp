@@ -46,6 +46,9 @@ void EventRuntime::cmd_restart() {
 void EventRuntime::update(const AppContext& ctx) {
     if (!ctx.replayer) return;
     ReplayManager& rm = ctx.replay_mgr();
+    if (release_checkpoint_) {
+        rm.release_pack_checkpoint(); release_checkpoint_ = false;
+    }
 
     // One-shot deep-link seek (?event=…&t=…): a key-moment link on the public
     // event page lands the replay AT its timestamp. Deferred until the session
@@ -184,6 +187,7 @@ void EventRuntime::emit_state(const AppContext& ctx) {
     hasher.mix(paused  ? 1u : 0u);
     hasher.mix(loading ? 1u : 0u);
     hasher.mix(ended   ? 1u : 0u);
+    hasher.mix(static_cast<uint64_t>(rm.pack_checkpoint_ms()));
     hasher.mix(static_cast<uint64_t>(static_cast<int>(speed * 100.0f)));
 
     if (!transport::should_emit(hasher.value(), emit_sig_, active, playing, paused, loading,
@@ -217,6 +221,7 @@ void EventRuntime::emit_state(const AppContext& ctx) {
     st["paused"]  = paused;
     st["loading"] = loading;
     st["ended"]   = ended;
+    st["checkpointMs"] = rm.pack_checkpoint_ms();
     st["speed"]   = speed;
     {
         const int64_t span = std::max<int64_t>(1, end_ms - start_ms);
@@ -253,6 +258,9 @@ EMSCRIPTEN_KEEPALIVE void _event_cmd_seek(int milli_progress, int deliberate) {
 }
 EMSCRIPTEN_KEEPALIVE void _event_cmd_skip(int seconds) {
     edu::EventRuntime::instance().cmd_skip(seconds);
+}
+EMSCRIPTEN_KEEPALIVE void _event_cmd_release_checkpoint() {
+    edu::EventRuntime::instance().cmd_release_checkpoint();
 }
 EMSCRIPTEN_KEEPALIVE void _event_cmd_restart() {
     edu::EventRuntime::instance().cmd_restart();

@@ -58,6 +58,8 @@ int64_t PackReplayEngine::market_now_ms() const {
     int64_t now = market_base_ms_ + static_cast<int64_t>(
         static_cast<double>(elapsed) * speed_);
     if (header_ready_ && now > header_.end_ts_ms()) now = header_.end_ts_ms();
+    if (mgr_ && mgr_->pack_checkpoint_ms() > 0)
+        now = std::min(now, std::max(header_.start_ts_ms(), mgr_->pack_checkpoint_ms()));
     return now;
 }
 
@@ -416,6 +418,13 @@ void PackReplayEngine::tick() {
         (frame_queue_.empty() || frame_queue_.front().ts > skip_before_ms_)) {
         seek_priming_ = false;
         wall_base_ms_ = wall_ms();
+    }
+    const auto checkpoint = mgr_->pack_checkpoint_ms();
+    if (playing_ && !seek_priming_ && !mgr_->is_loading() && checkpoint > 0 &&
+        market_now_ms() >= checkpoint && queued_through_ms_ >= checkpoint &&
+        (frame_queue_.empty() || frame_queue_.front().ts > checkpoint)) {
+        emit_status();
+        control_pause();
     }
     emit_status();
     maybe_finish();

@@ -387,6 +387,9 @@ set(PROJECT_SRC
         src/ui/replay_library_widget.h
         src/ui/replay_library_widget.cpp
         src/ui/chart_widget.h
+        src/core/workspace_manager.cpp
+        src/ui/chart_reference_context.cpp
+        src/ui/workspace_settings.cpp
         src/ui/chart_widget.cpp
         src/ui/chart_widget_realtime.cpp
         src/core/realtime_archive.cpp

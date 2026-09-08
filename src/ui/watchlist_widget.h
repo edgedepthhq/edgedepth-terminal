@@ -30,6 +30,8 @@
 
 class WatchlistWidget : public Widget {
 public:
+    workspace::Json save_settings() const override;
+    void load_settings(const workspace::Json& settings) override;
     WatchlistWidget(const Terminal::Pair& active_pair, const AppContext& ctx);
 
     void update() override;

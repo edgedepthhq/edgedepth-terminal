@@ -4,11 +4,15 @@
 #include <algorithm>
 #include <cstdio>
 #include "implot.h"
+#include "core/workspace_settings.h"
 
 namespace Indicators {
     class IndicatorBase {
     public:
         virtual ~IndicatorBase() = default;
+        virtual workspace::Json save_settings() const { return workspace::Json::object(); }
+        virtual void load_settings(const workspace::Json&) {}
+
 
         // Simplified interface - just render content
         virtual void render_content(double x_min, double x_max) = 0;

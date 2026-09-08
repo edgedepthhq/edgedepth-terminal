@@ -27,6 +27,8 @@
 
 class StatsWidget : public Widget {
 public:
+    workspace::Json save_settings() const override;
+    void load_settings(const workspace::Json& settings) override;
     StatsWidget(const Terminal::Pair& pair, const AppContext& ctx, const PriceFormatter& fmt);
     ~StatsWidget() override;
 

@@ -6,6 +6,7 @@
 #include "../stream_handler.h"
 #include "../types/types.h"
 #include "imgui.h"
+#include "core/workspace_settings.h"
 
 struct StreamKey;
 class StreamManager;
@@ -46,6 +47,9 @@ public:
     virtual void update() = 0;
     virtual WidgetType type() const = 0;
     virtual const char* title() const = 0;
+    virtual workspace::Json save_settings() const { return workspace::Json::object(); }
+    virtual void load_settings(const workspace::Json&) {}
+
 
     // Called on replay backward skip (<<). Widgets should clear any buffered
     // data with timestamps after cutoff_ms. Default: no-op.

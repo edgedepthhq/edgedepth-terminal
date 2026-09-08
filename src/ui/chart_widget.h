@@ -1,4 +1,5 @@
 #pragma once
+#include "core/reference_context.h"
 #include "ui/realtime_dom_frame.h"
 #include "core/trade_at_price.h"
 #include "core/realtime_history.h"
@@ -85,6 +86,8 @@ constexpr bool ct_allows_time_overlays(ChartType t) {
 
 class ChartWidget : public Widget {
 public:
+    workspace::Json save_settings() const override;
+    void load_settings(const workspace::Json& settings) override;
     static bool selection_escape_consumed(int frame) { return selection_escape_frame_ == frame; }
     // The pair this chart draws. A replay of a different symbol replaces the
     // chart, and the exit rebuild has to restore the pair that was live.
@@ -230,6 +233,16 @@ public:
     void setup_time_axis_ticks(double visible_x_min, double visible_x_max) const;
 
 private:
+    bool session_vwap_ = false, previous_day_ = false, previous_week_ = false;
+    int64_t vwap_anchor_ms_ = 0;
+    reference_context::Series session_vwap_data_, anchored_vwap_data_;
+    reference_context::Levels previous_day_data_, previous_week_data_;
+    const CandleManager* reference_manager_ = nullptr;
+    int64_t reference_tf_ = 0;
+    double reference_update_time_ = -1;
+    int64_t reference_asof_ = 0;
+    void update_reference_context();
+    void render_reference_context();
     // ─── External Dependencies (not owned) ───────────────────────────────
     Terminal::Pair pair_;
     const AppContext& ctx_;

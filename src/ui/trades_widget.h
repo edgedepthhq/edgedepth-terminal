@@ -9,6 +9,8 @@
 
 class TradesWidget : public Widget {
 public:
+    workspace::Json save_settings() const override;
+    void load_settings(const workspace::Json& settings) override;
     // The pair this widget was built for. The replay swap tears the live
     // order-flow widgets down and rebuilds them on exit, and it has to
     // rebuild the pair that was actually on screen, not the boot route.

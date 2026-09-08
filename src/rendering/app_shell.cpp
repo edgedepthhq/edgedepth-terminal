@@ -13,6 +13,7 @@
 #include "rendering/menu.h"
 #include "rendering/theme.h"
 #include "rendering/layout.h"
+#include "core/workspace_manager.h"
 #include "replayer/replay_manager.h"
 #include "core/symbol_metadata.h"
 #include "core/ticker_manager.h"
@@ -1140,7 +1141,7 @@ namespace {
         const float ico   = 30.0f, igap = 5.0f, dvw = 13.0f;
         ImGui::PushFont(Fonts::ui_semibold());
         const float courses_w = ImGui::CalcTextSize("Courses").x + 20.0f;
-        const float default_w = ImGui::CalcTextSize("Default").x + 22.0f;
+        const float default_w = ImGui::CalcTextSize("Workspace").x + 22.0f;
         const float live_w    = ImGui::CalcTextSize("Live").x   + 22.0f;  // padx 11*2
         const float replay_w  = ImGui::CalcTextSize("Replay").x + 22.0f;
         ImGui::PopFont();
@@ -1274,7 +1275,7 @@ namespace {
 
         // Default (layout) menu
         rx -= default_w; ImGui::SetCursorScreenPos(ImVec2(rx, icy));
-        if (tb_button("Default", default_w)) ImGui::OpenPopup("##tb_layout");
+        if (tb_button("Workspace", default_w)) ImGui::OpenPopup("##tb_layout");
 
         vdiv();
 
@@ -1333,8 +1334,7 @@ namespace {
             static bool show_demo = false, show_metrics = false;
             if (ImGui::BeginPopup("##tb_layout")) {
                 if (ImGui::MenuItem("Reset Layout")) LayoutManager::reset_layout();
-                if (ImGui::MenuItem("Save Layout"))
-                    ImGui::SaveIniSettingsToDisk(ImGui::GetIO().IniFilename);
+                workspace::menu();
                 ImGui::MenuItem("Market Header", nullptr, &g_market_header_open);
                 ImGui::Separator();
                 ImGui::MenuItem("ImGui Demo", nullptr, &show_demo);

@@ -32,13 +32,15 @@ Thanks for your interest. A few ground rules keep this maintainable by a very sm
 ## Native tests
 
 The host-side test suite is CMake/CTest based and does not require Emscripten,
-protoc, or any network access. It covers the parts of the terminal that are pure
+protoc. The workspace test uses the terminal's existing nlohmann JSON 3.12.0
+dependency, fetched on first configuration (or supplied through CMake's
+`FETCHCONTENT_SOURCE_DIR_WORKSPACE_JSON` override for offline builds). It covers the parts of the terminal that are pure
 enough to run off the browser: the Renko and TPO chart transforms, the order
 book's sorted container and its publish-on-frame double buffer, the ingest
 queue's time-budgeted drain, the indicator series cache, replay entitlements,
 route parsing, and the liquidation heatmap's reach maths.
 
-There is no test framework and no external dependency. Each test is a single
+There is no test framework. Each test is a single
 source file with its own `main()`, a file-static failure counter, and small
 `expect_*` helpers. Follow the shape of an existing one; please do not introduce
 gtest, Catch2, or doctest. Tests must be deterministic: no sleeps, no wall-clock

@@ -541,7 +541,10 @@ void ReplayManager::request_pack_replay(
 }
 
 void ReplayManager::tick_pack_engine() {
-    if (pack_engine_) pack_engine_->tick();
+    if (pack_engine_) {
+        if (pack_checkpoint_ms_ > 0) set_seek_ceiling_ms(pack_checkpoint_ms_);
+        pack_engine_->tick();
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1628,6 +1631,7 @@ void ReplayManager::reset() {
     scrub_preview_ms_ = 0;
     scrub_hover_since_ = 0.0;
     seek_ceiling_ms_ = 0;
+    pack_checkpoint_ms_ = 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

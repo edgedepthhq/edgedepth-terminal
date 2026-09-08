@@ -220,6 +220,22 @@ Open-source trade aggregators and charting components exist, but complete browse
 - **Watchlist / scanner**: every symbol the feed lists, with 24h stats. The bundled gateway serves about 900, of which 737 are Binance USDT-M perpetuals (counted 2026-08-15; exchanges list and delist, so expect drift)
 - **Wire format**: zstd-compressed protobuf ([`protos/messages.proto`](protos/messages.proto)), decoded off the render thread
 
+## Workspaces and reference context
+
+Use **Workspace** in the full live terminal to save a named setup, switch between
+Order Flow, Liquidity and Replay Review presets, or export/import a JSON backup.
+Layout and panel settings restore in the same browser. Version 1 supports one
+panel of each type for the current market. Replay and hosted embeds leave your
+live workspace alone. Browser storage can be cleared, so export setups you need
+to keep.
+
+**Layers** includes session VWAP and previous-day/week high, low and close.
+Right-click a candle to anchor VWAP. VWAP uses completed HLC3 candles weighted by
+base volume; it is not exact trade-price VWAP. Sessions start at midnight UTC and
+weeks on Monday. Missing bars stop VWAP and suppress incomplete period levels.
+Use **Load reference history** when offered; the data source still determines
+coverage. TPO and Renko do not display these overlays.
+
 ## Bring your own data
 
 The terminal is a client. It speaks a documented protobuf-over-WebSocket wire format and connects to whatever feed you give it, resolved in this order:
