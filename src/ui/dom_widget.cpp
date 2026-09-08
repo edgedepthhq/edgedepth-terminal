@@ -875,10 +875,13 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
     const float bottom = std::min(org.y + avail.y, frame.bottom);
     if (bottom <= top || avail.x <= 0) return;
     const float price_w = std::max(ImGui::CalcTextSize(bid).x, ImGui::CalcTextSize(ask).x) + 10;
-    const float col_w = std::max(1.0f, (avail.x - price_w) / 5);
-    const float edges[] = {org.x, org.x + col_w, org.x + col_w * 2,
-        org.x + col_w * 2 + price_w, org.x + col_w * 3 + price_w,
-        org.x + col_w * 4 + price_w, org.x + avail.x};
+    // Reserve a gutter for exact-price quote markers, clear of all numbers.
+    const float quote_gutter = 8.0f;
+    const float columns_x = org.x + quote_gutter;
+    const float col_w = std::max(1.0f, (avail.x - quote_gutter - price_w) / 5);
+    const float edges[] = {columns_x, columns_x + col_w, columns_x + col_w * 2,
+        columns_x + col_w * 2 + price_w, columns_x + col_w * 3 + price_w,
+        columns_x + col_w * 4 + price_w, org.x + avail.x};
     const float tick_h = float(tick_size_ / (frame.price_max - frame.price_min) * (frame.bottom - frame.top));
     const double ticks_per_row = std::max(1.0, std::ceil(double(text_h + 5) / tick_h));
     const double step = tick_size_ * ticks_per_row;
@@ -948,10 +951,10 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
             dl->PopClipRect();
         }
     }
-    // Best quotes stay at their exact native prices even inside grouped rows.
+    // Exact-price markers stay in the gutter, never crossing grouped-row text.
     for (int side = 0; side < 2; ++side) {
         const float y = frame.price_y(side ? book.ask : book.bid);
-        dl->AddLine(ImVec2(org.x, y), ImVec2(org.x + avail.x, y),
+        dl->AddLine(ImVec2(org.x + 1, y), ImVec2(columns_x - 2, y),
             Theme::u32(side ? Theme::Tokens::DOWN : Theme::Tokens::UP), 1.25f);
     }
     dl->PopClipRect();
