@@ -1,5 +1,7 @@
 #include "core/realtime_history.h"
 #include "ui/realtime_dom_frame.h"
+#include "ui/realtime_navigation.h"
+#include <cmath>
 #include "core/orderbook_manager.h"
 #include <cstdio>
 
@@ -8,6 +10,28 @@ static void expect(bool ok, const char* message) {
     if (!ok) { std::fprintf(stderr, "FAIL: %s\n", message); ++failures; }
 }
 int main() {
+    const auto zoom_in = realtime_zoom(60000, 1, 0.1, true, false);
+    const auto zoom_out = realtime_zoom(60000, -1, 0.1, true, false);
+    expect(zoom_in.follow && zoom_in.span_ms < 60000, "zoom in retains follow and narrows time");
+    expect(zoom_out.follow && zoom_out.span_ms > 60000, "zoom out retains follow and widens time");
+    expect(!realtime_zoom(40000, 1, 0.1, false, false).follow, "zoom in preserves panned history");
+    expect(realtime_zoom(40000, -1, 0.1, false, false).follow, "running zoom out deliberately resumes follow");
+    for (float wheel : {-1.0f, 1.0f}) {
+        const auto paused = realtime_zoom(40000, wheel, 0.1, false, true);
+        expect(!paused.follow && paused.span_ms == 40000, "paused live/replay history uses ImPlot zoom without rearming follow");
+        expect(realtime_zoom(40000, wheel, 0.1, true, true).follow, "paused following view can zoom around its frozen clock");
+    }
+    expect(realtime_zoom(5000, 1, 0.1, true, false).span_ms == 5000, "minimum zoom span");
+    expect(realtime_zoom(120000, -1, 0.1, true, false).span_ms == 120000, "maximum zoom span");
+    expect(!realtime_zoom(40000, 0, 0.1, false, false).follow, "no-input/focus recovery cannot rearm follow");
+    RealtimeDOMFrame dense;
+    dense.price_min = 78850; dense.price_max = 78920;
+    dense.top = 100; dense.bottom = 800;
+    expect(std::abs(dense.price_y(78865.4) - dense.price_y(78865.5) - 1.0f) < 0.001f,
+        "BTC one-tick spread retains exact one-pixel price separation");
+    dense.price_max = 78990;
+    expect(std::abs(dense.price_y(78865.4) - dense.price_y(78865.5) - 0.5f) < 0.001f,
+        "subpixel spread is never widened to a readable row");
     // Clearly synthetic unit fixture. Never a product capture.
     Terminal::Orderbook book;
     book.snapshot = true;

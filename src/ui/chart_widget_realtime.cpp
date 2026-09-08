@@ -108,6 +108,7 @@ void ChartWidget::update_realtime() {
         rt_flow_->set_tick_size(tick_size_);
         rt_flow_->advance_to(clock);
     }
+    rt_clock_ms_ = clock;
     rt_renderer_->set_observation_clock_ms(clock);
     rt_book_valid_ = ctx_.ob_mgr().copy_realtime_since(pair_, rt_serial_, rt_pending_);
     // Samples past the as-of clock stay pending.

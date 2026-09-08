@@ -15,6 +15,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "ui/chart_widget.h"
+#include "ui/realtime_navigation.h"
 #include "core/drawing_manager.h"
 #include "ui/price_profile_renderer.h"
 #include "ui/custom_implot.h"
@@ -559,7 +560,6 @@ void ChartWidget::update() {
             }
         }
     }
-    if (rt_mode_) update_realtime();
     // Heatmap - request once candles are loaded (WS guaranteed connected).
     // Skipped in Renko: the time-keyed overlays do not draw there, and
     // update_heatmap() reads last_visible_range_ as TIME (brick indices in Renko).
@@ -751,6 +751,8 @@ void ChartWidget::render() {
     }
 
     render_controls();
+    // Acquire one as-of clock after pause controls, before chart and DOM render.
+    if (rt_mode_) update_realtime();
     crosshair_state_ = CrosshairState();
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
 
@@ -950,18 +952,13 @@ void ChartWidget::render_chart() {
     // Real-time view (RT), any chart type: engage follow-live so the chart
     // streams and keeps the live edge current. We re-arm follow-live ONLY on the
     // rising edge of rt_mode_ (rt_was_on_ edge-detect) - not every frame - so the
-    // normal follow_live() X/Y path (above / below) takes over and ImPlot zoom +
-    // pan stay fully interactive (the first user pan/scroll clears the latch in
-    // handle_plot_interaction). No per-frame axis pin here.
+    // normal follow_live() X/Y path (above / below) takes over. Wheel zoom keeps
+    // following; deliberate pan clears the latch in handle_plot_interaction.
     if (rt_mode_ && !rt_was_on_) {
         ctx_.candle_mgr().set_follow_live(true);
     }
     rt_was_on_ = rt_mode_;
     if (rt_mode_) {
-        if (!rt_paused_) rt_clock_ms_ = ctx_.replay_mgr().is_active()
-            ? ctx_.replay_mgr().interpolated_time_ms()
-            : std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
         // Grow the initial view from actual observations, without painting
         // the current book backward into the pre-join interval.
         const double observed_span = rt_samples_.empty() ? 5000.0 :
@@ -3752,16 +3749,18 @@ void ChartWidget::handle_plot_interaction() {
         crosshair_state_.hovered_y_min = limits.Y.Min;
         crosshair_state_.hovered_y_max = limits.Y.Max;
 
-        // Detect user interaction → stop following live (a drawing drag is
-        // not a pan - the layer suppresses the pan, so keep follow-live)
+        // Panning owns history inspection. Wheel zoom keeps an existing follow
+        // latch; zoom out may resume it only while the display is running.
         const float wheel = ImGui::GetIO().MouseWheel;
-        if (rt_mode_ && wheel < 0) {
-            rt_span_ms_ = std::clamp(limits.X.Size() *
-                (ctx_.candle_mgr().follow_live() ? 1.0 + ImPlot::GetInputMap().ZoomRate : 1.0),
-                5000.0, 120000.0);
-            ctx_.candle_mgr().set_follow_live(true);
-        } else if (wheel != 0 ||
-            (!draw_cap && ImGui::IsMouseDragging(ImGuiMouseButton_Left))) {
+        if (!draw_cap && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+            ctx_.candle_mgr().set_follow_live(false);
+        } else if (!draw_cap && rt_mode_ && wheel != 0) {
+            const auto zoom = realtime_zoom(limits.X.Size(), wheel,
+                ImPlot::GetInputMap().ZoomRate, ctx_.candle_mgr().follow_live(),
+                rt_paused_ || ctx_.replay_mgr().is_paused());
+            rt_span_ms_ = zoom.span_ms;
+            ctx_.candle_mgr().set_follow_live(zoom.follow);
+        } else if (!draw_cap && wheel != 0) {
             ctx_.candle_mgr().set_follow_live(false);
         }
 

@@ -866,6 +866,13 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
     ImGui::TextColored(Theme::Tokens::UP, "Bid %s", bid);
     ImGui::SameLine();
     ImGui::TextColored(Theme::Tokens::DOWN, "Ask %s", ask);
+    char spread[24];
+    snprintf(spread, sizeof(spread), fmt_.price_fmt, book.ask - book.bid);
+    ImGui::Text("Spread %s / ticks %.0f", spread, (book.ask - book.bid) / tick_size_);
+    if (ImGui::IsItemHovered()) Theme::tooltip("Ask minus bid from the same synchronized depth sample. Exact quote prices use the chart scale, even when the spread is smaller than one pixel. Grouped PRICE labels are row centers, not executable quotes.");
+    ImGui::TextDisabled("Sample age %.1fs / 100ms bins",
+        double(frame.clock_ms - book.timestamp_ms) / 1000.0);
+    if (ImGui::IsItemHovered()) Theme::tooltip("Age is measured at the chart clock and freezes on pause. Sampling and the 512-level-per-side retained book are display limits, not a complete exchange event record. Independent ticker and trade arrivals do not replace this sampled book.");
 
     const ImVec2 org = ImGui::GetCursorScreenPos();
     const ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -916,7 +923,7 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
             Theme::u32(Theme::Tokens::TX2), names[c]);
         dl->PopClipRect();
     }
-    char grouping[48]; snprintf(grouping, sizeof(grouping), "Rows %.0f ticks", ticks_per_row);
+    char grouping[48]; snprintf(grouping, sizeof(grouping), "Rows %.0f ticks / centers", ticks_per_row);
     dl->AddText(ImVec2(org.x, org.y + text_h + 3), Theme::u32(Theme::Tokens::TX2), grouping);
     const float row_h = float(step / (frame.price_max - frame.price_min) * (frame.bottom - frame.top));
     dl->PushClipRect(ImVec2(org.x, top), ImVec2(org.x + avail.x, bottom), true);
@@ -954,7 +961,9 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
     // Exact-price markers stay in the gutter, never crossing grouped-row text.
     for (int side = 0; side < 2; ++side) {
         const float y = frame.price_y(side ? book.ask : book.bid);
-        dl->AddLine(ImVec2(org.x + 1, y), ImVec2(columns_x - 2, y),
+        // Separate horizontal halves preserve both colors at subpixel spreads.
+        const float x = org.x + (side ? 4.5f : 0.5f);
+        dl->AddLine(ImVec2(x, y), ImVec2(x + 3.0f, y),
             Theme::u32(side ? Theme::Tokens::DOWN : Theme::Tokens::UP), 1.25f);
     }
     dl->PopClipRect();

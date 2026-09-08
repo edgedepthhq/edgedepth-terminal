@@ -45,7 +45,7 @@ from a screenshot.
 | Timeframe > RT | Minimum trade value | With auto off, set price times quantity in quote units. For a USDT pair, the threshold is in USDT. Default manual value: 10,000. |
 | Layers > Depth settings | Fidelity | UHD/HD/SD/LD/ULD group 1/2/5/10/20 native price ticks. RT keeps the chosen grouping fixed; candle-mode zoom adaptation is separate. |
 | Layers > Depth settings | Recalibrate colors | Explicitly recalibrate brightness from the currently visible liquidity. This deliberately recolors history; normal feed updates do not. |
-| Chart navigation | Time zoom / Follow | Show five seconds to two minutes. Zoom out resumes Follow at the wider span; pan or zoom in detaches it. Follow also returns to the advancing edge. Price auto-fits eligible visible trades and quote steps. |
+| Chart navigation | Time zoom / Follow | Show five seconds to two minutes. Wheel zoom keeps Following live/replay in both directions. Pan detaches; zoom in then keeps the inspected history. While running, zoom out resumes Follow. Paused history stays detached in both directions. Follow returns to the current display clock without unpausing; use Pause display or the replay transport to resume time. Price auto-fits eligible visible trades and quote steps. |
 
 Bubbles use square-root radius scaling from 4px to a 16px cap. Values at or above
 16 times the minimum share the cap. Opaque signed fills, restrained shading and
@@ -76,8 +76,15 @@ it resets every five minutes of market time, not wall time. It starts when RT
 is enabled and is not a backfilled exchange-session total. CVD stays in base
 quantity when the row display switches to quote value.
 
+The header prints exact best bid/ask, their spread in price units and native
+ticks, and the sample age at the chart clock. Pause freezes that age with the
+book. A one-tick spread may be smaller than one screen pixel. The two gutter
+markers use separate horizontal halves so both remain identifiable without
+moving either vertically. No minimum visual spread is manufactured.
+
 At wider price ranges, nearby native ticks are summed into readable rows;
-**Rows N ticks** states the grouping. Both resting depth and traded volume use
+**Rows N ticks / centers** states the grouping. PRICE labels are bucket centers,
+not native executable quotes; bids and asks can share a grouped row. Both resting depth and traded volume use
 the same row groups. This changes the ladder display only, not historical
 heatmap fidelity or trade coordinates. Best bid/ask lines retain their exact
 prices, also printed in the header. Qty / Quote toggles row amounts between
