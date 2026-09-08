@@ -271,3 +271,19 @@ preserving summed volume and restoring earliest individual detail. Storage quota
 eviction, replay cutoffs, gaps, backpressure and stale query/reset responses are
 covered. Source archive loss is explicit in the RT menu. Browser storage remains
 best effort; no persistent cross-reload session recovery is promised.
+
+## Quiet RT startup and zoom correction (2026-09-08)
+
+RT now opens at its requested 60-second span even before a minute is collected.
+Zoom changes that span immediately; pre-join time remains empty. This supersedes
+initial observed-window growth, which overrode zoom-out on newly joined markets.
+Price auto-fit includes at least 48 grouped depth rows or a 0.1% full price span,
+whichever is wider, while preserving the full observed move. It no longer expands
+a few quiet levels to fill the plot. The fixed palette and depth grouping remain.
+
+The production artifact inspected on 8 September matched the older canonical
+build-release WASM SHA256 494922cad38229e3d6e1996dc6a22c4798347fad495d38f69898601ca13aa95b.
+It contained initial session-history controls but lacked the final dense-volume
+label and was not the final build previously verified. Rebuild the canonical
+Release target before copying deployment assets; a current source commit does
+not establish that an existing build directory is current.

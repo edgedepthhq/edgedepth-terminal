@@ -960,11 +960,9 @@ void ChartWidget::render_chart() {
     }
     rt_was_on_ = rt_mode_;
     if (rt_mode_) {
-        // Grow the initial view from actual observations, without painting
-        // the current book backward into the pre-join interval.
-        const double observed_span = rt_samples_.empty() ? 5000.0 :
-            std::max(5000.0, double(rt_clock_ms_ - (rt_archive_ && rt_archive_->first ? rt_archive_->first : rt_samples_.front()->timestamp_ms)) / 0.88);
-        const double span = std::min(rt_span_ms_, observed_span);
+        // The requested viewport is independent of collected coverage. Leave
+        // pre-join space empty rather than overriding zoom on a quiet market.
+        const double span = rt_span_ms_;
         x_max = double(rt_clock_ms_) + span * 0.12;
         x_min = x_max - span;
     }
@@ -1188,7 +1186,7 @@ void ChartWidget::render_chart() {
         }
         if (rt_mode_ && std::isfinite(y_min) && std::isfinite(y_max)) {
             const double center = (y_min + y_max) * 0.5;
-            const double half = std::max({(y_max - y_min) * 0.5, tick_size_ * 16.0, center * 0.0001});
+            const double half = realtime_price_half_span(y_min, y_max, tick_size_, rt_bucket_multiplier_);
             y_min = center - half;
             y_max = center + half;
         }

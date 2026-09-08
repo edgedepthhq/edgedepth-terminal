@@ -17,3 +17,11 @@ inline RealtimeZoom realtime_zoom(double displayed_span, float wheel,
                        5000.0, (1800000.0 / 0.88)),
             following || (wheel < 0 && !paused)};
 }
+
+// Keep at least 48 displayed depth rows on quiet markets. Fidelity groups
+// several native ticks into a row; a native-tick-only floor creates huge bands.
+inline double realtime_price_half_span(double low, double high, double tick, int grouping) {
+    const double center = (low + high) * 0.5;
+    return std::max({(high - low) * 0.5, tick * std::max(1, grouping) * 24.0,
+                     center * 0.0005});
+}

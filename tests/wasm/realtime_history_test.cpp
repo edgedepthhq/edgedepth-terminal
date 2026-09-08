@@ -42,6 +42,13 @@ int main() {
     expect(realtime_zoom(5000, 1, 0.1, true, false).span_ms == 5000, "minimum zoom span");
     expect(realtime_zoom(1800000 / 0.88, -1, 0.1, true, false).span_ms == 1800000 / 0.88, "maximum zoom span");
     expect(!realtime_zoom(40000, 0, 0.1, false, false).follow, "no-input/focus recovery cannot rearm follow");
+    expect(realtime_price_half_span(0.64224, 0.64249, 0.00001, 5) >= 0.0012,
+           "quiet SD market fits at least 48 grouped depth rows");
+    expect(realtime_price_half_span(90, 110, 0.01, 5) == 10,
+           "volatile market still fits the full observed move");
+    double fresh_span = 60000;
+    for (int i=0;i<5;++i) fresh_span = realtime_zoom(fresh_span,-1,0.1,true,false).span_ms;
+    expect(fresh_span > 90000, "fresh session can zoom out repeatedly without a coverage clamp");
     RealtimeDOMFrame dense;
     dense.price_min = 78850; dense.price_max = 78920;
     dense.top = 100; dense.bottom = 800;
