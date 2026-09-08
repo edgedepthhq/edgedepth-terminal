@@ -1019,8 +1019,14 @@ void ChartWidget::render_chart() {
         const bool hide_x_labels = has_subplots && chart_type_ != ChartType::TPO;
         ImPlotAxisFlags x_flags = hide_x_labels ? ImPlotAxisFlags_NoTickLabels : ImPlotAxisFlags_None;
         ImPlot::SetupAxis(ImAxis_X1, nullptr, x_flags);
+        // Plot-area wheel gestures already own RT time zoom. Price zoom is
+        // explicit on the price axis, so time navigation cannot change rows.
+        // Use the preceding hit rectangle before setup consumes this input.
+        const bool time_wheel = rt_mode_ && rt_dom_linked_ && ImGui::GetIO().MouseWheel != 0 &&
+            !ImPlot::GetCurrentPlot()->Axes[ImAxis_Y1].HoverRect.Contains(ImGui::GetIO().MousePos);
         ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_Opposite |
-            (rt_mode_ && rt_auto_price_ ? ImPlotAxisFlags_Lock : ImPlotAxisFlags_None));
+            ((rt_mode_ && rt_auto_price_ && !rt_dom_linked_) || time_wheel
+                ? ImPlotAxisFlags_Lock : ImPlotAxisFlags_None));
         ImPlot::SetupAxisFormat(ImAxis_Y1, fmt_.price_fmt);
 
         // Beyond this density candles and liquidation cells collapse below a
@@ -1226,7 +1232,7 @@ void ChartWidget::render_chart() {
         const double y_padding = y_span > 0.0
             ? y_span * 0.08
             : std::max(std::abs(y_min) * 0.001, tick_size_ * 4.0);
-        if (!rt_mode_ || rt_auto_price_) ImPlot::SetupAxisLimits(ImAxis_Y1,
+        if (!rt_mode_ || (rt_auto_price_ && !rt_dom_linked_)) ImPlot::SetupAxisLimits(ImAxis_Y1,
             rt_empty_prices ? last_visible_range_.Y.Min : y_min - y_padding,
             rt_empty_prices ? last_visible_range_.Y.Max : y_max + y_padding, ImPlotCond_Always);
         if (!hide_x_labels) {
@@ -1238,6 +1244,36 @@ void ChartWidget::render_chart() {
                 setup_time_axis_ticks(visible_x_min, visible_x_max);
             }
         }
+        if (rt_mode_ && rt_dom_linked_ && tick_size_ > 0) {
+            // The plot has one untitled X axis and explicit time ticks. Match
+            // ImPlot's padding calculation before SetupFinish draws the axes,
+            // including multiline labels and the current frame's resize.
+            auto& plot = *ImPlot::GetCurrentPlot();
+            const auto& style = ImPlot::GetStyle();
+            const auto& x_axis = plot.Axes[ImAxis_X1];
+            const double axis_height = x_axis.HasTickLabels()
+                ? std::max(ImGui::GetTextLineHeight(), x_axis.Ticker.MaxSize.y) + style.LabelPadding.y : 0;
+            const double height = std::max(1.0, double(plot.FrameRect.GetHeight()) -
+                2 * style.PlotPadding.y - axis_height);
+            const double step = (rt_renderer_ ? rt_renderer_->get_native_bucket_size() : tick_size_) * rt_bucket_multiplier_;
+            if (step > 0) {
+                const double row_height = ImGui::GetFontSize() + 4.0;
+                const auto& current = plot.Axes[ImAxis_Y1].Range;
+                double focus = std::numeric_limits<double>::quiet_NaN();
+                if (rt_book_valid_ && rt_latest_ && rt_latest_->timestamp_ms <= rt_clock_ms_ &&
+                    rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000)
+                    focus = (rt_latest_->bid + rt_latest_->ask) * 0.5;
+                if (rt_quote_.timestamp_ms > 0) focus = (rt_quote_.best_bid + rt_quote_.best_ask) * 0.5;
+                const auto range = rt_price_window_.update(current.Min, current.Max, step,
+                    height, row_height, focus, rt_auto_price_ && !rt_paused_ && !ctx_.replay_mgr().is_paused());
+                // SetRange preserves ImPlot input; SetupAxisLimits(Always)
+                // would lock wheel zoom and dragging for the whole frame.
+                ImPlot::SetupAxisZoomConstraints(ImAxis_Y1, step,
+                    std::max(1.0, std::floor(height / row_height)) * step);
+                ImPlot::SetupAxisLimits(ImAxis_Y1, range.low, range.high, ImPlotCond_Once);
+                plot.Axes[ImAxis_Y1].SetRange(range.low, range.high);
+            }
+        } else rt_price_window_ = {};
         stored_x_min_ = visible_x_min;
         stored_x_max_ = visible_x_max;
 
@@ -1253,10 +1289,14 @@ void ChartWidget::render_chart() {
             cp.plot_max = ImVec2(ppos.x + psz.x, ppos.y + psz.y);
             cp.x_min_ms = visible_x_min;
             cp.x_max_ms = visible_x_max;
-            cp.y_min = y_min - y_padding;
-            cp.y_max = y_max + y_padding;
+            cp.y_min = ImPlot::GetPlotLimits().Y.Min;
+            cp.y_max = ImPlot::GetPlotLimits().Y.Max;
             cp.valid = true;
         }
+        if (rt_mode_ && rt_dom_linked_ && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f) &&
+            (ImPlot::IsAxisHovered(ImAxis_Y1) || (ImPlot::IsPlotHovered() &&
+             std::abs(ImGui::GetIO().MouseDelta.y) > std::abs(ImGui::GetIO().MouseDelta.x))))
+            rt_auto_price_ = false;
         // ── Render layers (back to front)
         // 1. Heatmap (background)
         // Determine replay cutoff for heatmap rendering

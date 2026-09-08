@@ -32,3 +32,30 @@ inline bool realtime_pan_detaches(float dx, float dy) {
 inline bool realtime_view_has_live_edge(bool following, double right, int64_t clock) {
     return following || right >= double(clock);
 }
+
+// Linked depth is a numeric ladder. Its fixed fidelity sets the price span;
+// neither history nor a volatile market may squeeze rows below the font height.
+struct RealtimePriceWindow {
+    double bucket = 0;
+    double height = 0;
+    struct Range { double low, high; };
+    Range update(double low, double high, double step, double pixels,
+                 double row_height, double focus, bool follow) {
+        const double rows = std::max(1.0, std::floor(pixels / row_height));
+        const double maximum = rows * step;
+        double center = (low + high) * 0.5;
+        double span = high - low;
+        if (bucket <= 0) {
+            span = maximum;
+            if (std::isfinite(focus)) center = focus;
+        } else {
+            span *= step / bucket * pixels / height;
+        }
+        span = std::clamp(span, std::min(step, maximum), maximum);
+        if (follow && std::isfinite(focus) && std::abs(focus - center) > span * 0.25)
+            center = std::round(focus / step) * step;
+        bucket = std::isfinite(focus) || bucket > 0 ? step : 0;
+        height = pixels;
+        return {center - span * 0.5, center + span * 0.5};
+    }
+};

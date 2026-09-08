@@ -50,6 +50,26 @@ int main() {
            "quiet SD market fits at least 48 grouped depth rows");
     expect(realtime_price_half_span(90, 110, 0.01, 5) == 10,
            "volatile market still fits the full observed move");
+    for (double tick : {0.00001, 0.01, 0.1}) for (int group : {1, 2, 5, 10, 20}) {
+        const double step = tick * group, center = tick < 0.001 ? 0.184 : 90000;
+        RealtimePriceWindow window;
+        auto r = window.update(center - 100, center + 100, step, 800, 16, center, true);
+        expect(step * 800 / (r.high - r.low) >= 16 - 1e-5,
+            "TUT and BTC every fidelity reserve readable row height");
+        const auto stable = window.update(r.low, r.high, step, 800, 16, center + step, true);
+        expect(stable.low == r.low && stable.high == r.high, "safe zone does not recenter each tick");
+        const auto moved = window.update(r.low, r.high, step, 800, 16, center + 100 * step, true);
+        expect(std::abs((moved.high - moved.low) - (r.high - r.low)) < step * 1e-5,
+            "volatile price shifts the fixed window without compressing rows");
+        const auto frozen = window.update(r.low, r.high, step, 800, 16, center + 100 * step, false);
+        expect(frozen.low == r.low && frozen.high == r.high, "pause/manual view freezes market following");
+        r = window.update(r.low, r.high, step, 400, 16, center, false);
+        expect(step * 400 / (r.high - r.low) >= 16 - 1e-5, "resize keeps row height readable");
+        r = window.update(r.low, r.high, step * 2, 400, 16, center, false);
+        expect(step * 2 * 400 / (r.high - r.low) >= 16 - 1e-5, "fidelity changes span rather than row height");
+        r = window.update(center - 100, center + 100, step * 2, 400, 16, center, false);
+        expect(step * 2 * 400 / (r.high - r.low) >= 16 - 1e-5, "zoom out cannot hide numeric rows");
+    }
     expect(!realtime_pan_detaches(3, 2), "click jitter preserves RT follow");
     expect(!realtime_pan_detaches(4, 40), "vertical gesture preserves RT follow");
     expect(realtime_pan_detaches(30, 4), "intentional horizontal pan detaches RT follow");

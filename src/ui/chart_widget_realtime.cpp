@@ -61,8 +61,10 @@ void ChartWidget::render_realtime_settings() {
     ImGui::Checkbox("1s observed candles", &rt_candles_);
     ImGui::Checkbox("Trade-price line", &rt_trade_line_);
     chart_type_ = rt_candles_ ? ChartType::Candles : ChartType::Line;
-    ImGui::Checkbox("Auto-fit price", &rt_auto_price_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Turn off to zoom or drag the price axis. Linked DOM rows keep the same heatmap prices. Turn on to fit observed prices again.");
+    ImGui::Checkbox(rt_dom_linked_ ? "Follow price" : "Auto-fit price", &rt_auto_price_);
+    if (ImGui::IsItemHovered()) Theme::tooltip(rt_dom_linked_
+        ? "Keeps the market in the central half of a readable price window. Drag vertically to stop following. Zoom out stops before numbers overlap; choose coarser fidelity for a wider price range."
+        : "Turn off to zoom or drag the price axis. Turn on to fit observed prices again.");
     ImGui::Checkbox("Trade bubbles", &rt_bubbles_);
     ImGui::Checkbox("Extend current depth", &rt_extend_depth_);
     if (ImGui::IsItemHovered()) Theme::tooltip("Projects the last synchronized sampled book into the right margin. This is a held current book, not future orders or recorded history. Turn off to leave the margin clear.");

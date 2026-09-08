@@ -400,7 +400,7 @@ void DOMWidget::render() {
     }
 
     ImGui::Checkbox("Link RT", &link_rt_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Shares the matching RT chart's depth, trade-flow clock and price positions. Rows use heatmap fidelity; hover thin bands for values or zoom the price axis in. Turn off for independent centering and reset controls.");
+    if (ImGui::IsItemHovered()) Theme::tooltip("Shares the matching RT chart's depth, trade-flow clock and price positions. Rows use heatmap fidelity with readable numbers. Choose coarser fidelity for a wider price range. Turn off for independent centering and reset controls.");
     if (link_rt_ && rt_frame_) {
         render_linked_ladder(*rt_frame_);
         ImGui::End();
@@ -843,7 +843,7 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
         frame.replay ? "Replay" : "Live", frame.paused ? " paused" : "");
     ImGui::SameLine();
     if (ImGui::SmallButton(display_usd_ ? "Quote" : "Qty")) display_usd_ = !display_usd_;
-    if (ImGui::IsItemHovered()) Theme::tooltip("Resting depth and received trade volume at the chart clock. CVD is buy quantity minus sell quantity, reset every 5 minutes of market time. Rows use the heatmap fidelity. Thin rows retain their bars; hover for numbers or zoom the price axis in.");
+    if (ImGui::IsItemHovered()) Theme::tooltip("Resting depth and received trade volume at the chart clock. CVD is buy quantity minus sell quantity, reset every 5 minutes of market time. Rows use the heatmap fidelity. The shared price scale keeps numbers readable at every fidelity.");
     if (frame.flow) {
         char cvd[24];
         // CVD stays in base units: multiplying a session total by today's price
@@ -877,8 +877,8 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     const float text_h = ImGui::GetFontSize();
     const float header_h = text_h * 2 + 8;
-    const float top = std::max(org.y + header_h, frame.top);
-    const float bottom = std::min(org.y + avail.y, frame.bottom);
+    float top = std::max(org.y + header_h, frame.top);
+    float bottom = std::min(org.y + avail.y, frame.bottom);
     if (bottom <= top || avail.x <= 0) return;
     if (frame.native_tick <= 0 || frame.bucket_ticks < 1) return;
     const auto center_fmt = PriceFormatter::from_tick_and_step(frame.native_tick * 0.1, 1);
@@ -893,6 +893,15 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
         columns_x + col_w * 2 + price_w, columns_x + col_w * 3 + price_w,
         columns_x + col_w * 4 + price_w, org.x + avail.x};
     const double step = frame.bucket_size();
+    // Keep the viewport edges on complete bands: no half-cut numeric rows
+    // under the header or at the bottom of a resized DOM panel.
+    const auto price_at_y = [&](float y) {
+        return frame.price_min + (frame.bottom - y) / (frame.bottom - frame.top) *
+            (frame.price_max - frame.price_min);
+    };
+    top = frame.price_y(std::floor(price_at_y(top) / step + 1e-7) * step);
+    bottom = frame.price_y(std::ceil(price_at_y(bottom) / step - 1e-7) * step);
+    if (bottom <= top) return;
     const int64_t first_bucket = frame.bucket_index(frame.price_min);
     const int64_t last_bucket = frame.bucket_index(frame.price_max);
     if (last_bucket - first_bucket > 16384) {
@@ -930,9 +939,7 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
         dl->PopClipRect();
     }
     const float row_h = float(step / (frame.price_max - frame.price_min) * (frame.bottom - frame.top));
-    const bool show_numbers = row_h >= text_h + 3;
-    char grouping[96]; snprintf(grouping, sizeof(grouping), "%d ticks / centers%s", frame.bucket_ticks,
-        show_numbers ? "" : " / hover");
+    char grouping[96]; snprintf(grouping, sizeof(grouping), "%d ticks / centers", frame.bucket_ticks);
     dl->AddText(ImVec2(org.x, org.y + text_h + 3), Theme::u32(Theme::Tokens::TX2), grouping);
     dl->PushClipRect(ImVec2(org.x, top), ImVec2(org.x + avail.x, bottom), true);
     for (size_t i = 0; i < count; ++i) {
@@ -941,7 +948,7 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
         if (y + row_h * 0.5f < top || y - row_h * 0.5f > bottom) continue;
         if (row_index((book.bid + book.ask) * 0.5) == int64_t(i))
             dl->AddRectFilled(ImVec2(org.x, y - row_h * 0.5f), ImVec2(org.x + avail.x, y + row_h * 0.5f), Theme::u32(Theme::Tokens::ELEV));
-        if (show_numbers) dl->AddLine(ImVec2(org.x, y + row_h * 0.5f), ImVec2(org.x + avail.x, y + row_h * 0.5f), Theme::u32(Theme::Tokens::BD1, 0.5f));
+        dl->AddLine(ImVec2(org.x, y + row_h * 0.5f), ImVec2(org.x + avail.x, y + row_h * 0.5f), Theme::u32(Theme::Tokens::BD1, 0.5f));
     }
     const float bid_y = frame.price_y(frame.bid()), ask_y = frame.price_y(frame.ask());
     dl->AddRectFilled(ImVec2(edges[2], ask_y), ImVec2(edges[3], bid_y), Theme::u32(Theme::Tokens::TX2, 0.07f));
@@ -968,30 +975,10 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
                 dl->AddRectFilled(ImVec2(leftward ? edges[c+1] - width : edges[c], y - row_h * 0.5f),
                     ImVec2(leftward ? edges[c+1] : edges[c] + width, y + row_h * 0.5f), Theme::u32(color, c == 1 || c == 3 ? 0.35f : 0.16f));
             }
-            if (!show_numbers) continue;
             const float x = c == 2 ? (edges[c]+edges[c+1]-ImGui::CalcTextSize(label).x)*0.5f : edges[c+1]-ImGui::CalcTextSize(label).x-3;
             dl->AddText(ImVec2(x, y - text_h*0.5f), Theme::u32(c == 2 || c == 1 || c == 3 ? Theme::Tokens::TX1 : color), label);
         }
         dl->PopClipRect();
-    }
-    const ImVec2 mouse = ImGui::GetIO().MousePos;
-    if (ImGui::IsWindowHovered() && mouse.x >= org.x && mouse.x < org.x + avail.x &&
-        mouse.y >= top && mouse.y < bottom) {
-        const double price = frame.price_min + (frame.bottom - mouse.y) /
-            (frame.bottom - frame.top) * (frame.price_max - frame.price_min);
-        const auto idx = row_index(price);
-        if (idx >= 0 && size_t(idx) < count) {
-            Theme::begin_tooltip();
-            const auto& row = linked_rows_[size_t(idx)];
-            char lo[32], hi[32];
-            fmt_.format_price(lo, sizeof(lo), double(first_bucket + idx) * step);
-            fmt_.format_price(hi, sizeof(hi), double(first_bucket + idx + 1) * step);
-            ImGui::Text("Bucket [%s, %s)", lo, hi);
-            ImGui::Text("Current depth: bids %.6g / asks %.6g", row.bid, row.ask);
-            ImGui::Text("5m flow: buys %.6g / sells %.6g", row.buy, row.sell);
-            ImGui::TextUnformatted(display_usd_ ? "Quote value" : "Base quantity");
-            Theme::end_tooltip();
-        }
     }
     // Exact-price markers stay in the gutter, never crossing grouped-row text.
     for (int side = 0; side < 2; ++side) {

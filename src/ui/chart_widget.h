@@ -1,6 +1,7 @@
 #pragma once
 #include "core/reference_context.h"
 #include "ui/realtime_dom_frame.h"
+#include "ui/realtime_navigation.h"
 #include "core/trade_at_price.h"
 #include "core/realtime_history.h"
 #include "core/realtime_archive.h"
@@ -121,6 +122,7 @@ public:
     // the live edge (follow-live streaming) and, for the Line, draws the live-
     // edge dot. Toggled from the TIMEFRAME dropdown (see app_shell render_tf_menu).
     bool rt_mode() const { return rt_mode_; }
+    void set_rt_dom_linked(bool linked) { rt_dom_linked_ = linked; }
     const RealtimeDOMFrame& realtime_dom_frame() const { return rt_dom_frame_; }
     void set_rt_mode(bool v);
     void toggle_rt_mode() { set_rt_mode(!rt_mode_); }
@@ -316,6 +318,8 @@ private:
     bool rt_paused_ = false, rt_trade_line_ = false;
     bool rt_extend_depth_ = true;
     bool rt_auto_price_ = true;
+    bool rt_dom_linked_ = false;
+    RealtimePriceWindow rt_price_window_;
     Terminal::BookTicker rt_quote_{};
     std::deque<RealtimeDepthHistory::SamplePtr> rt_samples_;
     std::deque<Terminal::Trade> rt_paused_trades_;

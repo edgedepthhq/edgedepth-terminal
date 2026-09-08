@@ -1113,25 +1113,33 @@ void update_and_render_widgets() {
     // subscriptions and is_open are untouched - is_open=false would ERASE it.)
     const bool rec_focus_widgets = ClipRecorder::focus_active() ||
                                    edu::RecorderRuntime::instance().active();
+    // Resolve ownership before chart layout so its price scale can reserve
+    // readable rows for the same DOM that will consume the published frame.
+    for (const auto& widget : g_app.widgets)
+        if (widget->type() == WidgetType::Chart)
+            static_cast<ChartWidget*>(widget.get())->set_rt_dom_linked(false);
+    for (const auto& widget : g_app.widgets) {
+        if (widget->type() == WidgetType::DOM) {
+            auto* dom = static_cast<DOMWidget*>(widget.get());
+            dom->link_realtime(nullptr);
+            for (const auto& candidate : g_app.widgets) {
+                if (!candidate->is_open || candidate->type() != WidgetType::Chart) continue;
+                auto* chart = static_cast<ChartWidget*>(candidate.get());
+                if (chart->rt_mode() && chart->pair().exchange == dom->pair().exchange &&
+                    chart->pair().symbol == dom->pair().symbol) {
+                    dom->link_realtime(&chart->realtime_dom_frame());
+                    if (dom->is_open && dom->links_realtime()) chart->set_rt_dom_linked(true);
+                    break;
+                }
+            }
+        }
+    }
     // Price transforms are only final after ImPlot renders. Charts go first,
     // then matching DOMs consume that same frame, regardless of widget order.
     for (int pass = 0; pass < 3; ++pass) for (const auto& widget: g_app.widgets) {
         const int widget_pass = widget->type() == WidgetType::Chart ? 0 :
             widget->type() == WidgetType::DOM ? 1 : 2;
         if (widget_pass != pass) continue;
-        if (widget->type() == WidgetType::DOM) {
-            auto* dom = static_cast<DOMWidget*>(widget.get());
-            dom->link_realtime(nullptr);
-            for (const auto& candidate : g_app.widgets) {
-                if (!candidate->is_open || candidate->type() != WidgetType::Chart) continue;
-                const auto* chart = static_cast<const ChartWidget*>(candidate.get());
-                if (chart->rt_mode() && chart->pair().exchange == dom->pair().exchange &&
-                    chart->pair().symbol == dom->pair().symbol) {
-                    dom->link_realtime(&chart->realtime_dom_frame());
-                    break;
-                }
-            }
-        }
         if (widget->type() == WidgetType::Trades) {
             const auto* tape = static_cast<const TradesWidget*>(widget.get());
             bool covered = false;
