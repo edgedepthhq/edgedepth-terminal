@@ -63,7 +63,7 @@ int test_archive_capture() {
     }
     const auto start_serial=archive.serial_;
     EM_ASM({Module['archiveBlocked']=true;});
-    archive.update(50000);
+    expect(!archive.prepare_replay(50000),"replay waits when recorder transport is blocked");
     expect(archive.serial_>start_serial && archive.serial_<start_serial+200 && archive.dropped==0,
         "full-depth burst defers uncollected samples while transport is blocked");
     EM_ASM({Module['archiveBlocked']=false;});
@@ -71,6 +71,7 @@ int test_archive_capture() {
     archive.sent_at_=-1000000;archive.update(50000);
     const int depths=EM_ASM_INT({return Module['rtArchive'].state(UTF8ToString($0)).records.filter(r=>r[0]===1).length;},archive.id_.c_str());
     expect(depths==200 && archive.dropped==0,"catch-up drains multiple bounded batches without depth loss");
+    expect(archive.prepare_replay(50000),"replay resumes once pending observations have drained");
     const auto generation=archive.generation;
     books.clear_all();seed.set_timestamp_ms(3001);seed.set_last_update_id(300);
     books.apply_orderbook_snapshot_from_pb(pair,seed);

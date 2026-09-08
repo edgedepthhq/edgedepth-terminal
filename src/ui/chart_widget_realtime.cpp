@@ -321,7 +321,7 @@ void ChartWidget::render_realtime() {
             for (float x = edge; x < right; x += 10) dl->AddLine(ImVec2(x, y), ImVec2(std::min(x + 5, right), y), color);
         }
     }
-    const char* note = rt_archive_ && !rt_archive_->error.empty() ? "RT archive stopped: open RT settings for storage status" : rt_history_view_ ? (rt_archive_ && rt_archive_->loading ?
+    const char* note = rt_archive_ && rt_archive_->loading ? "Loading RT history..." : rt_archive_ && !rt_archive_->error.empty() ? "RT archive stopped: open RT settings for storage status" : rt_history_view_ ? (rt_archive_ && rt_archive_->loading ?
         "RT history loading / recording continues" : "RT history: mean depth bins / grouped trade volume when dense / zoom for detail") : rt_paused_ ? "RT paused / session recording continues" : !fresh ? "RT: waiting for fresh synchronized depth" :
         (rt_trade_view_.grouped && rt_bubbles_ ? "RT: grouped trade volume at average prices / zoom for individual records" :
          "RT: sampled book held between updates / bubbles are trade records");
@@ -339,6 +339,18 @@ void ChartWidget::render_realtime() {
         ImVec2(pos.x + 16 + note_size.x, note_y + note_size.y + 3),
         Theme::u32(Theme::Tokens::BASE, 0.9f), 3);
     dl->AddText(ImVec2(pos.x + 12, note_y), Theme::u32(Theme::Tokens::TX1), note);
+    if (ctx_.replay_mgr().is_loading()) {
+        const ImVec2 size = ImPlot::GetPlotSize();
+        dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), Theme::u32(Theme::Tokens::BASE));
+        const ImVec2 center(pos.x + size.x * 0.5f, pos.y + size.y * 0.5f);
+        const float angle = float(ImGui::GetTime() * 4.0);
+        dl->PathArcTo(center, 12.0f, angle, angle + 4.5f, 24);
+        dl->PathStroke(Theme::u32(Theme::Tokens::BRAND_TX), 0, 2.5f);
+        const char* label = "Loading replay...";
+        const ImVec2 text_size = ImGui::CalcTextSize(label);
+        dl->AddText(ImVec2(center.x - text_size.x * 0.5f, center.y + 24),
+                    Theme::u32(Theme::Tokens::TX1), label);
+    }
     ImPlot::PopPlotClipRect();
 }
 
@@ -440,15 +452,27 @@ void ChartWidget::update_realtime_archive_view() {
         }
         return;
     }
-    if (!rt_history_view_) { rt_history_view_ = true; rt_query_step_ = 100; rebuild_realtime_view(); }
     const int64_t step = std::max(int64_t(100), ((to-from+179999)/180000)*100);
     const int64_t aligned = from / step * step;
     int64_t received_step = 100;
-    if (rt_archive_->take_view(rt_archive_samples_, rt_archive_trades_, received_step)) {
+    std::deque<RealtimeDepthHistory::SamplePtr> received_samples;
+    std::deque<Terminal::Trade> received_trades;
+    const auto displayed_count = rt_archive_->view_trade_count;
+    const bool displayed_grouped = rt_archive_->view_trades_grouped;
+    if (rt_archive_->take_view(received_samples, received_trades, received_step)) {
         // Navigation may have changed while a worker query was in flight.
         if (step != rt_query_step_ || rt_query_multiplier_ != rt_bucket_multiplier_ || (!follow && std::abs(aligned-rt_query_from_)>step)) {
-            rt_archive_samples_.clear(); rt_archive_trades_.clear(); rt_query_from_ = 0;
-        } else { rt_loaded_to_ = rt_query_to_; rt_query_step_ = received_step; rebuild_realtime_view(); }
+            rt_archive_->view_trade_count = displayed_count;
+            rt_archive_->view_trades_grouped = displayed_grouped;
+            rt_query_from_ = 0;
+        } else {
+            // Keep the displayed data until a matching replacement is complete.
+            rt_archive_samples_.swap(received_samples);
+            rt_archive_trades_.swap(received_trades);
+            rt_history_view_ = true;
+            rt_loaded_to_ = rt_query_to_; rt_query_step_ = received_step;
+            rebuild_realtime_view();
+        }
     }
     // Join the query's as-of snapshot to the recent source by a strict time
     // boundary. Equal timestamps stay together in the archive snapshot; late

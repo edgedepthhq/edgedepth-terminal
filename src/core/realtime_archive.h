@@ -11,6 +11,7 @@ public:
     static constexpr int64_t target_ms = 1800000;
     static std::shared_ptr<RealtimeArchive> acquire(CandleManager&, OrderbookManager&, const Terminal::Pair&);
     ~RealtimeArchive();
+    static bool prepare_replay(CandleManager*, int64_t clock);
     void update(int64_t clock);
     void reset(bool discard_existing = true);
     void cancel_view();
@@ -28,6 +29,7 @@ private:
     void gap(int64_t);
     void poll();
     bool make_room(size_t count);
+    bool prepare_replay(int64_t clock);
     OrderbookManager& books_;
     Terminal::Pair pair_;
     std::string id_;

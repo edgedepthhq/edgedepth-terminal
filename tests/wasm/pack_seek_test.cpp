@@ -2,12 +2,14 @@
 #include "replayer/replay_manager.h"
 #include "core/message_handler.h"
 #include "core/orderbook_manager.h"
+#include "core/realtime_archive.h"
 #include "stream_handler.h"
 #include <cstdio>
 
 std::function<bool(const std::string&)> StreamManager::pack_request_hook_;
 // The production block decoder and seek state run here without HTTP or UI.
 // The route is unused (the test feeds decoded records to the real book owner).
+bool RealtimeArchive::prepare_replay(CandleManager*, int64_t) { return true; }
 MessageContext ReplayManager::replay_message_context() const { return {}; }
 void MessageHandler::route_parsed(const pb::WSPayload&, const MessageContext&) {}
 
@@ -72,7 +74,7 @@ struct PackReplayEngineTest {
             if (frame.stream == pb::STREAM_ORDERBOOK) {
                 pb::BookUpdate update; update.ParseFromString(frame.payload);
                 books.apply_book_update_from_pb(pair, update);
-            } else { ++trades; check(frame.ts == 60000, "trade timestamp remains the source timestamp"); }
+            } else { ++trades; check(frame.ts == (trades == 1 ? 3000 : 60000), "both historical and target trade timestamps remain original"); }
         }
         std::vector<RealtimeDepthHistory::SamplePtr> samples;
         check(books.copy_realtime_since(pair, 0, samples), "seed plus intervening deltas preserves strict RT continuity");
@@ -80,7 +82,10 @@ struct PackReplayEngineTest {
         const auto* book=books.get_orderbook(pair);
         check(book->last_update_id == 104 && book->bids.begin()->first == 99,
               "target book includes pre-target removals and excludes future deltas");
-        check(samples.back()->timestamp_ms == 60000 && trades == 1, "seek cutoff includes only eligible observations");
+        check(samples.back()->timestamp_ms == 60000 && trades == 2, "seek restores historical trades through the inclusive target");
+        engine.wall_base_ms_ -= 10000;
+        check(engine.is_seeking() && engine.playback_time_ms() == 60000,
+              "display clock stays at target throughout seek reconstruction");
         engine.control_pause(); engine.wall_base_ms_ -= 10000;
         check(engine.market_now_ms() == 60000, "pause freezes target while reconstruction is pending");
         delta.set_previous_update_id(105); delta.set_first_update_id(106);

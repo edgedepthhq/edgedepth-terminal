@@ -239,7 +239,7 @@ public:
     // True while the session is joined but its data context hasn't been primed
     // yet (no candles / no OB seed). The clock is HELD here so playback never
     // starts against empty buffers. Drives loading spinners (lesson + live).
-    bool is_loading() const { return info_.state == State::Buffering; }
+    bool is_loading() const;
     State state() const { return info_.state; }
     const SessionInfo& info() const { return info_; }
 

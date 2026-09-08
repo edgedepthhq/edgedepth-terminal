@@ -9,6 +9,7 @@
 #include "core/message_handler.h"
 #include "core/symbol_metadata.h"
 #include "core/message_parser.h"
+#include "core/realtime_archive.h"
 #include "stream_handler.h"
 
 #include <nlohmann/json.hpp>
@@ -478,10 +479,11 @@ bool PackReplayEngine::decode_block_into_queue(const std::string& raw_block) {
         }
         off += rec_len;
         // The opening seed needs EVERY intervening depth event. Other
-        // streams start at the requested target and keep their wire clocks.
+        // trades rebuild the RT tape too; other streams start at the target.
         queued_through_ms_ = frame.ts_ms();
         if (skip_before_ms_ > 0 && frame.ts_ms() < skip_before_ms_ &&
-            frame.stream() != static_cast<uint32_t>(pb::STREAM_ORDERBOOK)) continue;
+            frame.stream() != static_cast<uint32_t>(pb::STREAM_ORDERBOOK) &&
+            frame.stream() != static_cast<uint32_t>(pb::STREAM_TRADES)) continue;
         QFrame qf;
         qf.ts = frame.ts_ms();
         qf.stream = frame.stream();
@@ -542,6 +544,8 @@ void PackReplayEngine::deliver_due_frames() {
                 std::chrono::steady_clock::now() - t0).count();
             if (spent >= kBudgetMs) break;
         }
+        if ((delivered & 31) == 0 &&
+            !RealtimeArchive::prepare_replay(mgr_->replay_context()->candles, cutoff)) break;
         route_frame(f.ts, f.stream, f.tf, f.payload);
         frame_queue_.pop_front();
         delivered++;
@@ -677,6 +681,8 @@ void PackReplayEngine::control_skip_forward(int64_t ts_ms, bool book_cleared) {
             // clock passes them, exactly like the box's SkipForwardTo (the
             // client kept its book and its sequence anchor).
             market_base_ms_ = target;
+            skip_before_ms_ = target;
+            seek_priming_ = true;
             wall_base_ms_ = wall_ms();
             finished_emitted_ = false;
         }

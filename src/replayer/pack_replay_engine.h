@@ -19,7 +19,7 @@
 //   - clock: the box's 50ms smooth-clock drip (market = anchor + wall×speed,
 //     batch-deliver everything ≤ clock) runs in tick(), budgeted per frame.
 //   - seeks: replay depth from the opening seed through the target using
-//     bounded range reads. Other streams begin at the requested target.
+//     bounded range reads, restoring trades too. Other streams begin at the target.
 //   - get_historical_candles: served locally from the header's baked
 //     per-timeframe candle seeds, end-clamped to the playhead (F3 parity).
 //     Installed as StreamManager's pack request hook; other historical
@@ -70,6 +70,9 @@ public:
     // re-seed (block seek) instead of clock-advancing, or the book stays
     // empty forever (deltas are rejected without a snapshot base).
     void control_skip_forward(int64_t ts_ms, bool book_cleared);
+
+    bool is_seeking() const { return seek_priming_; }
+    int64_t playback_time_ms() const { return market_now_ms(); }
 
     bool active() const { return phase_ != Phase::Idle && phase_ != Phase::Error; }
 

@@ -316,3 +316,23 @@ Canonical/public isolated Release builds and capture/transport regressions pass.
 A real TUT pack seek from the beginning to about 18:55, followed by a five-minute
 history overview, showed continuous depth and no capture-overload warning.
 This remains local pending James's deployment gate.
+
+## Pack trade history and loading transitions (2026-09-09, local)
+
+Pack seeks now restore every trade as well as depth from the opening seed to
+the target. Other streams still start at the requested target. Original source
+timestamps and multiplicity are retained, and the normal bounded archive owns
+older trades. Pack delivery checks archive capacity between groups of 32 frames
+and waits for pending capture to drain; archive failure remains visible without
+blocking playback. The existing capture, worker and retention limits are unchanged.
+
+The display uses the pack engine clock, including catch-up holds for full seeks
+and small forward skips. RT shows a loading spinner during replay priming.
+Archive navigation retains the displayed view until a matching replacement is
+ready; stale responses cannot empty it or change its trade grouping.
+
+Both isolated Release client builds and pack/capture/transport regressions pass.
+Local TUT verification sought to about 19:01:34, retained 11.8 minutes without a
+capture-overload warning, and showed bubbles in the preceding minute when panned
+back. Repeated zoom changes retained displayed history. A spinner was visible
+during reconstruction. These changes are local and still require deployment.

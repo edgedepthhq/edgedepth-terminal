@@ -28,11 +28,12 @@ EM_JS(void, archive_view, (const char* id, double* ptr, double* info), {
     HEAPF64.set([s.view.step,s.view.tradeCount,s.view.grouped?1:0],info/8);s.view=null;
 });
 
+namespace { std::map<CandleManager*,std::weak_ptr<RealtimeArchive>> sessions; }
+
 RealtimeArchive::RealtimeArchive(OrderbookManager& books,const Terminal::Pair& pair):books_(books),pair_(pair) {
     batch_.reserve(131072); pending_.reserve(RealtimeDepthHistory::max_samples); reset();
 }
 std::shared_ptr<RealtimeArchive> RealtimeArchive::acquire(CandleManager& candles, OrderbookManager& books,const Terminal::Pair& pair) {
-    static std::map<CandleManager*,std::weak_ptr<RealtimeArchive>> sessions;
     for(auto it=sessions.begin();it!=sessions.end();) {
         if(it->second.expired()) it=sessions.erase(it);else ++it;
     }
@@ -43,6 +44,22 @@ std::shared_ptr<RealtimeArchive> RealtimeArchive::acquire(CandleManager& candles
         if(auto archive=weak.lock()) {if(trade)archive->append_trade(*trade);else archive->reset();}
     });
     return current;
+}
+bool RealtimeArchive::prepare_replay(CandleManager* candles, int64_t clock) {
+    const auto it=sessions.find(candles);
+    if(it==sessions.end())return true;
+    auto archive=it->second.lock();
+    if(!archive)return true;
+    return archive->prepare_replay(clock);
+}
+bool RealtimeArchive::prepare_replay(int64_t clock) {
+    update(clock);
+    if(!error.empty())return true; // Recording failure must not stop playback.
+    books_.copy_realtime_since(pair_,serial_,pending_);
+    const bool pending=!pending_.empty() && pending_.front()->timestamp_ms<=clock;
+    pending_.clear();
+    // Leave room for the next small delivery group without growing any queue.
+    return !pending && make_room(65536);
 }
 RealtimeArchive::~RealtimeArchive() {archive_clear(id_.c_str());}
 void RealtimeArchive::reset(bool discard_existing) {

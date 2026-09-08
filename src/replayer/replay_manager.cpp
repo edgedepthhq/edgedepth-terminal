@@ -2117,6 +2117,11 @@ void ReplayManager::tick_usage(double dt_seconds, bool document_visible) {
     }
 }
 
+bool ReplayManager::is_loading() const {
+    return info_.state == State::Buffering || info_.state == State::Seeking ||
+        (pack_mode_ && pack_engine_ && pack_engine_->is_seeking());
+}
+
 int64_t ReplayManager::interpolated_time_ms() const {
     // Frozen while not playing: paused, seeking, OR still buffering (the gate
     // holds the clock at the window start until candles + OB seed are primed -
@@ -2126,6 +2131,8 @@ int64_t ReplayManager::interpolated_time_ms() const {
         info_.state == State::Buffering || info_.last_status_update == 0) {
         return info_.current_time_ms;
     }
+    // The local source owns its clock, including seek reconstruction holds.
+    if (pack_mode_ && pack_engine_) return pack_engine_->playback_time_ms();
     // During drip-feed catch-up after client-only rewind, the client
     // owns the clock. Advance from rewind target using local wall time.
     if (using_local_clock_) {
