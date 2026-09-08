@@ -356,6 +356,7 @@ void ChartWidget::refresh_instrument() {
 
 void ChartWidget::update() {
     ProfileScope _ps("ChartUpd");
+    if (rt_mode_) capture_realtime_archive();
     if (heatmap_stream_mgr_ &&
         (!heatmap_enabled_ || !ct_allows_time_overlays(chart_type_) ||
          heatmap_stream_mgr_ != &ctx_.stream_mgr())) {
@@ -962,7 +963,7 @@ void ChartWidget::render_chart() {
         // Grow the initial view from actual observations, without painting
         // the current book backward into the pre-join interval.
         const double observed_span = rt_samples_.empty() ? 5000.0 :
-            std::max(5000.0, double(rt_clock_ms_ - rt_samples_.front()->timestamp_ms) / 0.88);
+            std::max(5000.0, double(rt_clock_ms_ - (rt_archive_ && rt_archive_->first ? rt_archive_->first : rt_samples_.front()->timestamp_ms)) / 0.88);
         const double span = std::min(rt_span_ms_, observed_span);
         x_max = double(rt_clock_ms_) + span * 0.12;
         x_min = x_max - span;
@@ -1002,7 +1003,7 @@ void ChartWidget::render_chart() {
             ImPlot::SetupAxisZoomConstraints(
                 ImAxis_X1,
                 rt_mode_ ? 5000.0 : kMinVisibleCandles * timeframe_ms,
-                rt_mode_ ? double(RealtimeDepthHistory::retention_ms) : kMaxVisibleCandles * timeframe_ms);
+                rt_mode_ ? (double(RealtimeArchive::target_ms) / 0.88) : kMaxVisibleCandles * timeframe_ms);
         }
 
         // TPO mode: override x-axis formatter to show dates only (no scientific notation)
@@ -1019,7 +1020,7 @@ void ChartWidget::render_chart() {
         // Keep the viewport between 8 and 1,440 candles. When it is already
         // outside those bounds, force the repaired range for this frame.
         const double min_x_span = rt_mode_ ? 5000.0 : kMinVisibleCandles * timeframe_ms;
-        const double max_x_span = rt_mode_ ? double(RealtimeDepthHistory::retention_ms) : kMaxVisibleCandles * timeframe_ms;
+        const double max_x_span = rt_mode_ ? (double(RealtimeArchive::target_ms) / 0.88) : kMaxVisibleCandles * timeframe_ms;
         bool zoom_clamped = false;
         if (!ctx_.candle_mgr().follow_live() && chart_type_ != ChartType::TPO) {
             const double span = last_visible_range_.X.Max - last_visible_range_.X.Min;
@@ -1127,11 +1128,11 @@ void ChartWidget::render_chart() {
                 y_min = std::min(y_min, trade.price);
                 y_max = std::max(y_max, trade.price);
             }
-            for (size_t i = 0; i < rt_samples_.size(); ++i) {
-                const auto& sample = rt_samples_[i];
+            for (size_t i = 0; i < realtime_samples().size(); ++i) {
+                const auto& sample = realtime_samples()[i];
                 if (sample->timestamp_ms > rt_clock_ms_ || sample->timestamp_ms > visible_x_max) break;
-                const int64_t until = i + 1 < rt_samples_.size() && !rt_samples_[i + 1]->segment_start
-                    ? rt_samples_[i + 1]->timestamp_ms : sample->timestamp_ms;
+                const int64_t until = i + 1 < realtime_samples().size() && !realtime_samples()[i + 1]->segment_start
+                    ? realtime_samples()[i + 1]->timestamp_ms : sample->timestamp_ms;
                 if (until < visible_x_min) continue;
                 y_min = std::min(y_min, sample->bid);
                 y_max = std::max(y_max, sample->ask);
@@ -1266,7 +1267,7 @@ void ChartWidget::render_chart() {
         }
         if (rt_mode_ && rt_renderer_ && heatmap_enabled_) {
             configure_depth_fidelity(*rt_renderer_);
-            rt_renderer_->render_cells(100, heatmap_sensitivity_, false, rt_extend_depth_);
+            rt_renderer_->render_cells(rt_renderer_->get_column_interval_ms(), heatmap_sensitivity_, false, rt_extend_depth_ && !rt_history_view_);
         }
         // 1.5 Liquidation timeline heatmap (the predictive shader map) -- ENABLED 2026-06-27.
         //     Re-enabled on the L1 footprint-located estimator field (peaky + persistent on the
@@ -5374,6 +5375,7 @@ void ChartWidget::reset_overlay_subscriptions() {
     rt_stream_mgr_ = nullptr;
     rt_subscribed_ = false;
     rt_flow_.reset();
+    rt_archive_.reset();
     on_rewind(0);
     if (rt_mode_) set_rt_mode(true);
     // Reset subscription flags so overlays re-subscribe on the new context.

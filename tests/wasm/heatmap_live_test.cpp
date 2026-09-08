@@ -299,5 +299,19 @@ int main() {
     r.sync_gpu_from_timeline();
     assert(r.get_value_at_price_and_time(100.05, epoch + 819250) == 11);
     r.clear();
+    r.configure_realtime(1);r.set_bucket_multiplier(5);
+    r.set_observation_clock_ms(epoch+1800000);
+    r.finalize_column(epoch+17,{{100,10}},true,100);r.sync_gpu_from_timeline();
+    const float history_peak=r.realtime_normalization(95,105);
+    r.set_realtime_warm(true);r.clear_realtime_view(1000);
+    for(int i=0;i<1800;++i)r.finalize_column(epoch+i*1000+917,{{100,10}},i==0,100);
+    r.sync_gpu_from_timeline();
+    assert(r.timeline_.size()==1800 && r.ring_count_==1800);
+    assert(r.realtime_normalization(95,105)==history_peak && r.realtime_warm());
+    assert(r.get_value_at_price_and_time(100.5,epoch+950)==10);
+    r.clear_realtime_view(100);r.finalize_column(epoch+17,{{100,10}},true,100);
+    r.sync_gpu_from_timeline();
+    assert(r.realtime_normalization(95,105)==history_peak && r.realtime_warm());
+    assert(r.get_value_at_price_and_time(100.5,epoch+50)==10);
     std::puts("PASS: live depth survives rebuilds, finalization and origin changes; rewind/clear discard it");
 }

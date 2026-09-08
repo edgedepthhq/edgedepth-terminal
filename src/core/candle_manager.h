@@ -43,6 +43,7 @@ public:
 
     void handle_trade(const Terminal::Trade& trade);
     const RealtimeTradeHistory& realtime_trades() const { return realtime_trades_; }
+    void set_realtime_observer(std::function<void(const Terminal::Trade*)> observer) { realtime_trades_.set_observer(std::move(observer)); }
     void handle_candle(const Terminal::Candle& candle);
     void handle_candle_batch(std::span<const Terminal::Candle> batch);
 

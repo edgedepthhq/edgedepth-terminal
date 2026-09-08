@@ -323,7 +323,7 @@ void ShaderHeatmapRenderer::finalize_column(
         const int64_t bin = timestamp_ms / column_interval_ms_ * column_interval_ms_;
         auto it = timeline_.lower_bound(bin);
         if (it != timeline_.end() && it->first < bin + column_interval_ms_) return;
-        while (!timeline_.empty() && timeline_.begin()->first <= timestamp_ms - RealtimeDepthHistory::retention_ms) {
+        while (!timeline_.empty() && timeline_.begin()->first <= timestamp_ms - std::max(RealtimeDepthHistory::retention_ms, column_interval_ms_ * 2048)) {
             observation_centers_.erase(timeline_.begin()->first);
             observation_boundaries_.erase(timeline_.begin()->first);
             timeline_.erase(timeline_.begin());

@@ -2,6 +2,7 @@
 #include "ui/realtime_dom_frame.h"
 #include "ui/realtime_navigation.h"
 #include <cmath>
+#include "rendering/realtime_trade_view.h"
 #include "core/orderbook_manager.h"
 #include <cstdio>
 
@@ -9,7 +10,24 @@ static int failures = 0;
 static void expect(bool ok, const char* message) {
     if (!ok) { std::fprintf(stderr, "FAIL: %s\n", message); ++failures; }
 }
+int test_archive_capture();
 int main() {
+    failures += test_archive_capture();
+    RealtimeTradeHistory observed;
+    size_t captured=0, resets=0;
+    observed.set_observer([&](const Terminal::Trade* t){if(t)++captured;else ++resets;});
+    Terminal::Trade execution{};execution.price=100;execution.qty=2;execution.timestamp_ms=1000;execution.is_buy=true;
+    for(size_t i=0;i<25000;++i)observed.append(execution);
+    expect(captured==25000 && observed.trades().size()==20000,"archive observer receives every record before working-set eviction");
+    static RealtimeTradeView view;
+    view.build(observed.trades(), 0, 2000, 1);
+    double qty=0;for(size_t i=0;i<view.count;++i)qty+=view.records[i].qty;
+    expect(view.grouped && view.count==1 && qty==40000,"dense bubble view preserves all loaded volume instead of deleting oldest markers");
+    observed.clear();expect(resets==1,"archive observer follows source resets");
+    for(int i=0;i<100;++i){execution.timestamp_ms=1000+i;observed.append(execution);}
+    view.build(observed.trades(),0,2000,1);
+    expect(!view.grouped && view.count==100 && view.records[0].timestamp_ms==1000,"detail view restores individual records and original timestamps");
+
     const auto zoom_in = realtime_zoom(60000, 1, 0.1, true, false);
     const auto zoom_out = realtime_zoom(60000, -1, 0.1, true, false);
     expect(zoom_in.follow && zoom_in.span_ms < 60000, "zoom in retains follow and narrows time");
@@ -22,7 +40,7 @@ int main() {
         expect(realtime_zoom(40000, wheel, 0.1, true, true).follow, "paused following view can zoom around its frozen clock");
     }
     expect(realtime_zoom(5000, 1, 0.1, true, false).span_ms == 5000, "minimum zoom span");
-    expect(realtime_zoom(300000, -1, 0.1, true, false).span_ms == 300000, "maximum zoom span");
+    expect(realtime_zoom(1800000 / 0.88, -1, 0.1, true, false).span_ms == 1800000 / 0.88, "maximum zoom span");
     expect(!realtime_zoom(40000, 0, 0.1, false, false).follow, "no-input/focus recovery cannot rearm follow");
     RealtimeDOMFrame dense;
     dense.price_min = 78850; dense.price_max = 78920;

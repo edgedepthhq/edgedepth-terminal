@@ -59,10 +59,10 @@ public:
 
     // A separate instance for observed subsecond depth; historical candle
     // columns never enter this renderer. Original observation clocks are keys.
-    void configure_realtime(double tick_size) {
+    void configure_realtime(double tick_size, int64_t interval = 100) {
         realtime_ = true;
-        column_interval_ms_ = 100;
-        time_step_ms_ = 100;
+        column_interval_ms_ = interval;
+        time_step_ms_ = interval;
         native_bucket_size_ = tick_size;
     }
     void invalidate_observation(int64_t timestamp_ms) {
@@ -72,6 +72,11 @@ public:
     void set_observation_hold(int64_t until_ms) { observation_hold_until_ms_ = until_ms; }
     void set_observation_clock_ms(int64_t ms) { if (realtime_) replay_cutoff_ms_ = ms; }
     void clear();
+    void clear_realtime_view(int64_t interval) {
+        const float peak = realtime_peak_; const int64_t clock = realtime_peak_clock_ms_;
+        clear(); configure_realtime(native_bucket_size_, interval);
+        realtime_peak_ = peak; realtime_peak_clock_ms_ = clock;
+    }
     void mark_dirty();
 
     // Orderbook columns follow the requested candle interval, never sample gaps.
@@ -277,7 +282,7 @@ private:
     int64_t time_step_ms_ = 60000; // Interval of the uploaded GPU grid
     std::map<int64_t, double> observation_centers_;
     bool realtime_ = false;
-    bool realtime_warm_ = false;
+    bool realtime_warm_ = true;
     float realtime_normalization(double price_min, double price_max);
     float realtime_peak_ = 0;
     int64_t realtime_peak_clock_ms_ = 0;
@@ -286,7 +291,7 @@ private:
     double realtime_draw_until(double viewport_end, bool extend) const;
     std::set<int64_t> observation_boundaries_;
     float column_flags(int64_t ts) const {
-        return realtime_ ? (observation_boundaries_.contains(ts) ? 5.0f : 3.0f) + float(ts % 100) / 100.0f : 1.0f;
+        return realtime_ ? (observation_boundaries_.contains(ts) ? 5.0f : 3.0f) + float(ts % column_interval_ms_) / float(column_interval_ms_) : 1.0f;
     }
     int64_t column_interval_ms_ = 60000; // Requested orderbook interval
 

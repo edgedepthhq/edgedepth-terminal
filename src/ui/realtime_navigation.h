@@ -14,6 +14,6 @@ inline RealtimeZoom realtime_zoom(double displayed_span, float wheel,
     const double rate = wheel > 0 ? -zoom_rate / (1.0 + 2.0 * zoom_rate) :
                         wheel < 0 ? zoom_rate : 0.0;
     return {std::clamp(displayed_span * (following ? 1.0 + rate : 1.0),
-                       5000.0, double(RealtimeDepthHistory::retention_ms)),
+                       5000.0, (1800000.0 / 0.88)),
             following || (wheel < 0 && !paused)};
 }

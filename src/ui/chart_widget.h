@@ -2,6 +2,8 @@
 #include "ui/realtime_dom_frame.h"
 #include "core/trade_at_price.h"
 #include "core/realtime_history.h"
+#include "core/realtime_archive.h"
+#include "rendering/realtime_trade_view.h"
 
 #include <implot.h>
 #include "ui/widget.h"
@@ -302,6 +304,22 @@ private:
     Terminal::BookTicker rt_quote_{};
     std::deque<RealtimeDepthHistory::SamplePtr> rt_samples_;
     std::deque<Terminal::Trade> rt_paused_trades_;
+    std::shared_ptr<RealtimeArchive> rt_archive_;
+    std::deque<RealtimeDepthHistory::SamplePtr> rt_archive_samples_;
+    std::deque<Terminal::Trade> rt_archive_trades_;
+    RealtimeTradeView rt_trade_view_;
+    bool rt_history_view_ = false;
+    uint64_t rt_archive_generation_ = 0;
+    int64_t rt_query_from_ = 0, rt_query_to_ = 0, rt_query_step_ = 0;
+    int64_t rt_loaded_to_ = 0;
+    double rt_query_at_ = 0;
+    int rt_query_multiplier_ = 5;
+    void capture_realtime_archive();
+    void update_realtime_archive_view();
+    void rebuild_realtime_view();
+    const std::deque<RealtimeDepthHistory::SamplePtr>& realtime_samples() const {
+        return rt_history_view_ ? rt_archive_samples_ : rt_samples_;
+    }
     const std::deque<Terminal::Trade>& realtime_trades() const;
     bool rt_subscribed_ = false;
     StreamManager* rt_stream_mgr_ = nullptr;

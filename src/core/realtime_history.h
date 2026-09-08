@@ -6,6 +6,7 @@
 #include <deque>
 #include <memory>
 #include <vector>
+#include <functional>
 
 // Observations, not reconstructed pre-join history. The orderbook owner calls
 // this under its write lock after applying a complete depth event. Tickers and
@@ -83,9 +84,11 @@ private:
 class RealtimeTradeHistory {
 public:
     static constexpr size_t max_trades = 20000;
+    void set_observer(std::function<void(const Terminal::Trade*)> observer) { observer_ = std::move(observer); }
     void append(const Terminal::Trade& trade) {
         if (trade.timestamp_ms <= 0 || !(trade.price > 0) || !(trade.qty > 0) ||
             !std::isfinite(trade.price) || !std::isfinite(trade.qty)) return;
+        if (observer_) observer_(&trade);
         auto it = std::upper_bound(trades_.begin(), trades_.end(), trade.timestamp_ms,
             [](int64_t ts, const Terminal::Trade& t) { return ts < t.timestamp_ms; });
         trades_.insert(it, trade);
@@ -95,10 +98,11 @@ public:
     void trim_after(int64_t cutoff) {
         while (!trades_.empty() && trades_.back().timestamp_ms > cutoff) trades_.pop_back();
     }
-    void clear() { trades_.clear(); }
+    void clear() { trades_.clear(); if (observer_) observer_(nullptr); }
     const std::deque<Terminal::Trade>& trades() const { return trades_; }
 private:
     std::deque<Terminal::Trade> trades_;
+    std::function<void(const Terminal::Trade*)> observer_;
 };
 
 // A bounded, as-of market scale shared by live, paused and replay rendering.

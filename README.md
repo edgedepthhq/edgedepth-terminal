@@ -40,12 +40,17 @@ SOPH/USDT capture from 8 September 2026 with the linked six-column DOM, delta
 and CVD. Actual observed depth and received trades, with no pre-join depth backfill.*
 
 Choose **RT** in the timeframe menu to watch observed orderbook history, sampled
-best bid/ask steps and trade bubbles on one price axis. Each bubble's center is
-its received execution price and timestamp; size represents quote notional.
+best bid/ask steps and trade bubbles on one price axis. Individual bubbles retain
+received execution prices and timestamps; dense views group volume by time and
+side at average prices, with a label. Zoom in to recover individual records.
 Quotes and trades are separate streams, so a print can lie outside the sampled
 spread. Bubbles are never moved onto a quote to make them fit.
 
-RT retains up to five minutes of depth in 100ms display bins. Historical price
+RT records browser-local history from activation, targeting 30 minutes within a
+shared 256 MiB compressed storage budget. The menu shows actual coverage and
+provides Whole session and Return live. Detail uses 100ms observed samples; wide
+views use mean depth bins. The deeper blue cool-to-warm palette is the default.
+Historical price
 groups and the calibrated color scale stay fixed as new data arrives. The price
 axis still auto-fits the visible market. Optional candles, a trade-price line,
 auto/manual bubble thresholds and price fidelity are available in the menus.

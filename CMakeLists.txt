@@ -389,6 +389,7 @@ set(PROJECT_SRC
         src/ui/chart_widget.h
         src/ui/chart_widget.cpp
         src/ui/chart_widget_realtime.cpp
+        src/core/realtime_archive.cpp
         src/ui/chart_widget_scrub_preview.cpp
         src/ui/price_profile_renderer.h
         src/ui/price_profile_renderer.cpp
@@ -539,7 +540,8 @@ if(EMSCRIPTEN)
     target_link_options(realtime_mesh_regression PRIVATE -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1)
     set_target_properties(realtime_mesh_regression PROPERTIES SUFFIX ".js")
     add_executable(realtime_depth_regression EXCLUDE_FROM_ALL
-        tests/wasm/realtime_history_test.cpp src/core/orderbook_manager.cpp
+        tests/wasm/realtime_history_test.cpp tests/wasm/realtime_archive_test.cpp
+        src/core/realtime_archive.cpp src/core/orderbook_manager.cpp
         ${PROTO_SRCS} ${PROTOBUF_LITE_SRCS})
     add_dependencies(realtime_depth_regression generate_proto)
     target_include_directories(realtime_depth_regression PRIVATE
@@ -547,6 +549,7 @@ if(EMSCRIPTEN)
         ${CMAKE_CURRENT_BINARY_DIR}/include ${PROTOBUF_SOURCE_DIR}/src)
     target_compile_options(realtime_depth_regression PRIVATE -O1)
     target_link_options(realtime_depth_regression PRIVATE -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1)
+    target_link_options(realtime_depth_regression PRIVATE "--pre-js=${CMAKE_SOURCE_DIR}/tests/wasm/realtime_archive_bridge_fixture.js")
     set_target_properties(realtime_depth_regression PROPERTIES SUFFIX ".js")
 endif()
 
@@ -757,6 +760,8 @@ set_source_files_properties(
 )
 
 target_link_libraries(c_based_trader_client websocket.js)
+target_link_options(c_based_trader_client PRIVATE "--pre-js=${CMAKE_SOURCE_DIR}/src/realtime_archive.js")
+set_property(TARGET c_based_trader_client APPEND PROPERTY LINK_DEPENDS "${CMAKE_SOURCE_DIR}/src/realtime_archive.js")
 
 # Output as index.html
 set_target_properties(c_based_trader_client PROPERTIES
