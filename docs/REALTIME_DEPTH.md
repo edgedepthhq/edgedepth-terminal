@@ -297,3 +297,6 @@ working data, and archived views containing the live clock append new depth and
 trades even while detached. Queries refresh as their eligible end advances.
 Current-depth projection and quiet holds follow the visible live edge, not the
 Follow latch. Fully historical views do not project the current book backward.
+
+Selecting a standard timeframe while RT is active now exits RT into Candles
+automatically. Explicit chart-type selection still selects the requested type.

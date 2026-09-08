@@ -596,7 +596,7 @@ void ChartWidget::set_liq_opacity(float v) {
 
 void ChartWidget::change_timeframe(const int new_tf_seconds)
 {
-    if (rt_mode_) set_rt_mode(false);
+    if (rt_mode_) set_chart_type(ChartType::Candles);
     ctx_.candle_mgr().change_timeframe(new_tf_seconds);
     // The previous viewport is expressed in the old timeframe's domain. Reusing
     // it for even one frame makes the new timeframe's Y fit sample the wrong
