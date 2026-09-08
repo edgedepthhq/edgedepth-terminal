@@ -120,10 +120,10 @@ def book_msg(ts_ms: int, bids, asks, last_price: float) -> bytes:
     return out + _int(4, 1) + _f64(5, last_price)   # field 4 = snapshot
 
 
-def candle_msg(bar, timeframe_s: int, final: bool = True) -> bytes:
+def candle_msg(bar, timeframe_s: int) -> bytes:
     o, h, l, c, volume, ts_ms = bar
     return (_f64(1, o) + _f64(2, h) + _f64(3, l) + _f64(4, c) + _f64(5, volume)
-            + _int(10, ts_ms) + _int(11, timeframe_s) + _int(12, int(final)))  # 12 = final
+            + _int(10, ts_ms) + _int(11, timeframe_s) + _int(12, 1))  # 12 = final
 
 
 def candles_msg(timeframe_s: int, bars) -> bytes:

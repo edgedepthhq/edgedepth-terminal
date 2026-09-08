@@ -899,10 +899,22 @@ float ShaderHeatmapRenderer::realtime_normalization(double price_min, double pri
     return realtime_peak_ > 0 ? realtime_peak_ : global_max_qty_;
 }
 
+// A display-only projection of the last eligible GPU column. Never change
+// the observation clock, retained timeline, data lookup or replay cutoff.
+double ShaderHeatmapRenderer::realtime_draw_until(double viewport_end, bool extend) const {
+    if (extend && realtime_ && replay_cutoff_ms_ > 0 &&
+        observation_hold_until_ms_ == replay_cutoff_ms_ && ring_count_ > 0 &&
+        column_meta_[ring_count_ - 1].num_rows > 0 &&
+        column_meta_[ring_count_ - 1].timestamp_ms <= replay_cutoff_ms_)
+        return std::max(double(replay_cutoff_ms_), viewport_end);
+    return double(replay_cutoff_ms_);
+}
+
 void ShaderHeatmapRenderer::render_cells(
     int64_t candle_timeframe_ms,
     float sensitivity,
-    bool show_labels)
+    bool show_labels,
+    bool extend_current_depth)
 {
     if (timeline_.empty() || !data_texture_ || !meta_texture_) return;
 
@@ -973,8 +985,9 @@ void ShaderHeatmapRenderer::render_cells(
 
     // Sequential ring buffer - column 0 = oldest, column ring_count-1 = newest.
     u.time_step = static_cast<float>(time_step_ms_) / 1000.0f;
+    const double draw_until = realtime_draw_until(limits.X.Max, extend_current_depth);
     u.observation_hold_until = realtime_ && observation_hold_until_ms_ > oldest_ts
-        ? float(observation_hold_until_ms_ - oldest_ts) / 1000.0f : 0;
+        ? float((draw_until > replay_cutoff_ms_ ? draw_until : double(observation_hold_until_ms_)) - oldest_ts) / 1000.0f : 0;
     // Center each column on its bucket timestamp. Candles are center-anchored on T
     // (plot_candles draws timestamps[i] ± half_width); a left-anchored column spanning
     // [T, T+step] sat half a candle to the RIGHT of its candle. Shifting the column
@@ -1005,7 +1018,10 @@ void ShaderHeatmapRenderer::render_cells(
         const double data_time_min = static_cast<double>(gpu_origin_ms_) - (realtime_ ? 0.0 : time_step_ms_ * 0.5);
         double data_time_max = static_cast<double>(oldest_ts + (ring_count_ - 1) * time_step_ms_) + time_step_ms_ * (realtime_ ? 1.0 : 0.5);
         if (realtime_) data_time_max = std::max(data_time_max, double(observation_hold_until_ms_));
-        if (realtime_ && replay_cutoff_ms_ > 0) data_time_max = std::min(data_time_max, double(replay_cutoff_ms_));
+        if (realtime_ && replay_cutoff_ms_ > 0) {
+            data_time_max = std::min(data_time_max, double(replay_cutoff_ms_));
+            if (draw_until > replay_cutoff_ms_) data_time_max = draw_until;
+        }
         const double data_price_min = get_min_price();
         const double data_price_max = get_max_price();
 

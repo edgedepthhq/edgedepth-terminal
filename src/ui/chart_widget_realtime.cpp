@@ -160,23 +160,11 @@ void ChartWidget::render_realtime() {
     ImDrawList* dl = ImPlot::GetPlotDrawList();
     ImPlot::PushPlotClipRect();
     const auto& trades = realtime_trades();
-    if (rt_extend_depth_ && rt_book_valid_ && rt_latest_ &&
+    if (heatmap_enabled_ && rt_extend_depth_ && rt_book_valid_ && rt_latest_ &&
         rt_latest_->timestamp_ms <= rt_clock_ms_ && rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000 &&
         limits.X.Max > rt_clock_ms_) {
         const float edge = std::max(ImPlot::GetPlotPos().x,
             ImPlot::PlotToPixels(double(rt_clock_ms_), 0).x);
-        const float right = ImPlot::GetPlotPos().x + ImPlot::GetPlotSize().x;
-        double peak = 0;
-        for (const auto& level : rt_latest_->levels)
-            if (level.price >= limits.Y.Min && level.price <= limits.Y.Max) peak = std::max(peak, level.size);
-        const float half_tick = std::max(0.5f, float(tick_size_ / limits.Y.Size() * ImPlot::GetPlotSize().y * 0.5));
-        if (peak > 0) for (const auto& level : rt_latest_->levels) {
-            if (level.price < limits.Y.Min || level.price > limits.Y.Max) continue;
-            const float y = ImPlot::PlotToPixels(0, level.price).y;
-            const auto color = level.price <= rt_latest_->bid ? Theme::Tokens::UP : Theme::Tokens::DOWN;
-            dl->AddRectFilled(ImVec2(edge, y - half_tick), ImVec2(right, y + half_tick),
-                Theme::u32(color, 0.04f + 0.18f * float(std::sqrt(level.size / peak))));
-        }
         dl->AddLine(ImVec2(edge, ImPlot::GetPlotPos().y),
             ImVec2(edge, ImPlot::GetPlotPos().y + ImPlot::GetPlotSize().y), Theme::u32(Theme::Tokens::TX2, 0.35f));
         dl->AddText(ImVec2(edge + 5, ImPlot::GetPlotPos().y + 5), Theme::u32(Theme::Tokens::TX2), "Current depth");
@@ -294,18 +282,6 @@ void ChartWidget::render_realtime() {
             const ImU32 color = Theme::u32(side ? Theme::Tokens::DOWN : Theme::Tokens::UP);
             dl->AddLine(ImPlot::PlotToPixels(double(book.timestamp_ms), price),
                 ImPlot::PlotToPixels(double(rt_clock_ms_), price), color, 1.25f);
-        }
-        const float width = std::min(70.0f, std::max(0.0f, right - edge - 5));
-        double max_qty = 0;
-        for (const auto& level : book.levels)
-            if (level.price >= limits.Y.Min && level.price <= limits.Y.Max) max_qty = std::max(max_qty, level.size);
-        if (max_qty > 0) for (const auto& level : book.levels) {
-            if (level.price < limits.Y.Min || level.price > limits.Y.Max) continue;
-            const float y = ImPlot::PlotToPixels(0, level.price).y;
-            auto color = level.price <= book.bid ? Theme::Tokens::UP : Theme::Tokens::DOWN;
-            color.w = 0.45f;
-            dl->AddLine(ImVec2(right - width * float(level.size / max_qty), y), ImVec2(right, y),
-                ImGui::GetColorU32(color), 2.0f);
         }
         for (int side = 0; side < 2; ++side) {
             const double price = side ? rt_dom_frame_.ask() : rt_dom_frame_.bid();

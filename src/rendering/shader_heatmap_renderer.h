@@ -84,7 +84,8 @@ public:
     /// Must be called between ImPlot::BeginPlot() and EndPlot().
     void render_cells(int64_t candle_timeframe_ms,
                       float sensitivity = 1.0f,
-                      bool show_labels = true);
+                      bool show_labels = true,
+                      bool extend_current_depth = false);
 
     // ── Configuration ───────────────────────────────────────────────
     enum class ColormapType { Orderbook, Liquidation };
@@ -279,6 +280,7 @@ private:
     int64_t realtime_peak_clock_ms_ = 0;
     int64_t observation_hold_until_ms_ = 0;
     void fill_observation_hold(int previous, int next);
+    double realtime_draw_until(double viewport_end, bool extend) const;
     std::set<int64_t> observation_boundaries_;
     float column_flags(int64_t ts) const {
         return realtime_ ? (observation_boundaries_.contains(ts) ? 5.0f : 3.0f) + float(ts % 100) / 100.0f : 1.0f;

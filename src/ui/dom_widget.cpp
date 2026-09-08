@@ -870,13 +870,8 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
     ImGui::TextColored(Theme::Tokens::DOWN, "Ask %s", ask);
     char spread[24];
     snprintf(spread, sizeof(spread), fmt_.price_fmt, frame.ask() - frame.bid());
-    ImGui::Text("Spread %s / ticks %.0f", spread, (frame.ask() - frame.bid()) / tick_size_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Ask minus bid from the selected BBO observation. Native quotes never replace sampled depth quantities. Exact quote prices use the chart scale, even when the spread is smaller than one pixel. Grouped PRICE labels are row centers, not executable quotes.");
-    ImGui::TextDisabled("%s BBO / age %.1fs", frame.native_quote() ? "Native" : "Depth",
-        double(frame.clock_ms - (frame.native_quote() ? frame.quote.timestamp_ms : book.timestamp_ms)) / 1000.0);
-    ImGui::TextDisabled("Sample age %.1fs / 100ms bins",
-        double(frame.clock_ms - book.timestamp_ms) / 1000.0);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Age is measured at the chart clock and freezes on pause. Sampling and the 512-level-per-side retained book are display limits, not a complete exchange event record. Independent ticker and trade arrivals do not replace this sampled book.");
+    ImGui::TextDisabled("Spread %s", spread);
+    if (ImGui::IsItemHovered()) Theme::tooltip("The difference between the best ask and bid. PRICE rows are grouped for readability; the bid and ask above show the exact quotes.");
 
     const ImVec2 org = ImGui::GetCursorScreenPos();
     const ImVec2 avail = ImGui::GetContentRegionAvail();

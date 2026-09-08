@@ -1266,7 +1266,7 @@ void ChartWidget::render_chart() {
         }
         if (rt_mode_ && rt_renderer_ && heatmap_enabled_) {
             configure_depth_fidelity(*rt_renderer_);
-            rt_renderer_->render_cells(100, heatmap_sensitivity_, false);
+            rt_renderer_->render_cells(100, heatmap_sensitivity_, false, rt_extend_depth_);
         }
         // 1.5 Liquidation timeline heatmap (the predictive shader map) -- ENABLED 2026-06-27.
         //     Re-enabled on the L1 footprint-located estimator field (peaky + persistent on the

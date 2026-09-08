@@ -200,8 +200,18 @@ int main() {
     assert(metadata[r.meta_texture_][18 * 4 + 3] == 0); // Broken sequence stays absent.
     r.set_observation_hold(epoch + 2500);
     assert(r.observation_hold_until_ms_ == epoch + 2500);
+    const auto recorded_size = r.timeline_.size();
+    assert(r.realtime_draw_until(epoch + 3500, true) == epoch + 3500);
+    assert(r.realtime_draw_until(epoch + 3500, false) == epoch + 2500);
+    assert(r.realtime_draw_until(epoch + 2000, true) == epoch + 2500);
+    assert(r.timeline_.size() == recorded_size);
+    assert(r.get_value_at_price_and_time(100.25, epoch + 3500) == 0);
+    r.set_observation_clock_ms(epoch + 1900); // A newer retained column cannot project into a rewind.
+    assert(r.realtime_draw_until(epoch + 3500, true) == epoch + 1900);
+    r.set_observation_clock_ms(epoch + 2500);
     r.set_observation_hold(0);
     assert(r.observation_hold_until_ms_ == 0);
+    assert(r.realtime_draw_until(epoch + 3500, true) == epoch + 2500); // Invalid/stale books never extend.
     r.set_observation_clock_ms(epoch + 1000000);
     for (int i = 5; i < 1400; ++i) r.finalize_column(epoch + i * 100 + 17, {{100, float(i)}});
     assert(r.timeline_.size() == 1200);
