@@ -213,10 +213,10 @@ int main() {
     assert(r.observation_hold_until_ms_ == 0);
     assert(r.realtime_draw_until(epoch + 3500, true) == epoch + 2500); // Invalid/stale books never extend.
     r.set_observation_clock_ms(epoch + 1000000);
-    for (int i = 5; i < 1400; ++i) r.finalize_column(epoch + i * 100 + 17, {{100, float(i)}});
-    assert(r.timeline_.size() == 1200);
+    for (int i = 5; i < 3200; ++i) r.finalize_column(epoch + i * 100 + 17, {{100, float(i)}});
+    assert(r.timeline_.size() == 3000);
     r.sync_gpu_from_timeline();
-    assert(r.time_step_ms_ == 100 && r.ring_count_ <= 1200);
+    assert(r.time_step_ms_ == 100 && r.ring_count_ <= 3000);
     r.set_replay_cutoff_ms(epoch + 130017);
     r.sync_gpu_from_timeline();
     for (const auto& column : r.column_meta_)
@@ -225,7 +225,7 @@ int main() {
     // through initial batch upload, direct arrival and retention-origin rebuild.
     r.clear();
     r.configure_realtime(0.0000001);
-    r.set_observation_clock_ms(epoch + 200000);
+    r.set_observation_clock_ms(epoch + 400000);
     const std::unordered_map<double, float> small_tick{
         {0.00001, 1}, {0.0010299, 230000}, {0.0010300, 340000}, {0.02, 1}};
     r.finalize_column(epoch + 17, small_tick, true, 0.00102995);
@@ -236,7 +236,7 @@ int main() {
     assert(r.get_value_at_price_and_time(0.00102995, epoch + 1050) == 230000);
     assert(r.get_value_at_price_and_time(0.00102995, epoch + 550) == 230000);
     r.gpu_dirty_ = true; // A delayed batch remains CPU-owned until rebuild.
-    for (int i = 2; i < 135; ++i)
+    for (int i = 2; i < 335; ++i)
         r.finalize_column(epoch + i * 1000 + 17, small_tick, false, 0.00102995);
     r.sync_gpu_from_timeline();
     assert(r.gpu_origin_ms_ > epoch);
@@ -273,7 +273,7 @@ int main() {
     // direct arrivals, rebuilds and retirement of their original predecessor.
     for (int mult : {1, 2, 5, 10, 20}) {
         r.clear(); r.configure_realtime(0.0000001); r.set_bucket_multiplier(mult);
-        r.set_observation_clock_ms(epoch + 200000);
+        r.set_observation_clock_ms(epoch + 400000);
         r.finalize_column(epoch + 17, small_tick, true, 0.00102005);
         r.sync_gpu_from_timeline();
         r.finalize_column(epoch + 1017, small_tick, false, 0.00102995);
@@ -285,6 +285,19 @@ int main() {
         after = r.column_meta_[r.find_column_for_time(epoch + 1050)];
         assert(before.price_min == after.price_min && before.values == after.values);
     }
+    r.clear(); r.configure_realtime(0.1); r.set_observation_clock_ms(epoch + 1000000);
+    r.finalize_column(epoch + 17, {{100, 3}}, true, 100);
+    r.sync_gpu_from_timeline();
+    const auto origin = r.gpu_origin_ms_;
+    r.finalize_column(epoch + 300017, {{100, 7}}, true, 100);
+    assert(!r.gpu_dirty_ && r.gpu_origin_ms_ == origin);
+    assert(r.get_value_at_price_and_time(100.05, epoch + 50) == 0);
+    assert(r.get_value_at_price_and_time(100.05, epoch + 300050) == 7);
+    // Exhaust the spare texture span: only then rebase, preserving the sample.
+    r.finalize_column(epoch + 819217, {{100, 11}}, true, 100);
+    assert(r.gpu_dirty_);
+    r.sync_gpu_from_timeline();
+    assert(r.get_value_at_price_and_time(100.05, epoch + 819250) == 11);
     r.clear();
     std::puts("PASS: live depth survives rebuilds, finalization and origin changes; rewind/clear discard it");
 }

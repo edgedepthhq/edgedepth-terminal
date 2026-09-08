@@ -70,7 +70,7 @@ void ChartWidget::render_realtime_settings() {
     rt_min_notional_ = std::max(1.0f, rt_min_notional_);
     if (ImGui::IsItemHovered()) Theme::tooltip("Price x quantity in quote units. One bubble per received record; the exchange may aggregate fills. Radius starts at 3px and is capped at 12px. Sizes above 16 times the minimum share the cap.");
     ImGui::EndDisabled();
-    ImGui::TextUnformatted("Depth: 100ms samples, 2 minutes retained");
+    ImGui::TextUnformatted("Depth: 100ms samples, up to 5 minutes retained");
     ImGui::TextUnformatted("Fixed price fidelity: Layers > Depth settings");
 }
 
@@ -101,7 +101,7 @@ void ChartWidget::update_realtime() {
     if (!rt_renderer_) {
         rt_renderer_ = std::make_unique<ShaderHeatmapRenderer>();
         rt_renderer_->configure_realtime(tick_size_);
-        rt_pending_.reserve(1200);
+        rt_pending_.reserve(RealtimeDepthHistory::max_samples);
         rt_prices_.reserve(1024);
     }
     const int64_t clock = ctx_.replay_mgr().is_active()
@@ -127,7 +127,7 @@ void ChartWidget::update_realtime() {
         rt_renderer_->finalize_column(sample->timestamp_ms, rt_prices_, sample->segment_start, (sample->bid + sample->ask) * 0.5);
         rt_latest_ = sample;
         rt_samples_.push_back(sample);
-        while (rt_samples_.size() > 1200 || rt_samples_.front()->timestamp_ms <= clock - 120000)
+        while (rt_samples_.size() > RealtimeDepthHistory::max_samples || rt_samples_.front()->timestamp_ms <= clock - RealtimeDepthHistory::retention_ms)
             rt_samples_.pop_front();
     }
     if (!rt_book_valid_ && rt_latest_) {
@@ -156,7 +156,7 @@ const std::deque<Terminal::Trade>& ChartWidget::realtime_trades() const {
 void ChartWidget::render_realtime() {
     ProfileScope profile("RT overlays");
     const auto limits = ImPlot::GetPlotLimits();
-    if (!ctx_.candle_mgr().follow_live()) rt_span_ms_ = std::clamp(limits.X.Size(), 5000.0, 120000.0);
+    if (!ctx_.candle_mgr().follow_live()) rt_span_ms_ = std::clamp(limits.X.Size(), 5000.0, double(RealtimeDepthHistory::retention_ms));
     ImDrawList* dl = ImPlot::GetPlotDrawList();
     ImPlot::PushPlotClipRect();
     const auto& trades = realtime_trades();
@@ -174,7 +174,7 @@ void ChartWidget::render_realtime() {
     int64_t previous_ms = 0;
     // Last point per screen pixel bounds line geometry to the plot width.
     if (rt_trade_line_ && !rt_candles_) for (const auto& trade : trades) {
-        if (trade.timestamp_ms < limits.X.Min || trade.timestamp_ms <= rt_clock_ms_ - 120000) continue;
+        if (trade.timestamp_ms < limits.X.Min || trade.timestamp_ms <= rt_clock_ms_ - RealtimeDepthHistory::retention_ms) continue;
         if (trade.timestamp_ms > rt_clock_ms_ || trade.timestamp_ms > limits.X.Max) break;
         const ImVec2 point = ImPlot::PlotToPixels(double(trade.timestamp_ms), trade.price);
         if (rt_trade_line_ && !rt_candles_ && previous_ms && point.x >= previous.x + 1.0f &&
@@ -244,7 +244,7 @@ void ChartWidget::render_realtime() {
     if (rt_bubbles_) for (auto it = trades.rbegin(); it != trades.rend(); ++it) {
         const auto& trade = *it;
         if (trade.timestamp_ms > rt_clock_ms_ || trade.timestamp_ms > limits.X.Max) continue;
-        if (trade.timestamp_ms < limits.X.Min || trade.timestamp_ms <= rt_clock_ms_ - 120000) break;
+        if (trade.timestamp_ms < limits.X.Min || trade.timestamp_ms <= rt_clock_ms_ - RealtimeDepthHistory::retention_ms) break;
         const double notional = trade.price * trade.qty;
         if (!(minimum > 0) || notional < minimum || !std::isfinite(notional)) continue;
         if (++bubbles > 1500) break;
@@ -290,7 +290,7 @@ void ChartWidget::render_realtime() {
             for (float x = edge; x < right; x += 10) dl->AddLine(ImVec2(x, y), ImVec2(std::min(x + 5, right), y), color);
         }
     }
-    const char* note = rt_paused_ ? "RT paused / feed continues within the 2-minute retention limit" : !fresh ? "RT: waiting for fresh synchronized depth" :
+    const char* note = rt_paused_ ? "RT paused / feed continues within the 5-minute retention limit" : !fresh ? "RT: waiting for fresh synchronized depth" :
         (bubbles > 1500 ? "RT: newest 1,500 qualifying trade records shown" :
          "RT: sampled book held between updates / bubbles are trade records");
     const ImVec2 pos = ImPlot::GetPlotPos();
@@ -313,7 +313,7 @@ void ChartWidget::render_realtime() {
 void ChartWidget::configure_depth_fidelity(ShaderHeatmapRenderer& renderer) {
     if (rt_mode_) {
         // Keep historical price groups fixed as the live price axis auto-fits.
-        renderer.set_bucket_multiplier(heatmap_bucket_multiplier_);
+        renderer.set_bucket_multiplier(rt_bucket_multiplier_);
         return;
     }
     // Viewport-adaptive bucket multiplier: ensure each heatmap cell

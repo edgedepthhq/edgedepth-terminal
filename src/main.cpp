@@ -625,11 +625,10 @@ void check_initialization() {
             !EducationBoot::instance().is_pack()) {
             g_app.candle_mgr->initial_load();
         }
-        g_app.widgets.push_back(std::make_unique<ChartWidget>(
-            pair,
-            g_app.app_ctx,
-            tick_size
-        ));
+        auto initial_chart = std::make_unique<ChartWidget>(pair, g_app.app_ctx, tick_size);
+        if (EducationBoot::instance().is_pack() && EducationBoot::instance().pack_realtime())
+            initial_chart->set_rt_mode(true);
+        g_app.widgets.push_back(std::move(initial_chart));
         // The native shell (topbar + stats strip) is suppressed in embedded
         // lesson mode (React owns it), so skip its init too - it subscribes the
         // global ticker24h feed, which would be a live leak in a replay lesson.

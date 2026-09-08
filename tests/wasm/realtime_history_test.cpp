@@ -22,7 +22,7 @@ int main() {
         expect(realtime_zoom(40000, wheel, 0.1, true, true).follow, "paused following view can zoom around its frozen clock");
     }
     expect(realtime_zoom(5000, 1, 0.1, true, false).span_ms == 5000, "minimum zoom span");
-    expect(realtime_zoom(120000, -1, 0.1, true, false).span_ms == 120000, "maximum zoom span");
+    expect(realtime_zoom(300000, -1, 0.1, true, false).span_ms == 300000, "maximum zoom span");
     expect(!realtime_zoom(40000, 0, 0.1, false, false).follow, "no-input/focus recovery cannot rearm follow");
     RealtimeDOMFrame dense;
     dense.price_min = 78850; dense.price_max = 78920;
@@ -70,12 +70,12 @@ int main() {
     history.copy_since(serial, samples);
     expect(samples.empty(), "transport interruption requires seed");
     history.seed();
-    for (int64_t ts = 2000; ts < 202000; ts += 100) history.observe(book, ts);
+    for (int64_t ts = 2000; ts < 402000; ts += 100) history.observe(book, ts);
     history.copy_since(0, samples);
-    expect(samples.size() == 1200, "time and sampling bound the history");
-    expect(samples.front()->timestamp_ms == 82000, "expired observations evicted");
-    history.trim_after(101000); history.copy_since(0, samples);
-    expect(!history.valid() && samples.back()->timestamp_ms == 101000, "rewind excludes future observations and requires seed");
+    expect(samples.size() == RealtimeDepthHistory::max_samples, "time and sampling bound the history");
+    expect(samples.front()->timestamp_ms == 102000, "expired observations evicted");
+    history.trim_after(201000); history.copy_since(0, samples);
+    expect(!history.valid() && samples.back()->timestamp_ms == 201000, "rewind excludes future observations and requires seed");
     RealtimeDepthHistory other;
     other.copy_since(0, samples);
     expect(samples.empty(), "separate market owners cannot leak depth");

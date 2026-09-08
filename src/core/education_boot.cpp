@@ -151,6 +151,7 @@ void EducationBoot::detect() {
                 var sym = "";
                 var emb = "0";
                 var skt = "0";
+                var rt = "0";
                 var pk = window.__EDGEDEPTH_PACK__;
                 if (pk && pk.url) {
                     url = String(pk.url);
@@ -162,6 +163,7 @@ void EducationBoot::detect() {
                     // Start-at / deep-link target (epoch ms, 0 = none): the /demo
                     // route bakes the catalog startAtMs or its ?t= override here.
                     skt = String(pk.seekToMs || 0);
+                    rt = pk.realtime === true ? "1" : "0";
                 } else {
                     var qs = new URLSearchParams(window.location.search);
                     var qurl = qs.get('pack');
@@ -169,11 +171,12 @@ void EducationBoot::detect() {
                         url = String(qurl);
                         sym = String(qs.get('packsym') || "");
                         emb = "0";  // dev boot keeps the native transport
+                        rt = qs.get('packrt') === '1' ? '1' : '0';
                         skt = String(qs.get('packt') || 0);  // dev deep-link (epoch ms)
                     }
                 }
                 if (!url) return 0;
-                var s = url + '\n' + sym + '\n' + emb + '\n' + skt;
+                var s = url + '\n' + sym + '\n' + emb + '\n' + skt + '\n' + rt;
                 var len = lengthBytesUTF8(s);
                 var buf = _malloc(len + 1);
                 stringToUTF8(s, buf, len + 1);
@@ -186,10 +189,10 @@ void EducationBoot::detect() {
         if (praw) {
             std::string blob(praw);
             free(praw);
-            std::string parts[4];
+            std::string parts[5];
             {
                 size_t pos = 0;
-                for (int i = 0; i < 4; ++i) {
+                for (int i = 0; i < 5; ++i) {
                     const auto nl = blob.find('\n', pos);
                     if (nl == std::string::npos) { parts[i] = blob.substr(pos); break; }
                     parts[i] = blob.substr(pos, nl - pos);
@@ -199,6 +202,7 @@ void EducationBoot::detect() {
             pack_url_ = parts[0];
             pack_symbol_ = parts[1];
             pack_embedded_ = (parts[2] == "1");
+            pack_realtime_ = (parts[4] == "1");
             pack_seek_to_ms_ = parts[3].empty() ? 0 : std::strtoll(parts[3].c_str(), nullptr, 10);
             std::transform(pack_symbol_.begin(), pack_symbol_.end(), pack_symbol_.begin(),
                            [](unsigned char c) { return std::tolower(c); });

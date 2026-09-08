@@ -145,10 +145,15 @@ void main() {
 
     // ── NORMALIZATION ───────────────────────────────────────────────
     float t;
-    if (u_mode == 0) {
+    if (u_mode != 1) {
         // Orderbook: max_qty normalization
         if (u_max_qty < 0.0001) discard;
-        t = clamp(value * u_sensitivity / u_max_qty, 0.0, 1.0);
+        float relative = max(value * u_sensitivity / u_max_qty, 0.0);
+        // RT: a fixed shoulder keeps routine depth subdued and distinguishes
+        // later orders above the calibration reference without a hard ceiling.
+        // 0.1x -> 0.038, 0.5x -> 0.5, 1x -> 0.8, 2x -> 0.941.
+        float shoulder = relative / sqrt(0.25 + relative * relative);
+        t = u_mode == 2 ? shoulder * shoulder : clamp(relative, 0.0, 1.0);
     } else {
         // Liquidation: low/peak normalization (value already abs from interp above)
         if (value < u_color_low) discard;
@@ -219,6 +224,7 @@ bool ShaderHeatmapResources::init() {
     // Build colormap textures from HeatmapColormap (reuse existing LUT code)
     build_colormap_texture(colormap_ob_, 0, 1.0f);
     build_colormap_texture(colormap_rt_, 3, 1.0f);
+    build_colormap_texture(colormap_rt_warm_, 4, 1.0f);
     build_colormap_texture(colormap_liq_, 1, 1.0f);
     build_colormap_texture(colormap_liq_warm_, 2, 1.0f);
 
@@ -231,6 +237,7 @@ void ShaderHeatmapResources::destroy() {
     if (program_) { glDeleteProgram(program_); program_ = 0; }
     if (vao_) { glDeleteVertexArrays(1, &vao_); vao_ = 0; }
     if (colormap_rt_) { glDeleteTextures(1, &colormap_rt_); colormap_rt_ = 0; }
+    if (colormap_rt_warm_) { glDeleteTextures(1, &colormap_rt_warm_); colormap_rt_warm_ = 0; }
     if (colormap_ob_) { glDeleteTextures(1, &colormap_ob_); colormap_ob_ = 0; }
     if (colormap_liq_) { glDeleteTextures(1, &colormap_liq_); colormap_liq_ = 0; }
     if (colormap_liq_warm_) { glDeleteTextures(1, &colormap_liq_warm_); colormap_liq_warm_ = 0; }
@@ -332,6 +339,7 @@ void ShaderHeatmapResources::cache_uniforms() {
 void ShaderHeatmapResources::build_colormap_texture(GLuint& tex, int type, float opacity) {
     uint32_t lut[256];
     auto cm_type = (type == 0) ? HeatmapColormap::Type::Orderbook
+                 : (type == 4) ? HeatmapColormap::Type::RealtimeWarm
                  : (type == 3) ? HeatmapColormap::Type::RealtimeOrderbook
                  : (type == 2) ? HeatmapColormap::Type::LiquidationWarm
                                : HeatmapColormap::Type::Liquidation;
@@ -354,6 +362,7 @@ void ShaderHeatmapResources::build_colormap_texture(GLuint& tex, int type, float
 void ShaderHeatmapResources::rebuild_colormap(int type, float opacity) {
     if (type == 3) {
         build_colormap_texture(colormap_rt_, 3, opacity);
+        build_colormap_texture(colormap_rt_warm_, 4, opacity);
     } else if (type == 0) {
         build_colormap_texture(colormap_ob_, 0, opacity);
     } else if (type == 2) {

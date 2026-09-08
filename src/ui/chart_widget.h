@@ -332,6 +332,7 @@ private:
     bool open_heatmap_settings_ = false;
     bool heatmap_adapt_to_zoom_ = true;
     int heatmap_bucket_multiplier_ = 1;
+    int rt_bucket_multiplier_ = 5;
     int64_t heatmap_loaded_timeframe_ = 0;
     float heatmap_sensitivity_ = 1.0f;
     std::chrono::steady_clock::time_point last_heatmap_rebuild_;

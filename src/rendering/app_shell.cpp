@@ -867,7 +867,7 @@ namespace {
                             u32(on ? Tokens::TX1 : (rhov ? Tokens::TX1 : Tokens::TX2)), "RT");
                 ImGui::PopFont();
                 if (rclicked && chart) chart->toggle_rt_mode();
-                if (rhov) Theme::tooltip("Observed depth, trade bubbles and spread. Hosted live RT is Pro; local replay is available.");
+                if (rhov) Theme::tooltip("Observed depth, trade bubbles and spread. For standard candles, open Chart view (Line) and choose Candles, then select a timeframe. Hosted live RT is Pro; local replay is available.");
                 if (chart && on) chart->render_realtime_settings();
                 ImGui::Dummy(ImVec2(0, 2));
             }
@@ -1006,7 +1006,9 @@ namespace {
         ImGui::SetCursorScreenPos(ImVec2(x, p0.y));
         if (ImGui::InvisibleButton("##tf_caret", ImVec2(caretw, h))) ImGui::OpenPopup("##tf_menu");
         const bool chov = ImGui::IsItemHovered();
-        if (chov) Theme::tooltip("All timeframes and favourites");
+        if (chov) Theme::tooltip(chart && chart->rt_mode()
+            ? "RT: observed depth and trades. For standard candles, open Chart view (Line) and choose Candles, then select a timeframe."
+            : "All timeframes and favourites. Choose RT for observed depth and trade bubbles.");
         dl->AddRectFilled(ImVec2(x + 1, p0.y + 1), ImVec2(x + caretw - 1, p0.y + h - 1),
                           u32(chov ? Tokens::HOVER : Tokens::ELEV));
         dl->AddLine(ImVec2(x + 0.5f, p0.y + 1), ImVec2(x + 0.5f, p0.y + h - 1), u32(Tokens::BD2));

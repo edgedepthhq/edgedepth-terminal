@@ -45,7 +45,7 @@ its received execution price and timestamp; size represents quote notional.
 Quotes and trades are separate streams, so a print can lie outside the sampled
 spread. Bubbles are never moved onto a quote to make them fit.
 
-RT retains up to two minutes of depth in 100ms display bins. Historical price
+RT retains up to five minutes of depth in 100ms display bins. Historical price
 groups and the calibrated color scale stay fixed as new data arrives. The price
 axis still auto-fits the visible market. Optional candles, a trade-price line,
 auto/manual bubble thresholds and price fidelity are available in the menus.

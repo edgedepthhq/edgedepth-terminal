@@ -1002,7 +1002,7 @@ void ChartWidget::render_chart() {
             ImPlot::SetupAxisZoomConstraints(
                 ImAxis_X1,
                 rt_mode_ ? 5000.0 : kMinVisibleCandles * timeframe_ms,
-                rt_mode_ ? 120000.0 : kMaxVisibleCandles * timeframe_ms);
+                rt_mode_ ? double(RealtimeDepthHistory::retention_ms) : kMaxVisibleCandles * timeframe_ms);
         }
 
         // TPO mode: override x-axis formatter to show dates only (no scientific notation)
@@ -1019,7 +1019,7 @@ void ChartWidget::render_chart() {
         // Keep the viewport between 8 and 1,440 candles. When it is already
         // outside those bounds, force the repaired range for this frame.
         const double min_x_span = rt_mode_ ? 5000.0 : kMinVisibleCandles * timeframe_ms;
-        const double max_x_span = rt_mode_ ? 120000.0 : kMaxVisibleCandles * timeframe_ms;
+        const double max_x_span = rt_mode_ ? double(RealtimeDepthHistory::retention_ms) : kMaxVisibleCandles * timeframe_ms;
         bool zoom_clamped = false;
         if (!ctx_.candle_mgr().follow_live() && chart_type_ != ChartType::TPO) {
             const double span = last_visible_range_.X.Max - last_visible_range_.X.Min;
@@ -2845,12 +2845,13 @@ void ChartWidget::render_controls() {
         ImGui::Separator();
         const int multipliers[] = {1, 2, 5, 10, 20};
         const char* labels[] = {"UHD (1x)", "HD (2x)", "SD (5x)", "LD (10x)", "ULD (20x)"};
+        int& multiplier = rt_mode_ ? rt_bucket_multiplier_ : heatmap_bucket_multiplier_;
         int selected = 0;
         for (int i = 0; i < 5; ++i)
-            if (heatmap_bucket_multiplier_ == multipliers[i]) selected = i;
+            if (multiplier == multipliers[i]) selected = i;
         ImGui::SetNextItemWidth(155.0f);
         bool changed = ImGui::Combo("Fidelity", &selected, labels, 5);
-        heatmap_bucket_multiplier_ = multipliers[selected];
+        multiplier = multipliers[selected];
         if (rt_mode_) {
             ImGui::TextUnformatted("RT keeps the selected price grouping fixed.");
             ImGui::TextUnformatted("Color scale is fixed. Recalibration recolors the visible history.");
@@ -2861,8 +2862,12 @@ void ChartWidget::render_controls() {
         }
         auto* recon = rt_mode_ ? rt_renderer_.get() : ctx_.heatmap_mgr().get_reconstructor(pair_, heatmap_mode_);
         if (recon) {
-            if (rt_mode_ && ImGui::Button("Recalibrate colors")) recon->recalibrate_realtime_colors();
-            if (changed) recon->set_bucket_multiplier(heatmap_bucket_multiplier_);
+            if (rt_mode_) {
+                bool warm = recon->realtime_warm();
+                if (ImGui::Checkbox("Cool-to-warm palette", &warm)) recon->set_realtime_warm(warm);
+                if (ImGui::Button("Recalibrate colors")) recon->recalibrate_realtime_colors();
+            }
+            if (changed) recon->set_bucket_multiplier(multiplier);
             ImGui::TextUnformatted("Effective price bucket:");
             ImGui::SameLine();
             ImGui::Text(fmt_.price_fmt, recon->get_display_bucket_size());
@@ -4012,7 +4017,7 @@ void ChartWidget::render_crosshair(const ImPlotPoint& mouse_pos) const {
     const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
     // Snap to nearest candle timestamp
     const double timeframe_ms = static_cast<double>(tf_sec) * 1000.0;
-    const double snapped_time = std::round(mouse_pos.x / timeframe_ms) * timeframe_ms;
+    const double snapped_time = rt_mode_ ? mouse_pos.x : std::round(mouse_pos.x / timeframe_ms) * timeframe_ms;
     const float line_top = crosshair_state_.first_plot_min.y;
     const float line_bottom = crosshair_state_.last_plot_max.y;
     const double x_range = x_axis_max_ - x_axis_min_;

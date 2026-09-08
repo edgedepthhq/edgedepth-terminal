@@ -28,7 +28,7 @@ public:
     // ── Shared GPU handles ──
     GLuint shader_program() const { return program_; }
     GLuint empty_vao() const { return vao_; }
-    GLuint colormap_realtime() const { return colormap_rt_; }
+    GLuint colormap_realtime(bool warm = false) const { return warm ? colormap_rt_warm_ : colormap_rt_; }
     GLuint colormap_orderbook() const { return colormap_ob_; }
     GLuint colormap_liquidation() const { return colormap_liq_; }
     GLuint colormap_liquidation_warm() const { return colormap_liq_warm_; }
@@ -85,6 +85,7 @@ private:
     GLuint program_ = 0;
     GLuint vao_ = 0;
     GLuint colormap_rt_ = 0;
+    GLuint colormap_rt_warm_ = 0;
     GLuint colormap_ob_ = 0;       // Orderbook colormap 256×1 RGBA8
     GLuint colormap_liq_ = 0;      // Liquidation cool colormap 256×1 RGBA8
     GLuint colormap_liq_warm_ = 0; // Liquidation warm colormap 256×1 RGBA8

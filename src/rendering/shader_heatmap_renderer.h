@@ -91,6 +91,8 @@ public:
     enum class ColormapType { Orderbook, Liquidation };
     void set_colormap_type(ColormapType type);
     void set_bucket_multiplier(int multiplier);
+    void set_realtime_warm(bool warm) { realtime_warm_ = warm; }
+    bool realtime_warm() const { return realtime_warm_; }
     void recalibrate_realtime_colors() { realtime_peak_ = 0; }
     int get_bucket_multiplier() const { return bucket_multiplier_; }
 
@@ -275,6 +277,7 @@ private:
     int64_t time_step_ms_ = 60000; // Interval of the uploaded GPU grid
     std::map<int64_t, double> observation_centers_;
     bool realtime_ = false;
+    bool realtime_warm_ = false;
     float realtime_normalization(double price_min, double price_max);
     float realtime_peak_ = 0;
     int64_t realtime_peak_clock_ms_ = 0;

@@ -13,7 +13,7 @@
 class RealtimeDepthHistory {
 public:
     static constexpr int64_t interval_ms = 100;
-    static constexpr int64_t retention_ms = 120000;
+    static constexpr int64_t retention_ms = 300000;
     static constexpr size_t max_levels_per_side = 512;
     static constexpr size_t max_samples = retention_ms / interval_ms;
     struct Sample {
@@ -63,7 +63,9 @@ public:
     }
     void copy_since(uint64_t serial, std::vector<SamplePtr>& out) const {
         out.clear();
-        for (const auto& sample : samples_) if (sample->serial > serial) out.push_back(sample);
+        const auto first = std::upper_bound(samples_.begin(), samples_.end(), serial,
+            [](uint64_t value, const SamplePtr& sample) { return value < sample->serial; });
+        out.insert(out.end(), first, samples_.end());
     }
     void trim_after(int64_t cutoff) {
         while (!samples_.empty() && samples_.back()->timestamp_ms > cutoff) samples_.pop_back();

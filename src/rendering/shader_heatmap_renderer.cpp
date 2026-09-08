@@ -1,4 +1,5 @@
 #include "shader_heatmap_renderer.h"
+#include "core/realtime_history.h"
 #include "shader_heatmap_resources.h"
 #include "core/heatmap_colormap.h"
 #include "core/reach_math.h"
@@ -322,7 +323,7 @@ void ShaderHeatmapRenderer::finalize_column(
         const int64_t bin = timestamp_ms / column_interval_ms_ * column_interval_ms_;
         auto it = timeline_.lower_bound(bin);
         if (it != timeline_.end() && it->first < bin + column_interval_ms_) return;
-        while (!timeline_.empty() && timeline_.begin()->first <= timestamp_ms - 120000) {
+        while (!timeline_.empty() && timeline_.begin()->first <= timestamp_ms - RealtimeDepthHistory::retention_ms) {
             observation_centers_.erase(timeline_.begin()->first);
             observation_boundaries_.erase(timeline_.begin()->first);
             timeline_.erase(timeline_.begin());
@@ -332,7 +333,10 @@ void ShaderHeatmapRenderer::finalize_column(
     }
     timeline_[timestamp_ms] = price_qty_map;
     evict_oldest_timeline();
-    if (timeline_.begin()->first != old_origin) gpu_dirty_ = true;
+    // RT can append into the unused texture capacity after CPU retirement.
+    // Reads and draw bounds exclude expired columns. Rebase only when full,
+    // or on an explicit grid/reset operation, instead of rebuilding every 100ms.
+    if (!realtime_ && timeline_.begin()->first != old_origin) gpu_dirty_ = true;
 
     // Direct GPU upload of this single column instead of marking the entire
     // ring dirty (which would trigger a full rebuild of all columns).
@@ -765,6 +769,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
 int ShaderHeatmapRenderer::find_column_for_time(int64_t timestamp_ms) const {
     if (ring_count_ == 0 || time_step_ms_ <= 0) return -1;
     if (timeline_.empty()) return -1;
+    if (realtime_ && timestamp_ms < timeline_.begin()->first) return -1;
     const int64_t oldest = gpu_origin_ms_;
     const int col = static_cast<int>((timestamp_ms - oldest) / time_step_ms_);
     if (timestamp_ms < oldest || col < 0 || col >= ring_count_) return -1;
@@ -879,7 +884,8 @@ float ShaderHeatmapRenderer::realtime_normalization(double price_min, double pri
     const int stride = std::max(1, (ring_count_ + 63) / 64);
     for (int col = ring_count_ - 1; col >= 0; col -= stride) {
         const auto& meta = column_meta_[col];
-        if (meta.timestamp_ms > replay_cutoff_ms_ || meta.num_rows <= 0 || meta.values.empty()) continue;
+        if (meta.timestamp_ms > replay_cutoff_ms_ || meta.num_rows <= 0 || meta.values.empty() ||
+            (!timeline_.empty() && meta.timestamp_ms < timeline_.begin()->first)) continue;
         for (int row = 0; row < meta.num_rows; row += bucket_multiplier_) {
             const double lo = meta.price_min + row * meta.price_step;
             const double hi = lo + bucket_multiplier_ * meta.price_step;
@@ -962,7 +968,7 @@ void ShaderHeatmapRenderer::render_cells(
     u.data_tex = data_texture_;
     u.meta_tex = meta_texture_;
     u.colormap_tex = (colormap_type_ == ColormapType::Orderbook)
-        ? (realtime_ ? res.colormap_realtime() : res.colormap_orderbook()) : res.colormap_liquidation();
+        ? (realtime_ ? res.colormap_realtime(realtime_warm_) : res.colormap_orderbook()) : res.colormap_liquidation();
     u.colormap_warm_tex = res.colormap_liquidation_warm();
     u.reach_tex = reach_texture_;  // Phase 2a
 
@@ -1005,7 +1011,7 @@ void ShaderHeatmapRenderer::render_cells(
     u.max_qty = realtime_ ? realtime_normalization(limits.Y.Min, limits.Y.Max) : global_max_qty_;
     u.color_low = color_low_;
     u.color_peak = color_peak_;
-    u.mode = (colormap_type_ == ColormapType::Liquidation) ? 1 : 0;
+    u.mode = (colormap_type_ == ColormapType::Liquidation) ? 1 : (realtime_ ? 2 : 0);
     u.opacity = opacity_;
     u.use_reach = (use_reach_modulation_ && reach_texture_) ? 1 : 0;
 
@@ -1015,7 +1021,8 @@ void ShaderHeatmapRenderer::render_cells(
     {
         // Columns are now center-anchored (see data_time_start) → the first/last column
         // extends half a step either side of its bucket time, so widen the scissor to match.
-        const double data_time_min = static_cast<double>(gpu_origin_ms_) - (realtime_ ? 0.0 : time_step_ms_ * 0.5);
+        const double data_time_min = realtime_ ? double(timeline_.begin()->first)
+            : double(gpu_origin_ms_) - time_step_ms_ * 0.5;
         double data_time_max = static_cast<double>(oldest_ts + (ring_count_ - 1) * time_step_ms_) + time_step_ms_ * (realtime_ ? 1.0 : 0.5);
         if (realtime_) data_time_max = std::max(data_time_max, double(observation_hold_until_ms_));
         if (realtime_ && replay_cutoff_ms_ > 0) {

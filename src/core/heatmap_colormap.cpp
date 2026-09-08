@@ -129,6 +129,14 @@ void apply(Type type, float t, uint8_t& r, uint8_t& g, uint8_t& b) {
         return;
     }
 
+    if (type == Type::RealtimeWarm) {
+        constexpr Stop stops[] = {
+            {0.00f, 8, 13, 18}, {0.15f, 15, 30, 64}, {0.40f, 28, 92, 153},
+            {0.65f, 75, 181, 190}, {0.80f, 240, 205, 75},
+            {0.94f, 248, 108, 40}, {1.00f, 255, 55, 35}};
+        eval_stops(stops, t, r, g, b);
+        return;
+    }
     if (type == Type::RealtimeOrderbook) {
         // Weak liquidity stays dark; high size becomes cyan, yellow, then white.
         constexpr Stop stops[] = {

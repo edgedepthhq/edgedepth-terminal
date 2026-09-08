@@ -43,15 +43,16 @@ from a screenshot.
 | Timeframe > RT | Recalibrate bubble sizes | Reset the automatic size reference using eligible received records. This deliberately resizes and refilters historical bubbles. |
 | DOM | Link RT | Default on. Use the matching RT chart's sampled book, display clock and exact price-to-screen mapping. Includes buys, sells, delta and CVD. Turn off for independent centering and reset controls. |
 | Timeframe > RT | Minimum trade value | With auto off, set price times quantity in quote units. For a USDT pair, the threshold is in USDT. Default manual value: 10,000. |
-| Layers > Depth settings | Fidelity | UHD/HD/SD/LD/ULD group 1/2/5/10/20 native price ticks. RT keeps the chosen grouping fixed; candle-mode zoom adaptation is separate. |
+| Layers > Depth settings | Fidelity | UHD/HD/SD/LD/ULD group 1/2/5/10/20 native price ticks. RT defaults to SD (5x), independent of candle settings, and keeps the chosen grouping fixed; candle-mode zoom adaptation is separate. |
+| Layers > Depth settings | Cool-to-warm palette | Optional blue/cyan/yellow/orange/red colors on the same fixed intensity scale. |
 | Layers > Depth settings | Recalibrate colors | Explicitly recalibrate brightness from the currently visible liquidity. This deliberately recolors history; normal feed updates do not. |
-| Chart navigation | Time zoom / Follow | Show five seconds to two minutes. Wheel zoom keeps Following live/replay in both directions. Pan detaches; zoom in then keeps the inspected history. While running, zoom out resumes Follow. Paused history stays detached in both directions. Follow returns to the current display clock without unpausing; use Pause display or the replay transport to resume time. Price auto-fits eligible visible trades and quote steps. |
+| Chart navigation | Time zoom / Follow | Show five seconds to five minutes. Wheel zoom keeps Following live/replay in both directions. Pan detaches; zoom in then keeps the inspected history. While running, zoom out resumes Follow. Paused history stays detached in both directions. Follow returns to the current display clock without unpausing; use Pause display or the replay transport to resume time. Price auto-fits eligible visible trades and quote steps. |
 
 Bubbles use square-root radius scaling from 3px to a 12px cap. Values at or above
 16 times the minimum share the cap. Flat signed fills and thin dark edges reduce pale overlapping clusters. Quote lines have
 dark backing so they remain visible over bright liquidity. Newer records draw on top, with
 all centers kept at their received timestamps and prices. Up to 20,000 trade
-records/two minutes are retained, and the newest 1,500 qualifying records in view
+records/five minutes are retained, and the newest 1,500 qualifying records in view
 are drawn. Auto size is independent of chart zoom. During warm-up the reference may
 settle every five seconds; after 32 eligible records it stays fixed. Explicit
 recalibration or changing the manual threshold can change which historical
@@ -157,7 +158,7 @@ actual seed, continuity and stream coverage delivered by the replay service.
 
 ## Coverage
 
-Depth stores up to 1,200 observations/two minutes and 512 levels per side. It
+Depth stores up to 3,000 observations/five minutes and 512 levels per side. It
 samples the first actual event per 100ms bin; it does not claim an exchange event
 occurred at every bin boundary. Quiet intervals hold the last synchronized book.
 Sequence breaks and transport interruptions wait for a fresh seed. The initial
@@ -183,3 +184,42 @@ It is not recorded history or future evidence. RT DOM draws each numeric column
 in one clip scope instead of changing GPU clips for every cell. Optional hidden
 trade lines no longer transform every retained execution. RT overlays and RT DOM
 have separate profiler scopes. No production deployment is implied.
+
+
+## Readability and resource budgets
+
+RT starts at SD (five native ticks) independently of candle fidelity. UHD and
+other fixed groups remain explicit choices. Price auto-fit, new orders and
+retention do not regroup or recalibrate history. The fixed intensity shoulder
+maps 0.1/0.5/1/2 times the frozen reference to 0.038/0.5/0.8/0.941, separating
+later larger orders without hard clipping at the reference. An optional
+cool-to-warm LUT changes colors only. The RT crosshair uses the pointer time;
+standard candles retain candle snapping.
+
+Depth retention is 3,000 actual 100ms observations/up to five minutes, still
+512 levels per side. Trade retention is five minutes or 20,000 records, whichever
+is reached first; only 1,500 qualifying bubbles draw. Shared samples use at most
+46.875 MiB of level payload per market; a paused chart can pin another window.
+The existing two 8192x1024 R32F textures total 64 MiB per renderer. Its CPU
+column values remain bounded to 8,192x1,024 floats, while raw RT maps retain at
+most 3,000x1,024 entries. No application-wide chart-count cap is added.
+
+RT retires CPU history without rebasing the grid on every sample. Read lookups,
+calibration and draw bounds exclude expired columns. The texture rebases only
+when its spare span is exhausted or on explicit rebuild/reset. Collection copies
+use a serial binary search. Normalization still examines at most 64x1,024 rows.
+A full-depth WASM/Node CPU harness with GL stubs measured append/retire p50
+0.033ms, p95 0.041ms at 3,000 samples, and a 19.1ms maximum including a rebase.
+The old 1,200-sample path measured 5.84/7.57ms p50/p95. The new harness reached
+169 MiB of WASM heap, excluding real GPU allocation and shared sample payloads.
+These are CPU measurements, not browser FPS or hosted 0ms throughput claims.
+Budget roughly 350 MiB per full RT chart including a separately pinned pause
+window, plus the rest of the application; allocator and graphics-driver costs
+vary. Five minutes is the conservative scope, not a 50-minute coverage promise.
+
+Sequence gaps, quiet holds, live pause, replay cutoff and rewind gates remain.
+No pre-join depth or arbitrary seek reconstruction is introduced. The pack boot
+accepts realtime:true (packrt=1 for local QA); demo callers opt in and start at
+pack opening. Explicit time links use candles at their requested timestamp.
+The tour and timeframe tooltips explain Chart view (Line) > Candles to exit RT.
+This describes locally verified behavior; feed coverage remains source-dependent.
