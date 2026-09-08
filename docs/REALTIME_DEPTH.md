@@ -336,3 +336,7 @@ Local TUT verification sought to about 19:01:34, retained 11.8 minutes without a
 capture-overload warning, and showed bubbles in the preceding minute when panned
 back. Repeated zoom changes retained displayed history. A spinner was visible
 during reconstruction. These changes are local and still require deployment.
+
+TUTUSDT pack charts default to LD (10 ticks per RT row); other markets retain
+SD (5 ticks). Depth fidelity remains adjustable. A wider price range still
+reduces row height. The current-price tag stays hidden while replay is loading.

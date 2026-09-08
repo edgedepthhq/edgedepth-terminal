@@ -219,6 +219,10 @@ ChartWidget::ChartWidget(
     , last_heatmap_update_ms_(std::chrono::steady_clock::now())
     , liq_field_(ctx)
 {
+    // TUT demo depth is easier to read with ten-tick rows. This is only
+    // an initial pack default; the Depth settings still own user changes.
+    if (EducationBoot::instance().is_pack() && pair_.exchange == "binancef" &&
+        pair_.symbol == "tutusdt") rt_bucket_multiplier_ = 10;
     title_tf_seconds_ = ctx_.candle_mgr().timeframe_seconds();
     timeframe_label_ = timeframe_to_string(title_tf_seconds_);
     // Visible prefix carries the TF; identity after "###" is TF-independent so the
@@ -1429,7 +1433,7 @@ void ChartWidget::render_chart() {
         // 3.5 Current-price axis tag (green if current candle bullish, red if bearish).
         //     Uses the REAL candle close (never HA) so the tag tracks true price in
         //     every non-TPO mode.
-        if (chart_type_ != ChartType::TPO) {
+        if (chart_type_ != ChartType::TPO && !ctx_.replay_mgr().is_loading()) {
             double cur_price = 0.0;
             bool have_price = false, bullish = true;
             if (ctx_.candle_mgr().has_building_candle()) {
