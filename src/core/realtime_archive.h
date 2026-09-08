@@ -27,6 +27,7 @@ private:
     RealtimeArchive(OrderbookManager&, const Terminal::Pair&);
     void gap(int64_t);
     void poll();
+    bool make_room(size_t count);
     OrderbookManager& books_;
     Terminal::Pair pair_;
     std::string id_;

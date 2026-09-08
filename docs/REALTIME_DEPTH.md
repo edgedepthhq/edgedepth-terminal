@@ -299,3 +299,20 @@ Follow latch. Fully historical views do not project the current book backward.
 
 Selecting a standard timeframe while RT is active now exits RT into Candles
 automatically. Explicit chart-type selection still selects the requested type.
+
+## RT capture bursts and settings (2026-09-09, local)
+
+RT archive capture flushes full bounded batches before continuing collection.
+When the worker has no capacity, depth collection leaves its serial cursor at
+uncollected samples and retries from the existing bounded owner history next
+frame. Trade overflow remains explicit but no longer invents depth gaps. The
+1 MiB capture and 2 MiB transport limits are unchanged; prolonged storage stalls
+can still lose observations when owner retention expires. Existing lost records
+cannot be recovered. Genuine source interruptions still leave gaps.
+
+The toolbar RT button opens a dedicated settings popup. Its adjacent arrow opens
+the compact timeframe menu with only the RT mode toggle and timeframes.
+Canonical/public isolated Release builds and capture/transport regressions pass.
+A real TUT pack seek from the beginning to about 18:55, followed by a five-minute
+history overview, showed continuous depth and no capture-overload warning.
+This remains local pending James's deployment gate.

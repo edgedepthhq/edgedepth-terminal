@@ -59,13 +59,20 @@ void RealtimeArchive::reset(bool discard_existing) {
     }
     pending_.clear();archive_create(id_.c_str());
 }
+bool RealtimeArchive::make_room(size_t count) {
+    if(batch_.size()+count<=131072)return true;
+    const int sent=archive_send(id_.c_str(),batch_.data(),int(batch_.size()),double(clock_));
+    if(sent!=1)return false;
+    batch_.clear();sent_at_=emscripten_get_now();
+    return count<=131072;
+}
 void RealtimeArchive::gap(int64_t clock) {
     if(batch_.size()+3<=131072)batch_.insert(batch_.end(),{3,double(clock),3});
     else lost_=true;
 }
 void RealtimeArchive::append_trade(const Terminal::Trade& t) {
     if(!error.empty())return;
-    if(batch_.size()+6>131072){++dropped;lost_=true;return;}
+    if(!make_room(6)){++dropped;return;}
     batch_.insert(batch_.end(),{2,double(t.timestamp_ms),6,t.price,t.qty,t.is_buy?1.0:0.0});
 }
 void RealtimeArchive::poll() {
@@ -83,14 +90,16 @@ void RealtimeArchive::update(int64_t clock) {
     const bool valid=books_.copy_realtime_since(pair_,serial_,pending_);
     for(const auto& sample:pending_) {
         if(sample->timestamp_ms>clock)break;
+        const size_t n=7+sample->levels.size()*2;
+        // Flush full batches before continuing catch-up. A busy worker leaves
+        // the cursor here so the bounded owner history can be retried next frame.
+        if(!make_room(n+6))break;
         if(serial_ && sample->serial!=serial_+1) {
             gap(last_depth_ms_ ? last_depth_ms_ : sample->timestamp_ms);lost_=true;++dropped;
         }
         if(sample->segment_start && last_depth_ms_) gap(last_depth_ms_);
         serial_=sample->serial;
         last_depth_ms_=sample->timestamp_ms;
-        const size_t n=7+sample->levels.size()*2;
-        if(batch_.size()+n>131072){++dropped;lost_=true;continue;}
         batch_.insert(batch_.end(),{1,double(sample->timestamp_ms),double(n),
             sample->segment_start || lost_ ? 1.0:0.0,sample->bid,sample->ask,double(sample->levels.size())});
         for(const auto& level:sample->levels)batch_.insert(batch_.end(),{level.price,level.size});

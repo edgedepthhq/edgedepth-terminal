@@ -44,10 +44,33 @@ int test_archive_capture() {
     EM_ASM({Module['archiveBlocked']=true;});
     for(int i=0;i<25000;++i)archive.append_trade({100,1,1400+i,true});
     archive.sent_at_=-1000000;archive.update(1400);
-    expect(archive.batch_.size()<=131072 && archive.dropped>0 && archive.lost_,"backpressure bounds capture RAM and records loss explicitly");
+    expect(archive.batch_.size()<=131072 && archive.dropped>0 && !archive.lost_,"trade backpressure bounds capture RAM without inventing depth gaps");
     EM_ASM({Module['archiveBlocked']=false;});
     archive.sent_at_=-1000000;archive.update(1400);
     expect(archive.batch_.empty(),"capture recovers when the bounded transport has capacity");
+    archive.reset();
+    seed.clear_bids();seed.clear_asks();
+    for(int i=0;i<512;++i) {
+        auto* b=seed.add_bids();b->set_price(100-i*0.01);b->set_size(2);
+        auto* a=seed.add_asks();a->set_price(101+i*0.01);a->set_size(3);
+    }
+    seed.set_timestamp_ms(30001);seed.set_last_update_id(400);
+    books.apply_orderbook_snapshot_from_pb(pair,seed);
+    for(int i=1;i<200;++i) {
+        delta.set_timestamp_ms(30001+i*100);delta.set_first_update_id(400+i);
+        delta.set_previous_update_id(399+i);delta.set_last_update_id(400+i);
+        books.apply_book_update_from_pb(pair,delta);
+    }
+    const auto start_serial=archive.serial_;
+    EM_ASM({Module['archiveBlocked']=true;});
+    archive.update(50000);
+    expect(archive.serial_>start_serial && archive.serial_<start_serial+200 && archive.dropped==0,
+        "full-depth burst defers uncollected samples while transport is blocked");
+    EM_ASM({Module['archiveBlocked']=false;});
+    archive.sent_at_=-1000000;archive.update(50000);
+    archive.sent_at_=-1000000;archive.update(50000);
+    const int depths=EM_ASM_INT({return Module['rtArchive'].state(UTF8ToString($0)).records.filter(r=>r[0]===1).length;},archive.id_.c_str());
+    expect(depths==200 && archive.dropped==0,"catch-up drains multiple bounded batches without depth loss");
     const auto generation=archive.generation;
     books.clear_all();seed.set_timestamp_ms(3001);seed.set_last_update_id(300);
     books.apply_orderbook_snapshot_from_pb(pair,seed);

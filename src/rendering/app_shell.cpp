@@ -868,7 +868,7 @@ namespace {
                 ImGui::PopFont();
                 if (rclicked && chart) chart->toggle_rt_mode();
                 if (rhov) Theme::tooltip("Observed depth, trade bubbles and spread. For standard candles, open Chart view (Line) and choose Candles, then select a timeframe. Hosted live RT is Pro; local replay is available.");
-                if (chart && on) chart->render_realtime_settings();
+
                 ImGui::Dummy(ImVec2(0, 2));
             }
 
@@ -987,9 +987,10 @@ namespace {
             const bool hov = ImGui::IsItemHovered();
             ImGui::PopID();
             if (clk && chart) {
-                if (realtime) ImGui::OpenPopup("##tf_menu");
+                if (realtime) ImGui::OpenPopup("##rt_settings");
                 else chart->change_timeframe(sec);
             }
+            if (hov && realtime) Theme::tooltip("RT settings");
             // Selected timeframe uses the shared accent on an inset chip.
             if (on) {
                 dl->AddRectFilled(ImVec2(x + 3, p0.y + 3), ImVec2(x + w - 3, p0.y + h - 3), u32(Tokens::BRAND_SOFT), 2.0f);
@@ -1027,6 +1028,14 @@ namespace {
         // dropdown, pinned under the bar
         ImGui::SetNextWindowPos(ImVec2(p0.x, p0.y + h + 5.0f), ImGuiCond_Appearing);
         render_tf_menu(chart);
+        ImGui::SetNextWindowPos(ImVec2(p0.x, p0.y + h + 5.0f), ImGuiCond_Appearing);
+        ImGui::SetNextWindowSizeConstraints(ImVec2(390, 0), ImVec2(390, ImGui::GetMainViewport()->WorkSize.y - 80));
+        if (ImGui::BeginPopup("##rt_settings")) {
+            ImGui::TextColored(Tokens::TX2, "RT SETTINGS");
+            ImGui::Separator();
+            if (chart && realtime) chart->render_realtime_settings();
+            ImGui::EndPopup();
+        }
         return total;
     }
 
