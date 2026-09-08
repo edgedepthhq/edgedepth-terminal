@@ -53,3 +53,7 @@ docker-compose.override.yml
 # Python bytecode from running the examples
 __pycache__/
 *.pyc
+
+# Local dataframe walkthrough outputs
+.venv/
+demo-data/

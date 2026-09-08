@@ -30,6 +30,16 @@ jobs:
           sudo unzip -q -o /tmp/protoc.zip -d /usr/local
           protoc --version
 
+      - name: Setup Python for data examples
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Verify CSV, Parquet and terminal wire contract
+        run: |
+          python -m pip install -r examples/requirements.txt protobuf==6.33.5
+          bash tests/examples/run_tests.sh
+
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:

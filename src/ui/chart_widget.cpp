@@ -142,50 +142,7 @@ ChartWidget::ChartWidget(
     liq_census_pair_ = hl_census_pair_for(pair_);
     liq_census_enabled_ = (pair_.exchange == "hl");
 
-    // Subscribe to Volume stream for CVD intra-candle wicks
-    {
-        volume_sub_tf_ms_ = ctx_.candle_mgr().timeframe_seconds() * 1000;
-        StreamKey vol_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
-        StreamHandler<Terminal::Volume> vol_handler{
-            .widget_ptr = this,
-            .callback = [](void* ptr, const Terminal::Volume& v) {
-                static_cast<ChartWidget*>(ptr)->handle_volume(v);
-            }
-        };
-        ctx_.stream_mgr().subscribe_volume(vol_key, vol_handler);
-        volume_subscribed_ = true;
-    }
-
-    // Subscribe to Stats stream for funding rate data
-    {
-        stats_sub_tf_ms_ = ctx_.candle_mgr().timeframe_seconds() * 1000;
-        StreamKey stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
-        StreamHandler<Terminal::Stat> stat_handler{
-            .widget_ptr = this,
-            .callback = [](void* ptr, const Terminal::Stat& s) {
-                static_cast<ChartWidget*>(ptr)->handle_stat_for_chart(s);
-            }
-        };
-        ctx_.stream_mgr().subscribe_stats(stat_key, stat_handler);
-        stats_subscribed_ = true;
-    }
-
-    // Subscribe to the discrete @forceOrder liquidation stream (WS4 Observed
-    // markers). TF-independent (timeframe 0); live frames come from the
-    // LIQUIDATIONS NATS stream, replay frames from the archive bundle / the
-    // liquidation_events DB seed. Events land in LiquidationHeatmapManager.
-    {
-        StreamKey liq_key{pair_, Terminal::Stream::Liquidations, 0};
-        StreamHandler<Terminal::Liquidation> liq_handler{
-            .widget_ptr = this,
-            .callback = [](void* ptr, const Terminal::Liquidation& l) {
-                auto* w = static_cast<ChartWidget*>(ptr);
-                w->ctx_.liq_heatmap_mgr().add_observed_event(w->pair_, l);
-            }
-        };
-        ctx_.stream_mgr().subscribe_liquidations(liq_key, liq_handler);
-        liq_events_subscribed_ = true;
-    }
+    subscribe_chart_streams();
 
     // Research rollout only. This is an explicit UI gate; the dedicated stream id
     // remains separate from ordinary pattern traffic and the server retains
@@ -212,18 +169,7 @@ ChartWidget::~ChartWidget() {
     if (footprint_stream_mgr_)
         footprint_stream_mgr_->unsubscribe_direct(
             {pair_, Terminal::Stream::TickVolume, 60}, this);
-    if (volume_subscribed_) {
-        StreamKey vol_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
-        ctx_.stream_mgr().unsubscribe_volume(vol_key, this);
-    }
-    if (stats_subscribed_) {
-        StreamKey stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
-        ctx_.stream_mgr().unsubscribe_stats(stat_key, this);
-    }
-    if (liq_events_subscribed_) {
-        StreamKey liq_key{pair_, Terminal::Stream::Liquidations, 0};
-        ctx_.stream_mgr().unsubscribe_liquidations(liq_key, this);
-    }
+    unsubscribe_chart_streams();
     if (pattern_subscribed_ && pattern_stream_mgr_) {
         const StreamKey pattern_key{pair_, Terminal::Stream::PatternAdmin, 0};
         pattern_stream_mgr_->unsubscribe_patterns(pattern_key, this);
@@ -236,6 +182,75 @@ ChartWidget::~ChartWidget() {
         const StreamKey key{liq_census_pair_, Terminal::Stream::LiquidationLevels, 0};
         ctx_.stream_mgr().send_unsubscribe(key);
     }
+}
+
+// Callback ownership follows the manager used for registration, even when the
+// shared AppContext has already switched between live and replay managers.
+void ChartWidget::subscribe_chart_streams() {
+    chart_stream_mgr_ = &ctx_.stream_mgr();
+    // Subscribe to Volume stream for CVD intra-candle wicks
+    {
+        volume_sub_tf_ms_ = ctx_.candle_mgr().timeframe_seconds() * 1000;
+        StreamKey vol_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
+        StreamHandler<Terminal::Volume> vol_handler{
+            .widget_ptr = this,
+            .callback = [](void* ptr, const Terminal::Volume& v) {
+                static_cast<ChartWidget*>(ptr)->handle_volume(v);
+            }
+        };
+        chart_stream_mgr_->subscribe_volume(vol_key, vol_handler);
+        volume_subscribed_ = true;
+    }
+
+    // Subscribe to Stats stream for funding rate data
+    {
+        stats_sub_tf_ms_ = ctx_.candle_mgr().timeframe_seconds() * 1000;
+        StreamKey stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
+        StreamHandler<Terminal::Stat> stat_handler{
+            .widget_ptr = this,
+            .callback = [](void* ptr, const Terminal::Stat& s) {
+                static_cast<ChartWidget*>(ptr)->handle_stat_for_chart(s);
+            }
+        };
+        chart_stream_mgr_->subscribe_stats(stat_key, stat_handler);
+        stats_subscribed_ = true;
+    }
+
+    // Subscribe to the discrete @forceOrder liquidation stream (WS4 Observed
+    // markers). TF-independent (timeframe 0); live frames come from the
+    // LIQUIDATIONS NATS stream, replay frames from the archive bundle / the
+    // liquidation_events DB seed. Events land in LiquidationHeatmapManager.
+    {
+        StreamKey liq_key{pair_, Terminal::Stream::Liquidations, 0};
+        StreamHandler<Terminal::Liquidation> liq_handler{
+            .widget_ptr = this,
+            .callback = [](void* ptr, const Terminal::Liquidation& l) {
+                auto* w = static_cast<ChartWidget*>(ptr);
+                w->ctx_.liq_heatmap_mgr().add_observed_event(w->pair_, l);
+            }
+        };
+        chart_stream_mgr_->subscribe_liquidations(liq_key, liq_handler);
+        liq_events_subscribed_ = true;
+    }
+
+}
+
+void ChartWidget::unsubscribe_chart_streams() {
+    if (!chart_stream_mgr_) return;
+    if (volume_subscribed_) {
+        StreamKey vol_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
+        chart_stream_mgr_->unsubscribe_volume(vol_key, this);
+    }
+    if (stats_subscribed_) {
+        StreamKey stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
+        chart_stream_mgr_->unsubscribe_stats(stat_key, this);
+    }
+    if (liq_events_subscribed_) {
+        StreamKey liq_key{pair_, Terminal::Stream::Liquidations, 0};
+        chart_stream_mgr_->unsubscribe_liquidations(liq_key, this);
+    }
+    volume_subscribed_ = stats_subscribed_ = liq_events_subscribed_ = false;
+    chart_stream_mgr_ = nullptr;
 }
 
 bool ChartWidget::is_loading() const {
@@ -560,40 +575,9 @@ void ChartWidget::change_timeframe(const int new_tf_seconds)
     }
     // Clear CVD wick cache and re-subscribe Volume stream for new timeframe
     cvd_wick_cache_.clear();
-    if (volume_subscribed_) {
-        StreamKey old_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
-        ctx_.stream_mgr().unsubscribe_volume(old_key, this);
-    }
-    {
-        volume_sub_tf_ms_ = static_cast<int64_t>(new_tf_seconds) * 1000;
-        StreamKey vol_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
-        StreamHandler<Terminal::Volume> vol_handler{
-            .widget_ptr = this,
-            .callback = [](void* ptr, const Terminal::Volume& v) {
-                static_cast<ChartWidget*>(ptr)->handle_volume(v);
-            }
-        };
-        ctx_.stream_mgr().subscribe_volume(vol_key, vol_handler);
-        volume_subscribed_ = true;
-    }
-    // Re-subscribe stats for new timeframe + clear funding cache
     funding_cache_.clear();
-    if (stats_subscribed_) {
-        StreamKey old_stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
-        ctx_.stream_mgr().unsubscribe_stats(old_stat_key, this);
-    }
-    {
-        stats_sub_tf_ms_ = static_cast<int64_t>(new_tf_seconds) * 1000;
-        StreamKey stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
-        StreamHandler<Terminal::Stat> stat_handler{
-            .widget_ptr = this,
-            .callback = [](void* ptr, const Terminal::Stat& s) {
-                static_cast<ChartWidget*>(ptr)->handle_stat_for_chart(s);
-            }
-        };
-        ctx_.stream_mgr().subscribe_stats(stat_key, stat_handler);
-        stats_subscribed_ = true;
-    }
+    unsubscribe_chart_streams();
+    subscribe_chart_streams();
     // Clear and reset funding indicator for new timeframe
     funding_history_requested_ = false;
     funding_data_dirty_ = false;
@@ -1214,7 +1198,7 @@ void ChartWidget::render_chart() {
             const int64_t start_ms = static_cast<int64_t>(visible_x_min);
             const int64_t end_ms = static_cast<int64_t>(visible_x_max) + tf_ms;
             ctx_.vpvr_mgr().request_profile(
-                pair_.symbol, start_ms, end_ms,
+                pair_, start_ms, end_ms,
                 compute_vpvr_tick_per_row(
                     ImPlot::GetPlotLimits().Y.Max - ImPlot::GetPlotLimits().Y.Min,
                     ImPlot::GetPlotSize().y),
@@ -1307,6 +1291,25 @@ void ChartWidget::render_chart() {
             } else {
                 render_footprint_overlay(visible_x_min, visible_x_max);
             }
+        }
+        // Coverage remains readable above the footprint cells and profiles.
+        if (!rt_mode_ && vpvr_enabled_) {
+            const auto* profile = ctx_.vpvr_mgr().get_profile(pair_);
+            const ImVec2 status_pos = ImPlot::GetPlotPos();
+            const char* coverage = profile && !profile->levels.empty()
+                ? "Volume profile: available closed minutes; gaps excluded"
+                : "Volume profile: no closed-minute volume in view";
+            const char* hint = profile && !profile->levels.empty()
+                ? "Coverage depends on the feed and retained history"
+                : "Feed may be warming up, outside retention, or unsupported";
+            auto* status_draw = ImPlot::GetPlotDrawList();
+            const float width = std::max(ImGui::CalcTextSize(coverage).x, ImGui::CalcTextSize(hint).x);
+            status_draw->AddRectFilled(ImVec2(status_pos.x+8, status_pos.y+78),
+                ImVec2(status_pos.x+16+width, status_pos.y+117), ImGui::GetColorU32(Theme::Tokens::ELEV), 3.0f);
+            status_draw->AddText(ImVec2(status_pos.x + 12, status_pos.y + 82),
+                ImGui::GetColorU32(Theme::Tokens::TX2), coverage);
+            status_draw->AddText(ImVec2(status_pos.x + 12, status_pos.y + 99),
+                ImGui::GetColorU32(Theme::Tokens::TX2), hint);
         }
         // 3. Admin pattern context. Live-only and already gated at subscription.
         if (!rt_mode_ && !ctx_.replay_mgr().is_active() && ct_allows_time_overlays(chart_type_)) {
@@ -2802,7 +2805,7 @@ void ChartWidget::render_controls() {
             {"Renko", "Price movement without fixed time bars", 6},
             {"Footprint cluster", "Bid and ask volume at every price", 1},
             {"Footprint profile", "Traded-volume shape inside each bar", 2},
-            {"TPO market profile", "Time spent at each price", 5} };
+            {"TPO market profile", "Candle ranges in 30-minute blocks", 5} };
         ImDrawList* d = ImGui::GetWindowDrawList();
         for (int r = 0; r < 7; ++r) {
             if (r == 0 || r == 4) {
@@ -5024,7 +5027,7 @@ double ChartWidget::compute_vpvr_tick_per_row(double price_range, double plot_he
 }
 
 void ChartWidget::render_vpvr_profile() {
-    const auto* profile = ctx_.vpvr_mgr().get_profile(pair_.symbol);
+    const auto* profile = ctx_.vpvr_mgr().get_profile(pair_);
     if (!profile || profile->levels.empty()) return;
 
     ImDrawList* draw_list = ImPlot::GetPlotDrawList();
@@ -5357,6 +5360,10 @@ void ChartWidget::toggle_liq_census() {
 }
 
 void ChartWidget::reset_overlay_subscriptions() {
+    if (chart_stream_mgr_ != &ctx_.stream_mgr()) {
+        unsubscribe_chart_streams();
+        subscribe_chart_streams();
+    }
     // The old context is still alive here. Release its callbacks before a
     // replay context can be retired, then bind both depth and flow to the new one.
     if (rt_stream_mgr_)
@@ -6455,6 +6462,13 @@ void ChartWidget::render_tpo(double visible_x_min, double visible_x_max) {
     if (timestamps.empty()) return;
 
     const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
+    const ImVec2 coverage_pos = ImPlot::GetPlotPos();
+    const bool compatible = tf_sec > 0 && tf_sec <= 1800 && 1800 % tf_sec == 0;
+    ImPlot::GetPlotDrawList()->AddText(ImVec2(coverage_pos.x+12, coverage_pos.y+60),
+        ImGui::GetColorU32(Theme::Tokens::TX2), compatible
+        ? "TPO: available candle ranges in 30m blocks; gaps are unfilled"
+        : "TPO needs 30m candles or a smaller timeframe dividing 30m");
+    if (!compatible) return;
     double tick_per_row = tpo.ticks_per_row_setting > 0
         ? tpo.ticks_per_row_setting * tick_size_ : 0.0;
 
@@ -7122,7 +7136,7 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
     const ImVec2 status_pos = ImPlot::GetPlotPos();
     const char* cadence = ctx_.replay_mgr().is_active()
         ? "Replay footprints: closed minutes"
-        : "Live: observed trades; reconciled after minute close";
+        : "Live: observed partial trades; history only where supplied";
     const ImVec2 note(status_pos.x + 12.0f, status_pos.y + 60.0f);
     const ImVec2 note_size = ImGui::CalcTextSize(cadence);
     ImPlot::GetPlotDrawList()->AddRectFilled(
@@ -7433,7 +7447,7 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
     const ImVec2 status_pos = ImPlot::GetPlotPos();
     const char* cadence = ctx_.replay_mgr().is_active()
         ? "Replay footprints: closed minutes"
-        : "Live: observed trades; reconciled after minute close";
+        : "Live: observed partial trades; history only where supplied";
     const ImVec2 note(status_pos.x + 12.0f, status_pos.y + 60.0f);
     const ImVec2 note_size = ImGui::CalcTextSize(cadence);
     ImPlot::GetPlotDrawList()->AddRectFilled(

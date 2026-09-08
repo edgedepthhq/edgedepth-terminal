@@ -619,6 +619,9 @@ private:
     void handle_volume(const Terminal::Volume& vol);
     struct CVDWickData { double cvd_high; double cvd_low; };
     std::unordered_map<int64_t, CVDWickData> cvd_wick_cache_;
+    void subscribe_chart_streams();
+    void unsubscribe_chart_streams();
+    StreamManager* chart_stream_mgr_ = nullptr;
     bool volume_subscribed_ = false;
     int64_t volume_sub_tf_ms_ = 0;  // Timeframe (ms) of current Volume subscription
 

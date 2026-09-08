@@ -130,13 +130,12 @@ unknown. If the canvas never appears, check `crossOriginIsolated` in the
 console: `false` means something upstream (a proxy, an extension) stripped the
 headers.
 
-**If the tape stays empty while the order book keeps moving**, your network
-cannot reach Binance's `@aggTrade` stream. The gateway detects this and logs a
-warning naming the fix after 30 seconds (`docker compose logs gateway`). Set
-`BINANCE_TRADE_STREAM: "trade"` in `docker-compose.yml` and restart: the tape,
-and the live candles built from it, fill in immediately. The market stats
-strip above the chart is fed by separate streams and can stay empty
-independently of this.
+**If the book moves but the tape is empty**, inspect `docker compose logs gateway`
+and verify the gateway revision. Binance now separates `/market` trade streams
+from `/public` depth streams. The local volume-history candidate uses both;
+older images using the legacy combined endpoint can show a moving book with no
+trades. Do not treat a trade-stream override as a general repair for an old
+image. Regional/network availability still applies.
 
 ## Versions and pinning
 
@@ -190,7 +189,7 @@ pin and a rollback target: keep the previous digest and you can go back to it.
 
 ## Why this exists
 
-Web trading UIs are usually React apps fighting the DOM for every orderbook tick. This terminal takes the approach used by native trading software, an immediate-mode GUI redrawn every frame on the GPU, and ships it through WebAssembly. A full orderflow stack (chart, DOM ladder, tape, heatmap) renders at 180 FPS in a browser tab with frame times around 5.7ms.
+Web trading UIs are usually React apps fighting the DOM for every orderbook tick. This terminal takes the approach used by native trading software, an immediate-mode GUI redrawn every frame on the GPU, and ships it through WebAssembly. Frame rate depends on hardware, browser, viewport, data load and enabled layers. The earlier 180 FPS capture describes one setup, not a portable benchmark.
 
 Open-source trade aggregators and charting components exist, but complete browser orderflow terminals in this class are rare. Most mature orderflow tools are closed and paid. This one is open: read it, build it, point it at your own data.
 
@@ -200,7 +199,8 @@ Open-source trade aggregators and charting components exist, but complete browse
 - **DOM ladder**: independent depth with grouping, USD/coin modes and trade columns, or a default RT link sharing the chart's price positions, sampled book and pause state. See [the RT guide](docs/REALTIME_DEPTH.md).
 - **Trade tape**: live time & sales with size highlighting
 - **Orderbook heatmap**: GPU-rendered depth history via a shader-based renderer
-- **Volume profile (VPVR), TPO / Market Profile, footprint**: built client-side from per-price tick volume, so they need a feed that carries it. Every `.edpack` does, which means the Replay Library packs below light all of them up with no account and no backend. A plain live feed does not: the bundled community gateway forwards trades, book and candles, not per-price volume history, so these panels stay empty on it
+- **Volume profile (VPVR) and footprint**: use supplied closed-minute per-price volume. The gateway candidate retains bounded observations after warmup; the CSV/Parquet example serves available source minutes. Pack coverage depends on its contents. Missing intervals remain gaps.
+- **TPO / Market Profile**: a candle-range approximation in 30-minute blocks, not tick-by-tick time occupancy. Choose 30m or a smaller timeframe dividing 30m. No available candles means no TPO.
 - **Footprint imbalances**: same-price or diagonal buy/sell comparisons, configurable ratio and minimum volume, and consecutive same-side stacks. Uses available closed one-minute tick-volume buckets; replay excludes buckets ending after the playhead. Right-click a footprint view in the chart menu, then choose Imbalances.
 - **Liquidation heatmap layers**: the dense liquidation Field, leverage-tier levels, and profile rendering. The Field is computed client-side from candles, so it works on any feed
 - **Market replay**: deterministic replay engine with scrubbing, and self-contained [`.edpack`](docs/EDPACK.md) files that play entirely client-side with no server
@@ -218,7 +218,12 @@ The terminal is a client. It speaks a documented protobuf-over-WebSocket wire fo
 2. `window.__EDGEDEPTH_WS_URL__` (set by the host page before the WASM glue loads)
 3. `wss://api.edgedepth.com/ws` (EdgeDepth's hosted backend, the default)
 
-The schema in [`protos/messages.proto`](protos/messages.proto) is the whole contract. A feed that emits trades, candles, orderbook updates, stats, and liquidation events, all derivable from any exchange's public streams, lights up the chart, DOM, tape, orderbook, heatmap, liquidation Field and paper trading. Volume profile, TPO and footprint need per-price volume history on top of that, which a raw exchange stream does not carry; serve `get_volume_profile` and `get_footprint_history` and they light up too, which is exactly what a `.edpack` does.
+The schema in [`protos/messages.proto`](protos/messages.proto) is the contract.
+Trades drive the tape and observed forming footprints; supplied candles drive
+the chart and candle-range TPO. DOM and depth require actual book snapshots and
+continuous deltas. Completed footprint snapshots and volume profiles need
+per-price volume through `get_footprint_history` and `get_volume_profile`.
+A trade CSV cannot reconstruct a historical order book.
 
 **Write your own feed:** [`examples/synthetic_feed.py`](examples/synthetic_feed.py) is a working feed in one file, with no `protoc` step and no protobuf package. It answers historical candle requests and streams trades plus an order book, which is enough to drive the chart, the tape and the DOM. Run it and open the terminal with `?ws=ws://localhost:8765` to see your own data on the screen, then swap the random walk for a strategy, a simulator, or a replay of your own capture:
 
@@ -227,14 +232,25 @@ pip install websockets
 python3 examples/synthetic_feed.py
 ```
 
-**Play a file you already have:** [`examples/file_feed.py`](examples/file_feed.py) is that same feed pointed at a CSV or Parquet of trades, so your own capture is on the chart without writing an adapter. It finds the time, price, size and side columns under their usual names, tells epoch seconds, millis, micros, nanos and ISO-8601 apart, inverts `buyer_maker`-style columns, sends the earlier rows as candles and replays the rest as live trades:
+**Start with a dataframe:** [the reproducible CSV/Parquet walkthrough](docs/DATAFRAME_WORKFLOW.md)
+creates 7,200 explicitly generated trades and puts them on the chart, tape,
+footprint and volume profile. No exchange access or credentials are required.
 
 ```bash
-pip install websockets        # plus pyarrow, for .parquet
-python3 examples/file_feed.py mytrades.csv --speed 10
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r examples/requirements.txt
+python examples/dataframe_demo.py --output demo-data
+python examples/file_feed.py demo-data/synthetic-btcusdt.parquet --symbol btcusdt --speed 10
 ```
 
-**Community gateway:** [edgedepth-gateway](https://github.com/edgedepthhq/edgedepth-gateway) is exactly that feed, MIT licensed. It serves trades, candles, orderbook, stats and liquidations from Binance's free public streams, and answers historical candle requests from their REST klines so the chart boots with real history. It also builds **1s, 5s, 15s and 30s candles** trade by trade from the raw stream, updating the building candle as each trade arrives. See the [Quick start](#quick-start) to run both together.
+With the terminal running locally, open
+[the generated BTC fixture](http://localhost:8080/terminal/btcusdt?ws=ws%3A%2F%2Flocalhost%3A8765).
+The example requires explicit aggressor side, positive base-asset quantity and
+source timestamps. It rejects unknown sides, negative sizes and future dates.
+It advances sequentially through source time; use `.edpack` for seekable replay.
+
+**Community gateway:** [edgedepth-gateway](https://github.com/edgedepthhq/edgedepth-gateway) is exactly that feed, MIT licensed. It serves trades, candles, orderbook, stats and liquidations from Binance's free public streams, and answers historical candle requests from their REST klines so the chart boots with real history. It also builds **1s, 5s, 15s and 30s candles** trade by trade from the raw stream, updating the building candle as each trade arrives. The local gateway candidate also retains up to 60 minutes / 50,000 price-minute cells per active symbol for footprints and profiles. It starts at the next minute boundary after joining or detecting a gap, then closes the minute on a later trade. It has no historical trade backfill or disk persistence. See the [Quick start](#quick-start) to run both together.
 
 A few layers are driven by EdgeDepth's proprietary analytics streams: VPIN toxicity, positioning and smart-money flow, modelled liquidation estimates, pattern detection, and the scanner's composite scores. With a raw-data feed those panels simply stay empty and the terminal degrades gracefully; [which panels, and why](https://edgedepth.com/open-source?utm_source=github&utm_medium=oss&utm_campaign=terminal#empty-panels) lists them side by side. The [hosted product](https://app.edgedepth.com/terminal?utm_source=github&utm_medium=oss&utm_campaign=terminal) provides them, along with historical replay and structured courses taught inside the terminal.
 
@@ -261,8 +277,9 @@ is also the production catalog source. It currently lists four curated
 recordings; additional picks can be published without rebuilding the terminal.
 
 The terminal can play a self-contained `.edpack` recording entirely
-client-side: orderbook, tape, liquidations, footprint and volume profile
-included, with nothing but static file hosting behind it.
+client-side, with nothing but static file hosting behind it. Orderbook, tape,
+liquidations, footprint and volume profile work where the pack actually includes
+those streams; a pack is not a promise of every layer.
 
 `.edpack` is EdgeDepth's own deterministic replay container. The format is
 documented in [`docs/EDPACK.md`](docs/EDPACK.md): magic and version gating,

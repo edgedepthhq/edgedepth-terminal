@@ -7,7 +7,7 @@ A synthetic EdgeDepth feed in one file, for driving the terminal with your own d
 
 Then open the terminal against it:
 
-    http://localhost:8000/?ws=ws://localhost:8765
+    http://localhost:8080/?ws=ws://localhost:8765
 
 The terminal accepts any ws:// or wss:// URL in the ?ws= query parameter, so
 you can point it at a strategy, a simulator, or a replay of your own capture
@@ -43,7 +43,7 @@ import time
 
 import websockets
 
-HOST, PORT = "0.0.0.0", 8765
+HOST, PORT = "127.0.0.1", 8765
 
 # Stream ids from protos/messages.proto.
 STREAM_TRADES = 1
@@ -120,10 +120,10 @@ def book_msg(ts_ms: int, bids, asks, last_price: float) -> bytes:
     return out + _int(4, 1) + _f64(5, last_price)   # field 4 = snapshot
 
 
-def candle_msg(bar, timeframe_s: int) -> bytes:
+def candle_msg(bar, timeframe_s: int, final: bool = True) -> bytes:
     o, h, l, c, volume, ts_ms = bar
     return (_f64(1, o) + _f64(2, h) + _f64(3, l) + _f64(4, c) + _f64(5, volume)
-            + _int(10, ts_ms) + _int(11, timeframe_s) + _int(12, 1))  # 12 = final
+            + _int(10, ts_ms) + _int(11, timeframe_s) + _int(12, int(final)))  # 12 = final
 
 
 def candles_msg(timeframe_s: int, bars) -> bytes:
@@ -145,14 +145,16 @@ def envelope(pair: bytes, stream: int, timeframe: int, ts_ms: int, inner: bytes)
 
 def make_history(timeframe_s: int, end_ms: int, count: int):
     """A random walk backwards from BASE_PRICE, oldest first."""
+    rng = random.Random(7 + timeframe_s)
     bars, price = [], BASE_PRICE
+    end_ms = end_ms // (timeframe_s * 1000) * (timeframe_s * 1000)
     start = end_ms - count * timeframe_s * 1000
     for i in range(count):
         o = price
-        c = max(TICK, o + random.gauss(0, BASE_PRICE * 0.0015))
+        c = max(TICK, o + rng.gauss(0, BASE_PRICE * 0.0015))
         h, l = max(o, c) * 1.0008, min(o, c) * 0.9992
         bars.append((round(o, 2), round(h, 2), round(l, 2), round(c, 2),
-                     round(random.uniform(5, 60), 3), start + i * timeframe_s * 1000))
+                     round(rng.uniform(5, 60), 3), start + i * timeframe_s * 1000))
         price = c
     return bars
 
@@ -167,7 +169,8 @@ def book_around(price: float):
 
 async def serve(ws):
     """One connection: read subscriptions, stream trades and book back."""
-    state = {"pair": None, "price": BASE_PRICE}
+    state = {"pair": None, "price": BASE_PRICE, "subscriptions": set(),
+             "history_end": int(time.time() * 1000)}
 
     async def control():
         async for raw in ws:
@@ -181,30 +184,44 @@ async def serve(ws):
             if not symbol:
                 continue
             encoded = pair_msg(pair.get("exchange", ""), symbol)
-            if state["pair"] is None and symbol != SENTINEL_SYMBOL:
-                state["pair"] = encoded
-                print(f"  streaming {pair.get('exchange')}/{symbol}", flush=True)
-
-            if method == "get_historical_candles":
+            if symbol == SENTINEL_SYMBOL:
+                continue
+            stream = int(data.get("stream") or 0)
+            if method == "subscribe":
+                if state["pair"] != encoded:
+                    state["subscriptions"].clear()
+                    state["pair"] = encoded
+                state["subscriptions"].add(stream)
+            elif method == "unsubscribe" and state["pair"] == encoded:
+                state["subscriptions"].discard(stream)
+            elif method == "get_historical_candles":
                 tf = int(data.get("timeframe") or 60)
-                count = min(int(data.get("count") or HISTORY_BARS), 1000)
-                now = int(time.time() * 1000)
-                bars = make_history(tf, now, count)
-                state["price"] = bars[-1][3]
-                await ws.send(envelope(encoded, STREAM_HISTORICAL_CANDLES, tf, now,
+                if tf not in (1,5,15,30,60,300,900,1800,3600,14400,86400):
+                    continue
+                count = max(1, min(int(data.get("count") or HISTORY_BARS), 1000))
+                end = min(int(data.get("end_time") or state["history_end"]), state["history_end"])
+                # Cache-independent, repeatable history. Reading it never moves live price.
+                bars = make_history(tf, end, HISTORY_BARS)[-count:]
+                await ws.send(envelope(encoded, STREAM_HISTORICAL_CANDLES, tf, end,
                                        candles_msg(tf, bars)))
-                print(f"  sent {len(bars)} historical candles at {tf}s", flush=True)
+            elif method == "get_footprint_history":
+                await ws.send(envelope(encoded, 17, 0, 0, b""))
+            elif method == "get_volume_profile":
+                await ws.send(envelope(encoded, 26, 0, 0, b""))
 
     reader = asyncio.create_task(control())
     try:
         while True:
             await asyncio.sleep(0.1)
+            if reader.done():
+                reader.result()
+                break
             if state["pair"] is None:
                 continue
             ts = int(time.time() * 1000)
             pair = state["pair"]
 
-            for _ in range(random.randint(1, 4)):
+            for _ in range(random.randint(1, 4) if STREAM_TRADES in state["subscriptions"] else 0):
                 state["price"] = max(TICK, state["price"] + random.gauss(0, TICK * 2))
                 price = round(state["price"], 2)
                 qty = round(random.expovariate(0.5) + 0.001, 3)
@@ -213,16 +230,18 @@ async def serve(ws):
                                        trade_msg(price, qty, is_buy, ts)))
 
             bids, asks = book_around(round(state["price"], 2))
-            await ws.send(envelope(pair, STREAM_ORDERBOOK, 0, ts,
-                                   book_msg(ts, bids, asks, round(state["price"], 2))))
+            if STREAM_ORDERBOOK in state["subscriptions"]:
+                await ws.send(envelope(pair, STREAM_ORDERBOOK, 0, ts,
+                                       book_msg(ts, bids, asks, round(state["price"], 2))))
     except websockets.ConnectionClosed:
         pass
     finally:
         reader.cancel()
+        await asyncio.gather(reader, return_exceptions=True)
 
 
 async def main():
-    async with websockets.serve(serve, HOST, PORT, max_size=None):
+    async with websockets.serve(serve, HOST, PORT, max_size=65536, max_queue=16):
         print(f"synthetic feed listening on ws://localhost:{PORT}")
         print(f"open the terminal with  ?ws=ws://localhost:{PORT}")
         await asyncio.Future()
