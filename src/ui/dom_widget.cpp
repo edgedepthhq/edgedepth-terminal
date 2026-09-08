@@ -857,7 +857,7 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
     }
     if (!frame.fresh()) {
         ImGui::TextWrapped(frame.replay
-            ? "Waiting for synchronized RT depth. For pack replay, restart from the beginning."
+            ? "Waiting for synchronized RT depth. Seeking reconstructs recorded depth."
             : "Recovering synchronized RT depth...");
         return;
     }

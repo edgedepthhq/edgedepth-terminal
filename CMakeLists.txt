@@ -532,6 +532,14 @@ target_compile_definitions(c_based_trader_client PRIVATE "ImDrawIdx=unsigned int
 
 # Standalone production depth regression uses the same pinned wire/runtime.
 if(EMSCRIPTEN)
+    add_executable(pack_seek_regression EXCLUDE_FROM_ALL
+        tests/wasm/pack_seek_test.cpp src/replayer/pack_replay_engine.cpp
+        src/core/message_parser.cpp src/core/orderbook_manager.cpp
+        ${ZSTD_SRC} ${PROTO_SRCS} ${PROTOBUF_LITE_SRCS})
+    add_dependencies(pack_seek_regression generate_proto)
+    target_compile_options(pack_seek_regression PRIVATE -O1)
+    target_link_options(pack_seek_regression PRIVATE -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1)
+    set_target_properties(pack_seek_regression PROPERTIES SUFFIX ".js")
     add_executable(realtime_mesh_regression EXCLUDE_FROM_ALL
         tests/wasm/realtime_mesh_test.cpp ${IMGUI_DIR}/imgui.cpp
         ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)

@@ -114,6 +114,35 @@ int main() {
     other.seed(); other.observe(book, 1234);
     expect(!other.valid(), "crossed source is not RT evidence");
 
+    // SOPH hosted seed at 2026-09-08 09:42 UTC lagged its exchange chain.
+    // These real IDs/times reproduce the reader dropping pre-seed overlap.
+    {
+        OrderbookManager replay;
+        replay.set_replay_mode(true);
+        Terminal::Pair p{"binancef", "sophusdt"};
+        pb::BookUpdate seed;
+        seed.set_snapshot(true); seed.set_timestamp_ms(1788860520000LL);
+        seed.set_last_update_id(11503682733156LL);
+        auto* b = seed.add_bids(); b->set_price(0.01189); b->set_size(20);
+        auto* a = seed.add_asks(); a->set_price(0.01190); a->set_size(30);
+        replay.apply_orderbook_snapshot_from_pb(p, seed);
+        pb::BookUpdate d;
+        d.set_timestamp_ms(1788860520025LL); d.set_first_update_id(11503682741576LL);
+        d.set_last_update_id(11503682748680LL); d.set_previous_update_id(11503682741575LL);
+        replay.apply_book_update_from_pb(p, d);
+        expect(!replay.copy_realtime_since(p, 0, samples), "actual hosted first transition rejects missing pre-seed chain");
+        replay.clear_all(); replay.apply_orderbook_snapshot_from_pb(p, seed);
+        d.set_timestamp_ms(1788860519887LL); d.set_first_update_id(11503682733905LL);
+        d.set_last_update_id(11503682734885LL); d.set_previous_update_id(11503682733156LL);
+        replay.apply_book_update_from_pb(p, d);
+        expect(replay.copy_realtime_since(p, 0, samples), "retained pre-seed event bridges by exact previous ID");
+        // A batched forward skip must keep this anchor, just like normal delivery.
+        d.set_timestamp_ms(1788860519913LL); d.set_first_update_id(11503682734999LL);
+        d.set_last_update_id(11503682736802LL); d.set_previous_update_id(11503682734885LL);
+        replay.apply_book_update_from_pb(p, d);
+        expect(replay.copy_realtime_since(p, 0, samples), "next batched delta preserves strict replay continuity");
+    }
+
     RealtimeTradeHistory trades;
     Terminal::Trade trade{100, 2, 1001, true};
     trades.append(trade); trades.append(trade);

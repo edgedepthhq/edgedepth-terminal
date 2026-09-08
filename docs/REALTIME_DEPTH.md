@@ -144,20 +144,19 @@ market data or proof of hosted deployment.*
 4. Use the same bubble and fidelity controls as live. Replay's transport replaces
    the live Pause display checkbox.
 
-Continuous playback and pause were checked with the TUT v2 pack. Two paused chart
-captures were pixel-identical. **Arbitrary seek/rewind is not yet a complete RT
-workflow.** Seeking clears the previous traversal; retained future data cannot
-paint backward. RT requires a valid seed followed by continuous depth deltas.
-The current pack seek implementation reuses the opening seed while skipping to
-the target, which can break that sequence. An in-buffer DOM restore also does not
-certify sequence integrity. Both RT and its linked DOM report that they are waiting for synchronized depth
-instead of presenting an unverified restored book as history.
+Continuous playback, forward scrub, a minute rewind and pause were checked with
+the TUT v2 pack in a local Release build. Pack seeks reconstruct depth by reading
+every orderbook event from the opening seed through the target. Reads keep one
+block queued at a time and delivery uses a per-frame budget; the clock stays at
+the target until reconstruction completes. Later seeks may take longer because
+existing packs have no intermediate checkpoints.
 
-To study RT depth reliably in these packs, reopen at the start and play through
-the move. Correct arbitrary seeking requires replaying the intervening orderbook
-deltas or adding verified checkpoints. A trades-only recording can show bubbles
-but cannot supply an orderbook heatmap. Hosted replay likewise depends on the
-actual seed, continuity and stream coverage delivered by the replay service.
+Other streams begin at the target with their original timestamps. Future depth
+cannot paint backward. RT still requires a valid seed and continuous deltas:
+actual source gaps and an unverified in-buffer DOM restore do not certify depth.
+A trades-only recording can show bubbles but cannot supply an orderbook heatmap.
+Hosted replay depends on the source seed, continuity and stream coverage delivered
+by its service; local verification is not evidence of hosted deployment.
 
 ## Coverage
 
@@ -221,7 +220,7 @@ chart plus the application; allocator and graphics-driver costs vary. The
 30-minute archive target is bounded by actual compressed storage availability.
 
 Sequence gaps, quiet holds, live pause, replay cutoff and rewind gates remain.
-No pre-join depth or arbitrary seek reconstruction is introduced. The pack boot
+No live pre-join depth is introduced. Recorded pack seeks reconstruct from their seed. The pack boot
 accepts realtime:true (packrt=1 for local QA); demo callers opt in and start at
 pack opening. Explicit time links use candles at their requested timestamp.
 The tour and timeframe tooltips explain Chart view (Line) > Candles to exit RT.

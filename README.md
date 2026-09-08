@@ -55,11 +55,12 @@ groups and the calibrated color scale stay fixed as new data arrives. The price
 axis still auto-fits the visible market. Optional candles, a trade-price line,
 auto/manual bubble thresholds and price fidelity are available in the menus.
 
-Continuous replay and pause work with a recording containing synchronized depth
-and trades. **RT depth after seeking is limited:** history clears, and the view
-waits for a valid source seed and continuous deltas. Current local packs reseed
-from their opening book, so jumping ahead can leave RT depth unavailable. Play
-from the recording's start to inspect its continuous sequence.
+Continuous replay, pause and seeking work with recordings containing a valid
+seed and continuous depth. Pack seeks reconstruct the book from the opening
+seed through the target and hold the clock during catch-up. Later seeks can
+require more loading because existing packs have no intermediate checkpoints.
+Original trade timestamps and replay cutoffs remain intact. Missing source
+links still leave RT waiting for synchronized depth.
 
 See the [RT guide](docs/REALTIME_DEPTH.md) for screenshots, settings, replay steps,
 retention limits and the distinction between quotes and executions. Standalone

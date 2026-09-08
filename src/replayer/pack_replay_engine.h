@@ -18,9 +18,8 @@
 //     ReplayManager::handle_ws_message - the state machine is untouched.
 //   - clock: the box's 50ms smooth-clock drip (market = anchor + wall×speed,
 //     batch-deliver everything ≤ clock) runs in tick(), budgeted per frame.
-//   - seeks: binary-search the header's block index, range-GET the blocks,
-//     re-deliver the header's OB seed (BookUpdate{snapshot:true}) - the same
-//     re-seed the box does on every archive seek.
+//   - seeks: replay depth from the opening seed through the target using
+//     bounded range reads. Other streams begin at the requested target.
 //   - get_historical_candles: served locally from the header's baked
 //     per-timeframe candle seeds, end-clamped to the playhead (F3 parity).
 //     Installed as StreamManager's pack request hook; other historical
@@ -85,6 +84,7 @@ public:
     static PackReplayEngine* active_instance() { return s_active_; }
 
 private:
+    friend struct PackReplayEngineTest;
     enum class Phase : uint8_t {
         Idle, FetchPrefix, FetchHeader, Ready, Ended, Error
     };
@@ -152,7 +152,6 @@ private:
     // never cleared). Deferring one frame restores box ordering.
     void emit_to_manager(const char* type, void* json_obj);
     void drain_emit_queue();
-    int block_index_for_ts(int64_t ts) const;
     void local_seek(int64_t target_ts);
     int64_t market_now_ms() const;
     static int64_t wall_ms();
@@ -196,12 +195,8 @@ private:
     int64_t market_base_ms_ = 0;
     int64_t wall_base_ms_ = 0;
 
-    // Post-seek prime: local_seek() acks + auto-resumes instantly (box
-    // semantics), but the blocks covering the target still have to arrive
-    // from the CDN - without a hold the clock runs over a stale book/chart
-    // for the fetch round-trip. Pin the wall base (same trick as the
-    // buffering-gate hold) until the first post-seek block has decoded
-    // through the target.
+    // Hold the target clock until all seed-to-target depth has been applied,
+    // including a budgeted delivery backlog and the final in-flight block.
     bool seek_priming_ = false;
 
     // v2 lazy seeds: raw bytes parsed once into caches; state machines drive

@@ -936,12 +936,8 @@ void ReplayManager::skip_forward_to(int64_t timestamp_ms) {
         pending_skip_needs_flush_ = false;
     }
 
-    // Reset OB continuity - the batch-delivered data from >> has a
-    // completely different last_update_id chain. Without zeroing, the first
-    // delta triggers a desync → blank DOM.
-    if (replay_ctx_ && replay_ctx_->orderbooks) {
-        replay_ctx_->orderbooks->reset_update_ids();
-    }
+    // A buffered forward skip delivers every intervening depth delta.
+    // Preserve its sequence anchor; reconnecting skips deliver a fresh seed.
 
     // Large forward skip detection: measure cumulative distance from the
     // pre-debounce origin, not just this individual press. Rapid >> presses
@@ -1925,7 +1921,11 @@ void ReplayManager::flush_pending_skip() {
     last_flushed_skip_large_ =
         is_forward && (target - skip_origin_ms_ > kLargeSkipThresholdMs);
 
-    send_control_with_int64("skip_forward", "timestamp", target);
+    // A cleared book requires a seed even when the server still has the
+    // target buffered. Its buffer horizon is not the client's two-minute
+    // clear threshold; a clock-only skip would send deltas into an empty book.
+    send_control_with_int64(last_flushed_skip_large_ ? "seek" : "skip_forward",
+                            "timestamp", target);
     lightweight_seek_count_++;
 
     // Sync client clock to the flushed target (may already be set, but

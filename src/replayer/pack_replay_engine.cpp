@@ -52,7 +52,7 @@ int64_t PackReplayEngine::wall_ms() {
 }
 
 int64_t PackReplayEngine::market_now_ms() const {
-    if (!playing_) return market_base_ms_;
+    if (!playing_ || seek_priming_) return market_base_ms_;
     const int64_t elapsed = wall_ms() - wall_base_ms_;
     int64_t now = market_base_ms_ + static_cast<int64_t>(
         static_cast<double>(elapsed) * speed_);
@@ -403,29 +403,28 @@ void PackReplayEngine::tick() {
         wall_base_ms_ = wall_ms();  // no wall time accrues while held
     }
 
-    // Post-seek prime: hold the clock until the first post-seek block has
-    // decoded through the target (see header). Without this the seek acks +
-    // auto-resumes instantly (box semantics) and the clock runs over a stale
-    // book for the CDN round-trip - visible as "playing without depth".
-    if (seek_priming_) {
-        if (queued_through_ms_ >= skip_before_ms_ ||
-            next_block_ >= header_.blocks_size()) {
-            seek_priming_ = false;
-        } else if (playing_) {
-            wall_base_ms_ = wall_ms();
-        }
-    }
-
     serve_pending_requests();
     maybe_fetch_seeds();
     maybe_fetch_next_block();
     deliver_due_frames();
+    // Decoding is not delivery: a budgeted backlog must drain through the
+    // target before wall time advances. An in-flight last block is not EOF.
+    if (seek_priming_ &&
+        (queued_through_ms_ > skip_before_ms_ ||
+         (next_block_ >= header_.blocks_size() && !fetch_inflight_)) &&
+        (frame_queue_.empty() || frame_queue_.front().ts > skip_before_ms_)) {
+        seek_priming_ = false;
+        wall_base_ms_ = wall_ms();
+    }
     emit_status();
     maybe_finish();
 }
 
 void PackReplayEngine::maybe_fetch_next_block() {
     if (next_block_ >= header_.blocks_size()) return;
+    // During reconstruction drain one decoded block before fetching another.
+    // The target may be hours ahead; it must not make the queue unbounded.
+    if (seek_priming_ && !frame_queue_.empty()) return;
 
     // Buffer-ahead policy (box: 5min target / 2min refill, but blocks are the
     // granularity here): keep the decoded queue covering the playhead plus a
@@ -478,9 +477,11 @@ bool PackReplayEngine::decode_block_into_queue(const std::string& raw_block) {
             return false;
         }
         off += rec_len;
-        // Straddling-block trim after a seek - mirrors the box reader's
-        // skipBeforeMs row skip.
-        if (skip_before_ms_ > 0 && frame.ts_ms() < skip_before_ms_) continue;
+        // The opening seed needs EVERY intervening depth event. Other
+        // streams start at the requested target and keep their wire clocks.
+        queued_through_ms_ = frame.ts_ms();
+        if (skip_before_ms_ > 0 && frame.ts_ms() < skip_before_ms_ &&
+            frame.stream() != static_cast<uint32_t>(pb::STREAM_ORDERBOOK)) continue;
         QFrame qf;
         qf.ts = frame.ts_ms();
         qf.stream = frame.stream();
@@ -613,17 +614,6 @@ void PackReplayEngine::control_set_speed(double speed) {
     speed_ = std::max(0.1, std::min(10.0, speed));
 }
 
-int PackReplayEngine::block_index_for_ts(int64_t ts) const {
-    // First block whose last_ts >= ts (blocks are time-ordered).
-    int lo = 0, hi = header_.blocks_size();
-    while (lo < hi) {
-        const int mid = (lo + hi) / 2;
-        if (header_.blocks(mid).last_ts_ms() < ts) lo = mid + 1;
-        else hi = mid;
-    }
-    return lo;
-}
-
 void PackReplayEngine::local_seek(int64_t target_ts) {
     target_ts = std::max(header_.start_ts_ms(),
                          std::min(target_ts, header_.end_ts_ms()));
@@ -633,7 +623,10 @@ void PackReplayEngine::local_seek(int64_t target_ts) {
     frame_queue_.clear();
     queued_through_ms_ = 0;
     skip_before_ms_ = target_ts;
-    next_block_ = block_index_for_ts(target_ts);
+    // Packs currently contain one opening seed and no seek checkpoints.
+    // Reconstruct from block zero rather than joining that seed to a later
+    // delta. Fetch/decode/delivery remain bounded per tick.
+    next_block_ = 0;
     // A seed fetch in flight was invalidated by the generation bump - re-arm
     // so the pending indicator requests retry after the seek settles.
     if (tickvol_seed_state_ == SeedState::Fetching) tickvol_seed_state_ = SeedState::Needed;
@@ -649,9 +642,8 @@ void PackReplayEngine::local_seek(int64_t target_ts) {
     finished_emitted_ = false;
     if (phase_ == Phase::Ended) phase_ = Phase::Ready;
 
-    // Re-seed the book at the target - the box's handleArchiveSeek re-delivers
-    // the bundle's row-0 snapshot on every seek (client cleared its book).
-    deliver_ob_seed(target_ts);
+    // Preserve the seed's source time; catch-up depth retains its own times.
+    deliver_ob_seed(header_.start_ts_ms());
 }
 
 void PackReplayEngine::control_seek(int64_t ts_ms) {
@@ -673,8 +665,8 @@ void PackReplayEngine::control_skip_forward(int64_t ts_ms, bool book_cleared) {
             // here would drip megabytes of intermediates into a cleared book
             // whose deltas are all rejected (no snapshot base) - the DOM
             // stays empty forever. Serve it as a block seek instead: jump
-            // the pipeline, re-deliver the OB seed, skip intermediates -
-            // the box reconnect's externally-visible behavior. local_seek
+            // the non-depth pipeline and reconstruct depth from its seed.
+            // local_seek
             // auto-resumes, matching the manager (large skips transition
             // Seeking → Playing on replay_seeked) and the box (auto-resume
             // after seek).
@@ -683,7 +675,7 @@ void PackReplayEngine::control_skip_forward(int64_t ts_ms, bool book_cleared) {
             // Small forward skip: clock-only advance - the intermediates
             // already queued (or about to be fetched) batch-deliver as the
             // clock passes them, exactly like the box's SkipForwardTo (the
-            // client kept its book; update-id continuity was reset).
+            // client kept its book and its sequence anchor).
             market_base_ms_ = target;
             wall_base_ms_ = wall_ms();
             finished_emitted_ = false;
