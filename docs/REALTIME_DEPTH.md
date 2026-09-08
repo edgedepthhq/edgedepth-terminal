@@ -168,7 +168,9 @@ and display sampling are separate limits.
 
 ## Native quotes and current-depth projection (2026-09-08)
 
-RT subscribes to Ticker alongside depth. Native BBO stays in a separate bounded
+Hosted orderbook subscriptions already include Ticker; do not request a second
+subscription. Sources without native quotes use the labeled depth fallback.
+Native BBO stays in a separate bounded
 8,192-observation/two-minute queue under the book write lock, with as-of and
 transport-epoch checks. Chart and DOM share a copied quote at the chart clock;
 pause freezes it. Missing/stale native quotes explicitly fall back to Depth BBO.

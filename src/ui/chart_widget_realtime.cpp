@@ -35,12 +35,10 @@ void ChartWidget::set_rt_mode(bool on) {
         if (!rt_subscribed_) {
             rt_stream_mgr_ = &ctx_.stream_mgr();
             rt_stream_mgr_->subscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
-            rt_stream_mgr_->subscribe_direct({pair_, Terminal::Stream::Ticker, 0}, this);
             rt_subscribed_ = true;
         }
     } else if (rt_subscribed_) {
         rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
-        rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Ticker, 0}, this);
         rt_stream_mgr_ = nullptr;
         rt_flow_.reset();
         rt_subscribed_ = false;
