@@ -29,6 +29,9 @@ void ChartWidget::set_rt_mode(bool on) {
         chart_type_ = ChartType::Line;
         rt_candles_ = false;
         rt_auto_price_ = true;
+        rt_auto_fit_ = {};
+        rt_price_window_ = {};
+        rt_effective_multiplier_ = rt_bucket_multiplier_;
         rt_paused_ = false;
         heatmap_enabled_ = true;
         rt_span_ms_ = 60000;
@@ -62,9 +65,14 @@ void ChartWidget::render_realtime_settings() {
     ImGui::Checkbox("1s observed candles", &rt_candles_);
     ImGui::Checkbox("Trade-price line", &rt_trade_line_);
     chart_type_ = rt_candles_ ? ChartType::Candles : ChartType::Line;
+    if (ImGui::Checkbox("Auto-fit visible history", &rt_auto_fit_history_)) {
+        rt_auto_fit_ = {}; rt_price_window_ = {}; rt_auto_price_ = true;
+        rt_effective_multiplier_ = rt_bucket_multiplier_;
+    }
+    if (ImGui::IsItemHovered()) Theme::tooltip("Fits observed trades and quotes in the visible time window. Automatically groups price rows to keep the linked DOM readable. Turn off for fixed-fidelity price following.");
     ImGui::Checkbox(rt_dom_linked_ ? "Follow price" : "Auto-fit price", &rt_auto_price_);
     if (ImGui::IsItemHovered()) Theme::tooltip(rt_dom_linked_
-        ? "Keeps the market in the central half of a readable price window. Drag vertically to stop following. Zoom out stops before numbers overlap; choose coarser fidelity for a wider price range."
+        ? rt_auto_fit_history_ ? "Fits observed price history with readable grouped rows. Drag or zoom the price axis to inspect manually; Follow price resumes fitting." : "Keeps the market in the central half of a readable price window. Drag vertically to stop following. Zoom out stops before numbers overlap; choose coarser fidelity for a wider price range."
         : "Turn off to zoom or drag the price axis. Turn on to fit observed prices again.");
     ImGui::Checkbox("Trade bubbles", &rt_bubbles_);
     ImGui::Checkbox("Extend current depth", &rt_extend_depth_);
@@ -101,11 +109,12 @@ void ChartWidget::render_realtime_settings() {
         if (a.dropped) ImGui::Text("Capture overload: %zu records missed; depth gaps preserved", a.dropped);
         if (ImGui::Button("Whole session")) { rt_span_ms_ = double(RealtimeArchive::target_ms) / 0.88; ctx_.candle_mgr().set_follow_live(true); }
         ImGui::SameLine();
-        if (ImGui::Button("Return live")) { rt_span_ms_ = 60000; rt_auto_price_ = true; rt_price_window_ = {}; ctx_.candle_mgr().set_follow_live(true); }
+        if (ImGui::Button("Return live")) { rt_span_ms_ = 60000; rt_auto_price_ = true; rt_price_window_ = {}; rt_auto_fit_ = {}; ctx_.candle_mgr().set_follow_live(true); }
         if (ImGui::Button("Clear history")) { rt_archive_->reset(); }
         ImGui::TextUnformatted("Local session only. Closing RT clears its archive. Storage may be evicted.");
     }
-    ImGui::TextUnformatted("Fixed price fidelity: Layers > Depth settings");
+    ImGui::Text("%s: %d native ticks per row", rt_auto_fit_history_ && rt_dom_linked_ ? "Automatic grouping" : "Fixed grouping", rt_effective_multiplier_);
+    ImGui::TextUnformatted("Minimum fidelity: Layers > Depth settings");
     ImGui::PopTextWrapPos();
 }
 
@@ -113,6 +122,7 @@ void ChartWidget::on_rewind(int64_t) {
     // The replay owner restores/replays depth separately. Never keep future
     // samples or GPU cells from the preceding traversal.
     rt_dom_frame_ = {};
+    rt_auto_fit_ = {}; rt_price_window_ = {};
     rt_archive_samples_.clear(); rt_archive_trades_.clear();
     rt_history_view_ = false; rt_query_from_ = rt_query_to_ = rt_loaded_to_ = 0;
     rt_quote_ = {};
@@ -303,6 +313,7 @@ void ChartWidget::render_realtime() {
     rt_dom_frame_.frame = ImGui::GetFrameCount();
     rt_dom_frame_.clock_ms = rt_clock_ms_;
     rt_dom_frame_.native_tick = rt_renderer_ ? rt_renderer_->get_native_bucket_size() : 0;
+    rt_dom_frame_.automatic_grouping = rt_auto_fit_history_ && rt_dom_linked_;
     rt_dom_frame_.bucket_ticks = rt_renderer_ ? rt_renderer_->get_bucket_multiplier() : rt_bucket_multiplier_;
     rt_dom_frame_.price_min = limits.Y.Min;
     rt_dom_frame_.price_max = limits.Y.Max;
@@ -364,8 +375,9 @@ void ChartWidget::render_realtime() {
 
 void ChartWidget::configure_depth_fidelity(ShaderHeatmapRenderer& renderer) {
     if (rt_mode_) {
-        // Keep historical price groups fixed as the live price axis auto-fits.
-        renderer.set_bucket_multiplier(rt_bucket_multiplier_);
+        // The chart owns one display grid for both historical depth and DOM.
+        // Archive queries retain the selected minimum grouping for later detail.
+        renderer.set_bucket_multiplier(rt_effective_multiplier_);
         return;
     }
     // Viewport-adaptive bucket multiplier: ensure each heatmap cell

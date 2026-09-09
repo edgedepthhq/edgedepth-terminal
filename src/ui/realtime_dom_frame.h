@@ -16,6 +16,7 @@ struct RealtimeDOMFrame {
     float top = 0, bottom = 0;
     double native_tick = 0;
     int bucket_ticks = 1;
+    bool automatic_grouping = false;
 
     double bucket_size() const { return native_tick * bucket_ticks; }
     int64_t bucket_index(double price) const {

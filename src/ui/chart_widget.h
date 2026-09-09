@@ -320,6 +320,9 @@ private:
     bool rt_auto_price_ = true;
     bool rt_dom_linked_ = false;
     RealtimePriceWindow rt_price_window_;
+    bool rt_auto_fit_history_ = true;
+    RealtimeAutoFit rt_auto_fit_;
+    int rt_effective_multiplier_ = 5;
     Terminal::BookTicker rt_quote_{};
     std::deque<RealtimeDepthHistory::SamplePtr> rt_samples_;
     std::deque<Terminal::Trade> rt_paused_trades_;

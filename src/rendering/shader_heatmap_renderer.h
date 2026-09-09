@@ -341,6 +341,7 @@ private:
     ColormapType colormap_type_ = ColormapType::Orderbook;
     double native_bucket_size_ = 0.0;
     int bucket_multiplier_ = 1;
+    int texture_grouping() const { return realtime_ ? 1 : bucket_multiplier_; }
     int64_t time_offset_ms_ = 0;
     float opacity_ = 1.0f;
     bool smooth_mode_ = false;

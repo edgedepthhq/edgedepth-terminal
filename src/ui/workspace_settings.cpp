@@ -106,6 +106,7 @@ Json ChartWidget::save_settings() const {
     j["rt_bubbles"] = rt_bubbles_;
     j["rt_trade_line"] = rt_trade_line_;
     j["rt_extend_depth"] = rt_extend_depth_;
+    j["rt_auto_fit_history"] = rt_auto_fit_history_;
     j["rt_auto_price"] = rt_auto_price_;
     j["rt_auto_bubbles"] = rt_auto_bubbles_;
     j["rt_min_notional"] = rt_min_notional_;
@@ -217,6 +218,8 @@ void ChartWidget::load_settings(const Json& j) {
     workspace::read(j, "rt_trade_line", rt_trade_line_);
     workspace::read(j, "rt_extend_depth", rt_extend_depth_);
     // A manual inspection is transient. Restored sessions start following price.
+    workspace::read(j, "rt_auto_fit_history", rt_auto_fit_history_);
+    rt_auto_fit_ = {};
     rt_auto_price_ = true;
     workspace::read(j, "rt_auto_bubbles", rt_auto_bubbles_);
     workspace::read(j, "rt_min_notional", rt_min_notional_, 0, 1000000000000.0);

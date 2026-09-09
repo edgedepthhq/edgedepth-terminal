@@ -41,7 +41,7 @@ int main() {
         // The production column builder and DOM must agree on TUT and BTC bucket sums,
         // including decimal boundaries at every fidelity.
         for (const auto [tick_size, first_tick] : {std::pair{0.00001, 19000}, std::pair{0.1, 788600}, std::pair{0.01, 7886000}})
-        for (int mult : {1, 2, 5, 10, 20}) {
+        for (int mult : {1, 2, 5, 10, 20, 50, 100, 500, 2000}) {
             r.clear(); r.configure_realtime(tick_size); r.set_bucket_multiplier(mult);
             std::unordered_map<double, float> levels;
             for (int tick = first_tick; tick < first_tick + 200; ++tick) levels[tick * tick_size] = float(tick % 7 + 1);
@@ -49,21 +49,31 @@ int main() {
             r.sync_gpu_from_timeline();
             RealtimeDOMFrame frame;
             frame.native_tick = r.get_native_bucket_size(); frame.bucket_ticks = r.get_bucket_multiplier();
+            r.finalize_column(1100, levels, false, (first_tick + 100) * tick_size);
+            assert(r.column_meta_[1].values == r.column_meta_[0].values);
+            assert(r.texture_grouping() == 1);
             const auto& meta = r.column_meta_[0];
-            for (int row = 0; row < meta.num_rows; row += mult) {
-                const double lower = meta.price_min + row * frame.native_tick;
+            for (int row = 0; row < meta.num_rows; ++row) {
+                const double lower = meta.price_min + row * meta.price_step;
                 const auto bucket = frame.bucket_index(lower);
                 double dom = 0, heatmap = 0;
                 for (const auto& [price, qty] : levels) if (frame.bucket_index(price) == bucket) dom += qty;
-                for (int j = row; j < std::min(row + mult, meta.num_rows); ++j) heatmap += meta.values[j];
+                heatmap = meta.values[row];
                 assert(dom == heatmap);
+                assert(r.get_value_at_price_and_time(lower, 1000) == heatmap);
                 // Float GPU offsets must stay well below a screen pixel even
                 // at 100 pixels/native tick, for BTC 0.1 and 0.01 tick fixtures.
                 const double gpu_lower = r.gpu_price_origin_ + metadata[r.meta_texture_][0] +
-                    row * double(float(tick_size));
-                assert(std::abs(gpu_lower - lower) / tick_size * 100 < 0.01);
+                    row * double(float(meta.price_step));
+                assert(std::abs(gpu_lower - lower) / meta.price_step * 100 < 0.01);
                 assert(std::abs(frame.bucket_center(bucket) - (lower + frame.bucket_size() * 0.5)) < 1e-10);
             }
+            r.set_bucket_multiplier(1);
+            r.sync_gpu_from_timeline();
+            double restored = 0, original = 0;
+            for (float qty : r.column_meta_[0].values) restored += qty;
+            for (const auto& [price, qty] : levels) original += qty;
+            assert(restored == original);
         }
     }
     r.native_bucket_size_ = 1;

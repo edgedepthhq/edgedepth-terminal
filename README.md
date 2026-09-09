@@ -50,9 +50,10 @@ RT records browser-local history from activation, targeting 30 minutes within a
 shared 256 MiB compressed storage budget. The menu shows actual coverage and
 provides Whole session and Return live. Detail uses 100ms observed samples; wide
 views use mean depth bins. The deeper blue cool-to-warm palette is the default.
-Historical price
-groups and the calibrated color scale stay fixed as new data arrives. The price
-axis still auto-fits the visible market. Optional candles, a trade-price line,
+The linked price axis fits the visible observed history by default. Display
+price groups expand as needed to keep DOM rows readable, and return to finer
+detail after sustained spare room. Grouping changes recalibrate colors; retained
+observations stay unchanged. Turn off Auto-fit visible history for fixed grouping. Optional candles, a trade-price line,
 auto/manual bubble thresholds and price fidelity are available in the menus.
 
 Continuous replay, pause and seeking work with recordings containing a valid

@@ -363,12 +363,12 @@ void ShaderHeatmapRenderer::finalize_column(
             }
             const double mid = realtime_ && observation_centers_.contains(timestamp_ms)
                 ? observation_centers_.at(timestamp_ms) : (snap_pmin + snap_pmax) * 0.5;
-            const double hw = (MAX_ROWS / 2) * native_bucket_size_;
+            const double hw = (MAX_ROWS / 2) * gpu_bucket_size_;
             const double grid = native_bucket_size_ * (realtime_ ? bucket_multiplier_ : 1);
             const double pmin = std::floor((mid - hw) / grid) * grid;
 
             const bool spread = (colormap_type_ == ColormapType::Liquidation);
-            const int num_rows = build_column(price_qty_map, pmin, native_bucket_size_, spread);
+            const int num_rows = build_column(price_qty_map, pmin, gpu_bucket_size_, spread);
             if (num_rows > 0) {
                 float col_max = 0.0f;
                 for (int i = 0; i < num_rows; ++i) {
@@ -376,12 +376,12 @@ void ShaderHeatmapRenderer::finalize_column(
                     if (av > col_max) col_max = av;
                 }
                 if (col_max > global_max_qty_) global_max_qty_ = col_max;
-                upload_column(col, num_rows, pmin, native_bucket_size_, col_max, column_flags(timestamp_ms));
+                upload_column(col, num_rows, pmin, gpu_bucket_size_, col_max, column_flags(timestamp_ms));
 
                 auto& meta = column_meta_[col];
                 meta.timestamp_ms = timestamp_ms;
                 meta.price_min = pmin;
-                meta.price_step = native_bucket_size_;
+                meta.price_step = gpu_bucket_size_;
                 meta.num_rows = num_rows;
                 meta.max_value = col_max;
                 meta.finalized = true;
@@ -411,8 +411,10 @@ int ShaderHeatmapRenderer::build_column(
 
     int max_row_used = 0;
     for (const auto& [price, qty] : price_qty_map) {
-        const int row = static_cast<int>(
-            std::floor((price - price_min) / bucket_size + (realtime_ ? 1e-7 : 0)));
+        const int row = static_cast<int>(realtime_
+            ? std::floor((price / native_bucket_size_ + 1e-7) / bucket_multiplier_) -
+              std::floor(price_min / bucket_size + 1e-7)
+            : std::floor((price - price_min) / bucket_size));
         if (row >= 0 && row < MAX_ROWS) {
             column_build_buf_[row] += qty;
             max_row_used = std::max(max_row_used, row);
@@ -547,7 +549,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
     }
 
     gpu_origin_ms_ = timeline_.begin()->first;
-    gpu_bucket_size_ = native_bucket_size_;
+    gpu_bucket_size_ = native_bucket_size_ * (realtime_ ? bucket_multiplier_ : 1);
     gpu_price_origin_ = 0;
     if (realtime_) {
         const auto center = observation_centers_.lower_bound(timeline_.begin()->first);
@@ -630,7 +632,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
 
         const double mid_price = realtime_ && observation_centers_.contains(ts)
             ? observation_centers_.at(ts) : (snap_pmin + snap_pmax) * 0.5;
-        const double half_win = (MAX_ROWS / 2) * native_bucket_size_;
+        const double half_win = (MAX_ROWS / 2) * gpu_bucket_size_;
 
         // "Sticky" centering: keep price_min stable across columns to avoid
         // stair-stepping at large bucket sizes ($50, $100). Only shift when
@@ -663,7 +665,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
         if (realtime_ && !observation_boundaries_.contains(ts)) fill_observation_hold(highest_col, col);
         // Build float column
         const int num_rows = build_column(price_qty_map, col_price_min,
-                                          native_bucket_size_, apply_spread);
+                                          gpu_bucket_size_, apply_spread);
         if (num_rows <= 0) continue;
 
         // Apply extend_levels (prev_column_carry_ is maintained across iterations)
@@ -682,7 +684,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
         // Direct per-column GL upload from column_build_buf_ (contiguous, cache-friendly).
         // The old staging buffer approach required strided writes (data_staging_[r * RING_SIZE + col])
         // which were cache-hostile - 4M iterations for 4000 columns.
-        upload_column(col, num_rows, col_price_min, native_bucket_size_, col_max,
+        upload_column(col, num_rows, col_price_min, gpu_bucket_size_, col_max,
             column_flags(ts));
 
         // Phase 2a: Build + upload reach_prob column at the same ring position.
@@ -739,7 +741,7 @@ void ShaderHeatmapRenderer::sync_gpu_from_timeline() {
         auto& meta = column_meta_[col];
         meta.timestamp_ms = ts;
         meta.price_min = col_price_min;
-        meta.price_step = native_bucket_size_;
+        meta.price_step = gpu_bucket_size_;
         meta.num_rows = num_rows;
         meta.max_value = col_max;
         meta.finalized = true;
@@ -893,12 +895,12 @@ float ShaderHeatmapRenderer::realtime_normalization(double price_min, double pri
         const auto& meta = column_meta_[col];
         if (meta.timestamp_ms > replay_cutoff_ms_ || meta.num_rows <= 0 || meta.values.empty() ||
             (!timeline_.empty() && meta.timestamp_ms < timeline_.begin()->first)) continue;
-        for (int row = 0; row < meta.num_rows; row += bucket_multiplier_) {
+        for (int row = 0; row < meta.num_rows; row += texture_grouping()) {
             const double lo = meta.price_min + row * meta.price_step;
-            const double hi = lo + bucket_multiplier_ * meta.price_step;
+            const double hi = lo + texture_grouping() * meta.price_step;
             if (hi <= price_min || lo >= price_max) continue;
             float value = 0;
-            for (int end = std::min(row + bucket_multiplier_, meta.num_rows), i = row; i < end; ++i)
+            for (int end = std::min(row + texture_grouping(), meta.num_rows), i = row; i < end; ++i)
                 value += meta.values[i];
             if (value > 0 && std::isfinite(value)) values.push_back(value);
         }
@@ -1015,7 +1017,7 @@ void ShaderHeatmapRenderer::render_cells(
     u.max_rows = MAX_ROWS;
 
     u.bucket_size = static_cast<float>(gpu_bucket_size_);
-    u.bucket_multiplier = bucket_multiplier_;
+    u.bucket_multiplier = texture_grouping();
     u.sensitivity = sensitivity;
     u.max_qty = realtime_ ? realtime_normalization(limits.Y.Min, limits.Y.Max) : global_max_qty_;
     u.color_low = color_low_;
@@ -1074,7 +1076,7 @@ void ShaderHeatmapRenderer::render_labels(int64_t, float sensitivity) const {
     // Measure near the viewport, not at Unix epoch zero (float cancellation).
     const auto p1 = ImPlot::PlotToPixels(limits.X.Min, limits.Y.Min);
     const auto p2 = ImPlot::PlotToPixels(limits.X.Min + time_step_ms_,
-                                        limits.Y.Min + gpu_bucket_size_ * bucket_multiplier_);
+                                        limits.Y.Min + gpu_bucket_size_ * texture_grouping());
     const float cell_w = std::abs(p2.x-p1.x), cell_h = std::abs(p2.y-p1.y);
     if (cell_w < 40 || cell_h < 16) return;
     ImPlot::PushPlotClipRect();
@@ -1086,14 +1088,14 @@ void ShaderHeatmapRenderer::render_labels(int64_t, float sensitivity) const {
         // Match the shader's float metadata and per-column aggregation origin.
         const double pmin = gpu_price_origin_ + static_cast<float>(meta.price_min - gpu_price_origin_);
         const double step = static_cast<float>(meta.price_step);
-        const double bucket = step * bucket_multiplier_;
+        const double bucket = step * texture_grouping();
         if (bucket <= 0) continue;
-        int first = std::max(0, static_cast<int>(std::floor((limits.Y.Min-pmin)/bucket)) * bucket_multiplier_);
-        for (int row = first; row < static_cast<int>(meta.values.size()); row += bucket_multiplier_) {
+        int first = std::max(0, static_cast<int>(std::floor((limits.Y.Min-pmin)/bucket)) * texture_grouping());
+        for (int row = first; row < static_cast<int>(meta.values.size()); row += texture_grouping()) {
             const double price = pmin + row * step;
             if (price > limits.Y.Max) break;
             float qty = 0;
-            for (int r = row; r < std::min(row + bucket_multiplier_, static_cast<int>(meta.values.size())); ++r) qty += meta.values[r];
+            for (int r = row; r < std::min(row + texture_grouping(), static_cast<int>(meta.values.size())); ++r) qty += meta.values[r];
             if (qty < 0.01f) continue;
             char label[16];
             if (qty >= 1000) snprintf(label,sizeof(label),"%.1fk",qty/1000);
@@ -1300,11 +1302,14 @@ float ShaderHeatmapRenderer::get_value_at_price_and_time(
     if (replay_cutoff_ms_ > 0 && meta.timestamp_ms > replay_cutoff_ms_) return 0;
     const double step = static_cast<float>(meta.price_step);
     if (step <= 0) return 0;
-    const int row = static_cast<int>(std::floor((price - gpu_price_origin_ - static_cast<float>(meta.price_min - gpu_price_origin_))/step));
+    const int row = static_cast<int>(realtime_
+        ? std::floor((price / native_bucket_size_ + 1e-7) / bucket_multiplier_) -
+          std::floor(meta.price_min / meta.price_step + 1e-7)
+        : std::floor((price - gpu_price_origin_ - static_cast<float>(meta.price_min - gpu_price_origin_))/step));
     if (row < 0) return 0;
-    const int first = row / bucket_multiplier_ * bucket_multiplier_;
+    const int first = row / texture_grouping() * texture_grouping();
     float qty = 0;
-    for (int r = first; r < std::min(first+bucket_multiplier_,static_cast<int>(meta.values.size())); ++r) qty += meta.values[r];
+    for (int r = first; r < std::min(first+texture_grouping(),static_cast<int>(meta.values.size())); ++r) qty += meta.values[r];
     return qty;
 }
 

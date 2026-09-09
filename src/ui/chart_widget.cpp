@@ -833,6 +833,7 @@ void ChartWidget::render() {
         if (ImGui::SmallButton(rt_auto_price_ ? "Recenter price" : "Follow price")) {
             rt_auto_price_ = true;
             rt_price_window_ = {};
+            rt_auto_fit_ = {};
         }
         if (!rt_auto_price_) {
             ImGui::SameLine(0, 6);
@@ -1035,6 +1036,9 @@ void ChartWidget::render_chart() {
         // Use the preceding hit rectangle before setup consumes this input.
         const bool time_wheel = rt_mode_ && rt_dom_linked_ && ImGui::GetIO().MouseWheel != 0 &&
             !ImPlot::GetCurrentPlot()->Axes[ImAxis_Y1].HoverRect.Contains(ImGui::GetIO().MousePos);
+        if (rt_mode_ && rt_dom_linked_ && rt_auto_fit_history_ &&
+            ImGui::GetIO().MouseWheel != 0 && !time_wheel)
+            rt_auto_price_ = false;
         const ImVec2 price_drag = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
         const bool deliberate_price_drag = !ImGui::GetIO().KeyShift &&
             realtime_price_pan_detaches(price_drag.x, price_drag.y);
@@ -1208,6 +1212,7 @@ void ChartWidget::render_chart() {
                 y_max = last_visible_range_.Y.Max;
             }
         }
+        const double rt_observed_low = y_min, rt_observed_high = y_max;
         // Fallback
         if (y_min == std::numeric_limits<double>::infinity()) {
             const size_t candle_count = std::min({timestamps.size(), lows.size(), highs.size()});
@@ -1273,7 +1278,14 @@ void ChartWidget::render_chart() {
                 ? std::max(ImGui::GetTextLineHeight(), x_axis.Ticker.MaxSize.y) + style.LabelPadding.y : 0;
             const double height = std::max(1.0, double(plot.FrameRect.GetHeight()) -
                 2 * style.PlotPadding.y - axis_height);
-            const double step = (rt_renderer_ ? rt_renderer_->get_native_bucket_size() : tick_size_) * rt_bucket_multiplier_;
+            const double native_tick = rt_renderer_ ? rt_renderer_->get_native_bucket_size() : tick_size_;
+            if (!rt_auto_fit_history_) rt_effective_multiplier_ = rt_bucket_multiplier_;
+            if (rt_auto_fit_history_ && rt_auto_price_ && !rt_empty_prices) {
+                rt_auto_fit_.update(rt_observed_low, rt_observed_high, native_tick,
+                    rt_bucket_multiplier_, height, ImGui::GetFontSize() + 4.0, rt_clock_ms_);
+                if (rt_auto_fit_.grouping > 0) rt_effective_multiplier_ = rt_auto_fit_.grouping;
+            }
+            const double step = native_tick * rt_effective_multiplier_;
             if (step > 0) {
                 const double row_height = ImGui::GetFontSize() + 4.0;
                 const auto& current = plot.Axes[ImAxis_Y1].Range;
@@ -1282,8 +1294,11 @@ void ChartWidget::render_chart() {
                     rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000)
                     focus = (rt_latest_->bid + rt_latest_->ask) * 0.5;
                 if (rt_quote_.timestamp_ms > 0) focus = (rt_quote_.best_bid + rt_quote_.best_ask) * 0.5;
-                const auto range = rt_price_window_.update(current.Min, current.Max, step,
-                    height, row_height, focus, rt_auto_price_ && !rt_paused_ && !ctx_.replay_mgr().is_paused());
+                const bool fit_history = rt_auto_fit_history_ && rt_auto_price_ && rt_auto_fit_.grouping > 0;
+                const auto range = fit_history ? rt_auto_fit_.range : rt_price_window_.update(
+                    current.Min, current.Max, step, height, row_height, focus,
+                    rt_auto_price_ && !rt_paused_ && !ctx_.replay_mgr().is_paused());
+                if (fit_history) { rt_price_window_.bucket = step; rt_price_window_.height = height; }
                 // SetRange preserves ImPlot input; SetupAxisLimits(Always)
                 // would lock wheel zoom and dragging for the whole frame.
                 ImPlot::SetupAxisZoomConstraints(ImAxis_Y1, step,
@@ -1291,7 +1306,7 @@ void ChartWidget::render_chart() {
                 ImPlot::SetupAxisLimits(ImAxis_Y1, range.low, range.high, ImPlotCond_Once);
                 plot.Axes[ImAxis_Y1].SetRange(range.low, range.high);
             }
-        } else rt_price_window_ = {};
+        } else { rt_price_window_ = {}; rt_effective_multiplier_ = rt_bucket_multiplier_; }
         stored_x_min_ = visible_x_min;
         stored_x_max_ = visible_x_max;
 
@@ -2943,9 +2958,10 @@ void ChartWidget::render_controls() {
         ImGui::SetNextItemWidth(155.0f);
         bool changed = ImGui::Combo("Fidelity", &selected, labels, 5);
         multiplier = multipliers[selected];
+        if (changed && rt_mode_) { rt_auto_fit_ = {}; rt_effective_multiplier_ = multiplier; }
         if (rt_mode_) {
-            ImGui::TextUnformatted("RT keeps the selected price grouping fixed.");
-            ImGui::TextUnformatted("Color scale is fixed. Recalibration recolors the visible history.");
+            ImGui::TextUnformatted(rt_auto_fit_history_ ? "Auto-fit uses this as the minimum grouping." : "RT keeps the selected price grouping fixed.");
+            ImGui::TextUnformatted("Changing price grouping recalibrates the color scale.");
         } else {
             changed |= ImGui::Checkbox("Adapt to zoom", &heatmap_adapt_to_zoom_);
             if (ImGui::IsItemHovered())
@@ -2958,7 +2974,7 @@ void ChartWidget::render_controls() {
                 if (ImGui::Checkbox("Cool-to-warm palette", &warm)) recon->set_realtime_warm(warm);
                 if (ImGui::Button("Recalibrate colors")) recon->recalibrate_realtime_colors();
             }
-            if (changed) recon->set_bucket_multiplier(multiplier);
+            if (changed) recon->set_bucket_multiplier(rt_mode_ ? rt_effective_multiplier_ : multiplier);
             ImGui::TextUnformatted("Effective price bucket:");
             ImGui::SameLine();
             ImGui::Text(fmt_.price_fmt, recon->get_display_bucket_size());

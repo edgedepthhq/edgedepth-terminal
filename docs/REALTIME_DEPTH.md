@@ -44,7 +44,8 @@ from a screenshot.
 | Timeframe > RT | Recalibrate bubble sizes | Reset the automatic size reference using eligible received records. This deliberately resizes and refilters historical bubbles. |
 | DOM | Link RT | Default on. Use the matching RT chart's sampled book, display clock and exact price-to-screen mapping. Includes buys, sells, delta and CVD. Turn off for independent centering and reset controls. |
 | Timeframe > RT | Minimum trade value | With auto off, set price times quantity in quote units. For a USDT pair, the threshold is in USDT. Default manual value: 10,000. |
-| Layers > Depth settings | Fidelity | UHD/HD/SD/LD/ULD group 1/2/5/10/20 native price ticks. RT defaults to SD (5x), independent of candle settings, and keeps the chosen grouping fixed; candle-mode zoom adaptation is separate. |
+| Layers > Depth settings | Fidelity | UHD/HD/SD/LD/ULD select the minimum grouping of 1/2/5/10/20 native ticks. Auto-fit may use coarser groups; disable it to keep this grouping fixed. |
+| RT settings | Auto-fit visible history | Default on. Expand to fit observed prices in the visible time interval, with padding. Group rows to keep the linked DOM readable; reduce grouping only after five seconds of spare room. Price-axis zoom or vertical pan enters manual inspection; Follow price resumes fitting. |
 | Layers > Depth settings | Cool-to-warm palette | Default deep-blue/cyan/yellow/orange/red colors on the same fixed intensity scale. |
 | Layers > Depth settings | Recalibrate colors | Explicitly recalibrate brightness from the currently visible liquidity. This deliberately recolors history; normal feed updates do not. |
 | Chart navigation | Time zoom / Follow | Show five seconds through the retained session. Whole session fits the 30-minute target; Return live restores a 60-second view. Wheel zoom keeps Following live/replay in both directions. Pan detaches; zoom in then keeps the inspected history. While running, zoom out resumes Follow. Paused history stays detached in both directions. Follow returns to the current display clock without unpausing; use Pause display or the replay transport to resume time. Price auto-fits eligible visible trades and quote steps. |
@@ -87,10 +88,11 @@ markers use separate horizontal halves so both remain identifiable without
 moving either vertically. No minimum visual spread is manufactured.
 
 At wider price ranges, nearby native ticks are summed into readable rows;
-**Rows N ticks / centers** states the grouping. PRICE labels are bucket centers,
+**Auto: N ticks / row; prices are centers** states the effective grouping. PRICE labels are bucket centers,
 not native executable quotes; bids and asks can share a grouped row. Both resting depth and traded volume use
-the same row groups. This changes the ladder display only, not historical
-heatmap fidelity or trade coordinates. Best bid/ask lines retain their exact
+the same row groups as the RT heatmap. Automatic grouping changes the display
+grid and recalibrates colors; it does not rewrite retained observations or move
+trade coordinates. Zooming back in restores finer retained detail. Best bid/ask lines retain their exact
 prices, also printed in the header. Qty / Quote toggles row amounts between
 base quantity and the sum of each actual price times quantity.
 

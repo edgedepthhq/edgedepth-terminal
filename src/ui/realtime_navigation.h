@@ -63,3 +63,48 @@ struct RealtimePriceWindow {
         return {center - span * 0.5, center + span * 0.5};
     }
 };
+
+// Fit observed prices, not remote resting orders. Expand immediately; require
+// five seconds of spare room before reducing the display increment.
+struct RealtimeAutoFit {
+    RealtimePriceWindow::Range range{};
+    int grouping = 0;
+    int64_t spare_since = 0, last_clock = 0;
+    void update(double low, double high, double tick, int minimum,
+                double pixels, double row_height, int64_t clock) {
+        if (!std::isfinite(low) || !std::isfinite(high) || high < low ||
+            !std::isfinite(tick) || tick <= 0 || pixels <= 0 || row_height <= 0) return;
+        if (clock < last_clock) { grouping = 0; spare_since = 0; }
+        last_clock = clock;
+        minimum = std::max(1, minimum);
+        const double rows = std::max(4.0, std::floor(pixels / row_height));
+        const double padding = std::max((high - low) * 0.10, tick * minimum * 2);
+        low -= padding; high += padding;
+        const double required = (high - low) / ((rows - 2) * tick);
+        int wanted = minimum;
+        // Integer native-tick multiples, also divisible by the archive's
+        // selected minimum grouping so a retained bin never straddles rows.
+        for (int64_t decade = 1; wanted < required && decade <= 100000000; decade *= 10)
+            for (int factor : {1, 2, 5, 10}) {
+                const int64_t candidate = decade * factor;
+                if (candidate >= minimum && candidate % minimum == 0 && candidate >= required) {
+                    wanted = int(candidate); break;
+                }
+            }
+        if (wanted < required) return; // Outside the supported integer grid.
+        bool resize = false;
+        if (grouping == 0 || wanted > grouping) {
+            grouping = wanted; spare_since = 0; resize = true;
+        } else if (wanted < grouping && (high-low) < (range.high-range.low) * 0.6) {
+            if (!spare_since) spare_since = clock;
+            if (clock - spare_since >= 5000) { grouping = wanted; spare_since = 0; resize = true; }
+        } else spare_since = 0;
+        const double step = tick * grouping;
+        const double span = rows * step;
+        if (resize || std::abs((range.high-range.low)-span) > step * 0.01 ||
+            low < range.low || high > range.high) {
+            const double center = std::round((low+high) * 0.5 / step) * step;
+            range = {center-span*0.5, center+span*0.5};
+        }
+    }
+};

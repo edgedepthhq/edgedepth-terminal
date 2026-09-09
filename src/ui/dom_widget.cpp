@@ -939,7 +939,7 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
         dl->PopClipRect();
     }
     const float row_h = float(step / (frame.price_max - frame.price_min) * (frame.bottom - frame.top));
-    char grouping[96]; snprintf(grouping, sizeof(grouping), "%d ticks / centers", frame.bucket_ticks);
+    char grouping[96]; snprintf(grouping, sizeof(grouping), "%s%d ticks / row; prices are centers", frame.automatic_grouping ? "Auto: " : "", frame.bucket_ticks);
     dl->AddText(ImVec2(org.x, org.y + text_h + 3), Theme::u32(Theme::Tokens::TX2), grouping);
     dl->PushClipRect(ImVec2(org.x, top), ImVec2(org.x + avail.x, bottom), true);
     for (size_t i = 0; i < count; ++i) {
