@@ -583,6 +583,7 @@ void MessageHandler::handle_trade(const Terminal::Pair& pair, const pb::Trade& t
     trade.qty = trade_pb.qty();
     trade.is_buy = trade_pb.is_buy();
     trade.timestamp_ms = trade_pb.timestamp_ms();
+    trade.agg_trade_id = trade_pb.agg_trade_id();
     const StreamKey key{pair, Terminal::Stream::Trades, 0};
     stream_mgr->dispatch_trade(key, trade);
 }

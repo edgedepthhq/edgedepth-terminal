@@ -137,6 +137,7 @@ namespace Terminal {
         double qty;
         int64_t timestamp_ms;
         bool is_buy;
+        int64_t agg_trade_id = 0;
     };
 
     struct Candle {

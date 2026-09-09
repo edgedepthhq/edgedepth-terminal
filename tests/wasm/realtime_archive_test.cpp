@@ -101,5 +101,35 @@ int test_archive_capture() {
     expect(!archive.query(1000,2000,2000,100,1) && archive.batch_.empty(),
         "query flushes native records before handing its cutoff to the worker");
     expect(!archive.query(1000,2000,2000,100,1),"rejected query reports failure so navigation can retry");
+    archive.reset();archive.startup_pending_=true;archive.startup_requested_=true;archive.startup_end=100000;
+    archive.append_trade({100,1,99999,true,10});
+    nlohmann::json response={{"end_ms",100000},{"records",{1,99000,11,1,100,101,2,100,2,101,3}},
+        {"trades",nlohmann::json::array({
+            {{"id","9"},{"time",99000},{"price",100},{"qty",1},{"buy",true}},
+            {{"id","10"},{"time",99999},{"price",100},{"qty",1},{"buy",true}},
+            {{"id","11"},{"time",99000},{"price",100},{"qty",1},{"buy",true}},
+            {{"id","9"},{"time",99000},{"price",100},{"qty",1},{"buy",true}}
+        })}};
+    const auto book_serial=archive.serial_;
+    archive.receive_seed(response);
+    expect(archive.seed_.size()==26 && archive.seeded_ids_.size()==2,
+        "startup removes only matching exchange IDs and keeps distinct identical trades");
+    expect(archive.serial_==book_serial && archive.startup_first==99000,
+        "history seed never advances live orderbook cursor");
+    const auto buffered=archive.batch_.size();
+    archive.append_trade({100,1,99000,true,9});
+    expect(archive.batch_.size()==buffered,"late live copy of a seeded ID is not recorded twice");
+    archive.append_trade({100,1,99000,true,12});
+    expect(archive.batch_.size()==buffered+6,"distinct identical late trade remains visible");
+    archive.reset();archive.startup_end=100000;archive.startup_pending_=true;
+    response["records"][2]=100000000;
+    archive.receive_seed(response);
+    expect(archive.seed_.empty() && archive.seeded_ids_.empty() && archive.startup_first==0,
+        "malformed startup response is rejected atomically");
+    archive.startup_pending_=true;archive.startup_at_=-100000;
+    archive.update(100000);
+    expect(!archive.startup_pending_ && archive.error.empty(),"history timeout leaves live recorder usable");
+    archive.reset();
+    expect(archive.startup_first==0 && archive.seeded_ids_.empty(),"reconnect clears startup identity and generation state");
     return failures;
 }

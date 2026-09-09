@@ -78,8 +78,9 @@ private:
     std::deque<SamplePtr> samples_;
 };
 
-// Preserve wire multiplicity: no identity exists in the trade protocol, so
-// equal timestamp/price/quantity records must not be guessed to be duplicates.
+// Preserve wire multiplicity: feeds can omit exchange identity, so equal
+// timestamp/price/quantity records must not be guessed to be duplicates.
+// RealtimeArchive uses available exchange IDs only for the startup overlap.
 // One append per CandleManager callback, regardless of the number of charts.
 class RealtimeTradeHistory {
 public:

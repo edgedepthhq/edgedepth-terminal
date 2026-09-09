@@ -105,6 +105,10 @@ void ChartWidget::render_realtime_settings() {
         }
         if (rt_history_view_) ImGui::Text("History: %.1fs depth bins; %zu markers from %zu trades",
             double(rt_query_step_)/1000, rt_archive_trades_.size(), a.view_trade_count);
+        if(!a.startup_status.empty()) {
+            ImGui::TextWrapped("%s",a.startup_status.c_str());
+            ImGui::TextWrapped("Startup depth: 500ms observations, up to 128 native levels per side. Trade coverage can be shorter during bursts. Current DOM uses live depth. Startup trades do not enter CVD or alerts.");
+        }
         ImGui::TextUnformatted(a.error.empty() ? "Recording observed depth and received trades" : a.error.c_str());
         if (a.dropped) ImGui::Text("Capture overload: %zu records missed; depth gaps preserved", a.dropped);
         if (ImGui::Button("Whole session")) { rt_span_ms_ = double(RealtimeArchive::target_ms) / 0.88; ctx_.candle_mgr().set_follow_live(true); }
@@ -358,6 +362,8 @@ void ChartWidget::render_realtime() {
         ImVec2(pos.x + 16 + note_size.x, note_y + note_size.y + 3),
         Theme::u32(Theme::Tokens::BASE, 0.9f), 3);
     dl->AddText(ImVec2(pos.x + 12, note_y), Theme::u32(Theme::Tokens::TX1), note);
+    if(rt_archive_ && !rt_archive_->startup_status.empty() && !rt_paused_ && fresh && rt_archive_->error.empty())
+        dl->AddText(ImVec2(pos.x+12,note_y+36),Theme::u32(Theme::Tokens::TX2),rt_archive_->startup_status.c_str());
     if (ctx_.replay_mgr().is_loading()) {
         const ImVec2 size = ImPlot::GetPlotSize();
         dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), Theme::u32(Theme::Tokens::BASE));
@@ -432,6 +438,7 @@ void ChartWidget::capture_realtime_archive() {
     const int64_t clock = ctx_.replay_mgr().is_active() ? ctx_.replay_mgr().interpolated_time_ms() :
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     rt_archive_->update(clock);
+    if(!ctx_.replay_mgr().is_active())rt_archive_->request_startup(ctx_.stream_mgr());
 }
 
 void ChartWidget::rebuild_realtime_view() {
@@ -462,7 +469,8 @@ void ChartWidget::update_realtime_archive_view() {
     const auto& recent_trades = rt_paused_ ? rt_paused_trades_ : ctx_.candle_mgr().realtime_trades().trades();
     const bool trades_retired = recent_trades.size() == RealtimeTradeHistory::max_trades &&
         recent_trades.front().timestamp_ms > from && rt_archive_->first < recent_trades.front().timestamp_ms;
-    const bool history = to > from && (trades_retired || to-from > 290000 || from < rt_clock_ms_ - 290000);
+    const bool seeded = rt_archive_->startup_first>0 && from<rt_archive_->startup_end;
+    const bool history = to > from && (seeded || trades_retired || to-from > 290000 || from < rt_clock_ms_ - 290000);
     if (!history) {
         int64_t discarded_step=100;
         rt_archive_->take_view(rt_archive_samples_, rt_archive_trades_, discarded_step);
@@ -472,7 +480,7 @@ void ChartWidget::update_realtime_archive_view() {
         }
         return;
     }
-    const int64_t step = std::max(int64_t(100), ((to-from+179999)/180000)*100);
+    const int64_t step = std::max(int64_t(seeded ? 500 : 100), ((to-from+179999)/180000)*100);
     const int64_t aligned = from / step * step;
     int64_t received_step = 100;
     std::deque<RealtimeDepthHistory::SamplePtr> received_samples;

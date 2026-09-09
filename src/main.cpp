@@ -1,3 +1,4 @@
+#include "core/realtime_archive.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_opengl.h>
 #include <SDL3/SDL_events.h>
@@ -219,6 +220,11 @@ static void on_ws_message(const uint8_t* data, size_t len, WsLane lane) {
                 reinterpret_cast<const char*>(data) + len);
             std::string type = parsed.value("type", "");
 
+            if(type=="rt_history") {
+                if(lane==WsLane::Live && !(g_app.replay_mgr && g_app.replay_mgr->is_active()))
+                    RealtimeArchive::receive_startup(parsed);
+                return;
+            }
             if (g_app.replay_mgr && g_app.replay_mgr->handle_ws_message(type, &parsed))
                 return;
 

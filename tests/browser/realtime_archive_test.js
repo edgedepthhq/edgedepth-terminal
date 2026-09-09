@@ -41,6 +41,14 @@ document.querySelector('#run').onclick=async()=>{
         await send({type:'clear',id:'roundtrip'});
         messages=await query('roundtrip',1000,1500);
         check(messages.find(m=>m.type==='view').buffer.byteLength===0,'clear prevents stale session reads');
+        await append('seeded',[...depth(5001,7,1),...trade(5002),...depth(5501,8)]);
+        await send({type:'append',id:'seeded',seed:true,buffer:new Float64Array([
+            ...depth(3001,2,1),...depth(3501,4),...trade(3002),3,4001,3]).buffer});
+        messages=await query('seeded',3000,6000,500);a=new Float64Array(messages.find(m=>m.type==='view').buffer);
+        const times=[];for(let p=0;p<a.length;p+=a[p+2])if(a[p]===1)times.push(a[p+1]);
+        check(times.join(',')==='3001,3501,5001,5501','late seed is queried before live depth with a preserved seam');
+        check(messages.find(m=>m.type==='view').tradeCount===2,'seed and live trades both survive IndexedDB ordering');
+        await send({type:'clear',id:'seeded'});
         // Thirty minutes of 100ms, 1024-level books and 300 records/second.
         // Deliberately labelled synthetic; not a hosted-throughput claim.
         const t0=10000000, begin=performance.now(), timings=[];let rawBytes=0,status;

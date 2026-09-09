@@ -1,6 +1,9 @@
 #pragma once
 #include "core/realtime_history.h"
 #include <string>
+#include <unordered_set>
+#include <nlohmann/json.hpp>
+class StreamManager;
 class CandleManager;
 class OrderbookManager;
 
@@ -13,6 +16,10 @@ public:
     ~RealtimeArchive();
     static bool prepare_replay(CandleManager*, int64_t clock);
     void update(int64_t clock);
+    void request_startup(StreamManager&);
+    static void receive_startup(const nlohmann::json&);
+    int64_t startup_first = 0, startup_end = 0;
+    std::string startup_status;
     void reset(bool discard_existing = true);
     void cancel_view();
     void append_trade(const Terminal::Trade&);
@@ -27,6 +34,12 @@ public:
 private:
     RealtimeArchive(OrderbookManager&, const Terminal::Pair&);
     void gap(int64_t);
+    void receive_seed(const nlohmann::json&);
+    std::vector<double> seed_;
+    std::unordered_set<int64_t> seen_ids_, seeded_ids_;
+    int64_t first_depth_ms_ = 0;
+    double startup_at_ = 0;
+    bool startup_requested_ = false, startup_pending_ = false, identities_complete_ = true;
     void poll();
     bool make_room(size_t count);
     bool prepare_replay(int64_t clock);

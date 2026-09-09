@@ -10,6 +10,19 @@ It opens without candles. The right gutter shows the current fresh book.
 browser build on 8 September 2026, with linked DOM delta and CVD. The gateway requests Binance depth at 100ms; this is not a
 measurement of the hosted feed's cadence or performance.*
 
+## Startup history depends on the feed
+
+A compatible hosted live feed can seed up to 30 seconds of recent depth and
+identified trades while live updates continue. Depth is observed every 500ms,
+with up to 128 native price levels on each side. Historical coverage can be
+shorter after a server restart, through gaps or during busy trade bursts.
+The chart shows depth and trade coverage separately; RT settings describe limits.
+Backfill does not change current DOM quantities, live CVD or alerts.
+
+The community gateway currently supplies live observations only. Selecting RT
+against that gateway does not manufacture history from its initial book snapshot.
+This client change requires the matching server endpoint for startup history.
+
 ## Reading a bubble outside the spread
 
 The **center** is the received trade's timestamp and execution price. Its radius

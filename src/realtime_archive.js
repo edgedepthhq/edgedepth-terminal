@@ -1,5 +1,6 @@
 // Browser-local observed RT sessions. Embedded in index.js so hosted and OSS
-// asset delivery share one owner. No network, persistence prompt, or backfill.
+// asset delivery share one owner. Validated startup seeds arrive through the
+// C++ coordinator; this worker never fetches market data.
 (function () {
 'use strict';
 function archiveWorker() {
@@ -60,7 +61,7 @@ function archiveWorker() {
         const meta = tx.objectStore('meta'), data = tx.objectStore('data'), budget = tx.objectStore('budget');
         let total = (await request(budget.get('bytes'))) || 0;
         const row = {key:s.id + ':' + (++s.seq), session:s.id, min, max,
-            seq:s.seq, bytes:packed.byteLength + 256, created:Date.now()};
+            seq:s.seq, seed:!!s.seed, bytes:packed.byteLength + 256, created:Date.now()};
         total += row.bytes;
         // The read/write transaction serializes this origin-wide budget across tabs.
         await new Promise((resolve, reject) => {
@@ -91,6 +92,7 @@ function archiveWorker() {
     }
     async function append(m) {
         const s = state(m.id), a = new Float64Array(m.buffer);
+        if(m.seed) {await flush(s);s.seed=true;}
         if(Number.isFinite(m.clock))s.clock=m.clock;
         // Records: kind,time,...; depth length=7+2*n, trade length=6, gap length=3.
         for (let p=0;p<a.length;) {
@@ -102,12 +104,12 @@ function archiveWorker() {
         }
         s.clock=Number.isFinite(m.clock) ? m.clock : s.max;
         // Each acknowledged batch is durable, including quiet tails and pause.
-        await flush(s); await status(s);
+        await flush(s);s.seed=false; await status(s);
     }
     async function query(m) {
         const s = state(m.id); await flush(s);
         const rows = (await metadata(m.id)).filter(r=>r.max>=m.from-m.step && r.min<=Math.min(m.to,m.cutoff))
-            .sort((a,b)=>a.seq-b.seq);
+            .sort((a,b)=>Number(!!b.seed)-Number(!!a.seed) || a.seq-b.seq);
         const db = await database(), trades = [], tradeBins = new Map();
         // A single aggregation bin and a bounded typed output. Never materialize
         // the full archive as per-observation JS objects/maps.
@@ -200,11 +202,11 @@ Module['rtArchive']={
         const s=states.get(id);
         return !s || s.error || failed ? -1 : inflight+bytes>2*1024*1024 ? 0 : 1;
     },
-    append(id,buffer,clock) {
+    append(id,buffer,clock,seed=false) {
         const s=states.get(id);
         if(!s || s.error || failed) return -1;
         if(inflight+buffer.byteLength>2*1024*1024) return 0;
-        inflight+=buffer.byteLength;worker.postMessage({type:'append',id,buffer,clock},[buffer]);return 1;
+        inflight+=buffer.byteLength;worker.postMessage({type:'append',id,buffer,clock,seed},[buffer]);return 1;
     },
     query(id,from,to,cutoff,step,tick) {
         const s=states.get(id);if(!s||s.error||failed||s.pending||pendingQueries>=4)return 0;

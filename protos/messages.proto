@@ -84,6 +84,7 @@ message Trade {
     double qty = 2;
     bool is_buy = 3;
     int64 timestamp_ms = 4;
+    int64 agg_trade_id = 5;
 }
 
 message Candle {
