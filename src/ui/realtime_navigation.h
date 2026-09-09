@@ -29,6 +29,10 @@ inline double realtime_price_half_span(double low, double high, double tick, int
 inline bool realtime_pan_detaches(float dx, float dy) {
     return std::abs(dx) > 12.0f && std::abs(dx) > std::abs(dy);
 }
+// Classify the whole gesture, not one frame's jitter during a horizontal pan.
+inline bool realtime_price_pan_detaches(float dx, float dy) {
+    return std::abs(dy) > 12.0f && std::abs(dy) > std::abs(dx);
+}
 inline bool realtime_view_has_live_edge(bool following, double right, int64_t clock) {
     return following || right >= double(clock);
 }

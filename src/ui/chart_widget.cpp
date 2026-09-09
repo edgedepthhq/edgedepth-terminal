@@ -828,6 +828,17 @@ void ChartWidget::render() {
             ctx_.candle_mgr().set_follow_live(true);
         }
     }
+    if (rt_mode_) {
+        ImGui::SameLine(0, 12);
+        if (ImGui::SmallButton(rt_auto_price_ ? "Recenter price" : "Follow price")) {
+            rt_auto_price_ = true;
+            rt_price_window_ = {};
+        }
+        if (!rt_auto_price_) {
+            ImGui::SameLine(0, 6);
+            ImGui::TextDisabled("Price following off");
+        }
+    }
     const float total_height = ImGui::GetContentRegionAvail().y;
     // Indicator pane (tabbed, design .indi-pane): 0 / header-only / INDI_PANE_H.
     // Renko skips the time-aligned indicator pane (render_indicators early-returns),
@@ -1024,8 +1035,15 @@ void ChartWidget::render_chart() {
         // Use the preceding hit rectangle before setup consumes this input.
         const bool time_wheel = rt_mode_ && rt_dom_linked_ && ImGui::GetIO().MouseWheel != 0 &&
             !ImPlot::GetCurrentPlot()->Axes[ImAxis_Y1].HoverRect.Contains(ImGui::GetIO().MousePos);
+        const ImVec2 price_drag = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
+        const bool deliberate_price_drag = !ImGui::GetIO().KeyShift &&
+            realtime_price_pan_detaches(price_drag.x, price_drag.y);
+        // A time pan may contain vertical jitter. Do not move the linked price
+        // axis until the complete gesture deliberately requests a price pan.
+        const bool keep_price_on_drag = rt_mode_ && rt_dom_linked_ && rt_auto_price_ &&
+            ImGui::IsMouseDown(ImGuiMouseButton_Left) && !deliberate_price_drag;
         ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_Opposite |
-            ((rt_mode_ && rt_auto_price_ && !rt_dom_linked_) || time_wheel
+            ((rt_mode_ && rt_auto_price_ && !rt_dom_linked_) || time_wheel || keep_price_on_drag
                 ? ImPlotAxisFlags_Lock : ImPlotAxisFlags_None));
         ImPlot::SetupAxisFormat(ImAxis_Y1, fmt_.price_fmt);
 
@@ -1293,9 +1311,8 @@ void ChartWidget::render_chart() {
             cp.y_max = ImPlot::GetPlotLimits().Y.Max;
             cp.valid = true;
         }
-        if (rt_mode_ && rt_dom_linked_ && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 3.0f) &&
-            (ImPlot::IsAxisHovered(ImAxis_Y1) || (ImPlot::IsPlotHovered() &&
-             std::abs(ImGui::GetIO().MouseDelta.y) > std::abs(ImGui::GetIO().MouseDelta.x))))
+        if (rt_mode_ && rt_dom_linked_ && ImGui::IsMouseDragging(ImGuiMouseButton_Left) &&
+            deliberate_price_drag && (ImPlot::IsAxisHovered(ImAxis_Y1) || ImPlot::IsPlotHovered()))
             rt_auto_price_ = false;
         // ── Render layers (back to front)
         // 1. Heatmap (background)

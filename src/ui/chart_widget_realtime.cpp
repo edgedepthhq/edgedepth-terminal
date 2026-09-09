@@ -100,7 +100,7 @@ void ChartWidget::render_realtime_settings() {
         if (a.dropped) ImGui::Text("Capture overload: %zu records missed; depth gaps preserved", a.dropped);
         if (ImGui::Button("Whole session")) { rt_span_ms_ = double(RealtimeArchive::target_ms) / 0.88; ctx_.candle_mgr().set_follow_live(true); }
         ImGui::SameLine();
-        if (ImGui::Button("Return live")) { rt_span_ms_ = 60000; ctx_.candle_mgr().set_follow_live(true); }
+        if (ImGui::Button("Return live")) { rt_span_ms_ = 60000; rt_auto_price_ = true; rt_price_window_ = {}; ctx_.candle_mgr().set_follow_live(true); }
         if (ImGui::Button("Clear history")) { rt_archive_->reset(); }
         ImGui::TextUnformatted("Local session only. Closing RT clears its archive. Storage may be evicted.");
     }

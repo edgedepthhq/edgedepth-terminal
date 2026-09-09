@@ -56,3 +56,6 @@ add_terminal_native_test(workspace_document_test workspace_document_test.cpp)
 target_link_libraries(workspace_document_test PRIVATE nlohmann_json::nlohmann_json)
 
 add_terminal_native_test(reference_context_test reference_context_test.cpp)
+
+add_terminal_native_test(realtime_navigation_test realtime_navigation_test.cpp)
+target_link_libraries(realtime_navigation_test PRIVATE nlohmann_json::nlohmann_json)
