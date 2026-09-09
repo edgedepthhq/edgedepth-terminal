@@ -1333,7 +1333,7 @@ namespace {
         {
             static bool show_demo = false, show_metrics = false;
             if (ImGui::BeginPopup("##tb_layout")) {
-                if (ImGui::MenuItem("Reset Layout")) LayoutManager::reset_layout();
+                if (ImGui::MenuItem("Reset Layout")) workspace::reset_default();
                 workspace::menu();
                 ImGui::MenuItem("Market Header", nullptr, &g_market_header_open);
                 ImGui::Separator();

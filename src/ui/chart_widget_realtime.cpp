@@ -21,6 +21,7 @@ void ChartWidget::set_rt_mode(bool on) {
             "Real-time depth and trade bubbles are a hosted Pro view.", "realtime_depth");
         return;
     }
+    if (!on && rt_mode_ && liq_dense_field_) heatmap_enabled_ = false;
     rt_mode_ = on;
     if (on && !rt_archive_) rt_archive_ = RealtimeArchive::acquire(ctx_.candle_mgr(), ctx_.ob_mgr(), pair_);
     if (!on) rt_archive_.reset();

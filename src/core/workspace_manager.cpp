@@ -1,4 +1,5 @@
 #include "workspace_manager.h"
+#include "imgui_internal.h"
 #include "workspace_document.h"
 #include "core/symbol_metadata.h"
 #include "core/education_boot.h"
@@ -52,6 +53,7 @@ const AppContext* context = nullptr;
 Terminal::Pair active_pair;
 bool ready = false, enabled_now = false, was_enabled = false;
 bool save_requested = false, export_requested = false;
+int capture_after_frame = 0;
 double last_capture = -1;
 char name[49] = {};
 std::string notice;
@@ -126,13 +128,17 @@ void apply(const Json& doc) {
             replace_all(ini, old.substr(old.find("###")), fresh.substr(fresh.find("###")));
         panels->push_back(std::move(w));
     }
-    if (!ini.empty()) ImGui::LoadIniSettingsFromMemory(ini.c_str(),ini.size());
+    ImGui::ClearIniSettings();
+    if (!ini.empty()) {
+        ImGui::LoadIniSettingsFromMemory(ini.c_str(),ini.size());
+        LayoutManager::restore_layout_for(active_pair.exchange,active_pair.symbol);
+    }
     else LayoutManager::reset_layout_for(active_pair.exchange,active_pair.symbol);
 }
 Json preset(int index) {
     Json settings = {{"chart_type",index == 0 ? 1 : 0},{"timeframe",60},
-        {"rt_mode",index == 1},{"liq_dense_field",false},{"liq_profile_enabled",false},
-        {"heatmap_enabled",false},{"indicators",Json::array()}};
+        {"rt_mode",index == 1},{"liq_dense_field",index == 3},{"liq_profile_enabled",false},
+        {"heatmap_enabled",index == 1},{"indicators",Json::array()}};
     if (index != 1) {
         settings["indicators"].push_back({{"name","Vol (USDT)"}});
         settings["indicators"].push_back({{"name","CVD"}});
@@ -147,7 +153,8 @@ Json preset(int index) {
 }
 }
 void flush() {
-    if (!ready || !enabled_now || !panels || !context || context->replay_mgr().is_active()) return;
+    if (!ready || !enabled_now || !panels || !context || context->replay_mgr().is_active() ||
+        ImGui::GetFrameCount() <= capture_after_frame) return;
     auto next = capture();
     if (next.is_null() || next.dump().size() > max_bytes) return;
     current = std::move(next); library["current"] = current; persist();
@@ -168,7 +175,17 @@ void tick(std::vector<std::unique_ptr<Widget>>& widgets, const AppContext& ctx,
                 library["named"] = Json::object();
                 for (const auto& item : stored["named"].items())
                     if (item.key().size() <= 48 && valid_document(item.value())) library["named"][item.key()] = item.value();
-                if (stored.contains("current") && valid_document(stored["current"])) pending = stored["current"];
+                if (stored.contains("current") && valid_document(stored["current"])) {
+                    pending = stored["current"];
+                    if (!stored.contains("layout_revision") || stored["layout_revision"] != 2) {
+                        bool rt = false;
+                        for (const auto& row : pending["widgets"])
+                            if (row["type"] == "chart")
+                                rt = row["settings"].value("rt_mode", Json(false)) == true;
+                        pending = preset(rt ? 1 : 3);
+                        notice = "Default layout repaired. Your named workspaces are still available.";
+                    }
+                }
             } else if (!stored.is_null()) notice = "Saved workspace could not be read. Defaults are available.";
         } else std::free(raw);
         EM_ASM({
@@ -180,7 +197,13 @@ void tick(std::vector<std::unique_ptr<Widget>>& widgets, const AppContext& ctx,
     was_enabled = true;
     if (!pending.is_null()) {
         apply(pending); pending = Json{}; last_capture = -1;
+        library["layout_revision"] = 2;
+        // DockBuilder and new windows need a completed frame before capture.
+        capture_after_frame = ImGui::GetFrameCount() + 1;
+        return;
     }
+    if (ImGui::GetFrameCount() <= capture_after_frame) return;
+    library["layout_revision"] = 2;
     if (save_requested || export_requested || ImGui::GetTime() - last_capture >= 1.0) {
         auto next = capture(); last_capture = ImGui::GetTime();
         if (next.is_null() || next.dump().size() > max_bytes) {
@@ -197,13 +220,22 @@ void tick(std::vector<std::unique_ptr<Widget>>& widgets, const AppContext& ctx,
         save_requested = export_requested = false;
     }
 }
+void reset_default() {
+    if (!enabled_now || !panels) { LayoutManager::reset_layout(); return; }
+    bool rt = false;
+    for (const auto& w : *panels)
+        if (w && w->type() == WidgetType::Chart) {
+            rt = static_cast<const ChartWidget*>(w.get())->rt_mode(); break;
+        }
+    pending = preset(rt ? 1 : 3);
+}
 void menu() {
     ImGui::TextDisabled("Workspaces apply to the current market");
     ImGui::TextDisabled("Changes are saved in this browser");
     ImGui::BeginDisabled(!enabled_now);
     if (ImGui::BeginMenu("Presets")) {
-        const char* labels[] = {"Order Flow", "Liquidity", "Replay Review"};
-        for (int i=0;i<3;++i) if (ImGui::MenuItem(labels[i])) pending = preset(i);
+        const char* labels[] = {"Order Flow", "Liquidity", "Replay Review", "Candles"};
+        for (int i=0;i<4;++i) if (ImGui::MenuItem(labels[i])) pending = preset(i);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Saved workspaces")) {

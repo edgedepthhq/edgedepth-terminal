@@ -2887,7 +2887,7 @@ void ChartWidget::render_controls() {
                            || EducationBoot::instance().is_pack();
         auto add = [&](PW type) {
             const bool global_widget = type == PW::PaperTrading
-                                    || type == PW::ReplayLibrary;
+                                    || type == PW::ReplayLibrary || type == PW::Watchlist;
             if (!global_widget && !embedded) {
                 Menu::g_symbol_picker.pending = type;
                 Menu::g_symbol_picker.open = true;
@@ -2909,6 +2909,7 @@ void ChartWidget::render_controls() {
         if (ImGui::MenuItem("Debug"))     add(PW::Debug);
         ImGui::Separator();
         if (ImGui::MenuItem("Paper Trading")) add(PW::PaperTrading);
+        if (!embedded && ImGui::MenuItem("Watchlist (24h change)")) add(PW::Watchlist);
         if (!embedded && ImGui::MenuItem("Replay Library")) add(PW::ReplayLibrary);
         ImGui::EndPopup();
     }

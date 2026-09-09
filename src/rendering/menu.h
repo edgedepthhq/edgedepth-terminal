@@ -22,7 +22,7 @@ namespace Menu {
         char search_buf[64] = {};
         enum class PendingWidget {
             None, Orderbook, DOM, Trades, Stats, Charts, Debug, PaperTrading,
-            ReplayLibrary
+            ReplayLibrary, Watchlist
         } pending = PendingWidget::None;
 
         int selected_category = -1;

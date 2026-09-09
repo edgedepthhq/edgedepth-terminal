@@ -8,5 +8,6 @@ namespace workspace {
 void tick(std::vector<std::unique_ptr<Widget>>& widgets, const AppContext& ctx,
           const Terminal::Pair& pair, bool enabled);
 void menu();
+void reset_default();
 void flush();
 }

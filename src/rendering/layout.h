@@ -13,6 +13,7 @@ public:
                                   const std::string& exchange = "binancef",
                                   const std::string& symbol = "btcusdt");
     static void reset_layout();
+    static void restore_layout_for(const std::string& exchange, const std::string& symbol);
     static void reset_layout_for(const std::string& exchange, const std::string& symbol);
     static bool is_initialized;
 

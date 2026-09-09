@@ -208,12 +208,16 @@ void ChartWidget::load_settings(const Json& j) {
     auto ct = chart_type_;
     workspace::read(j, "chart_type", ct, 0, 6);
     set_chart_type(ct);
-    workspace::read(j, "rt_mode", rt_mode_);
+    bool realtime = false;
+    workspace::read(j, "rt_mode", realtime);
+    if (realtime) set_rt_mode(true);
     workspace::read(j, "rt_candles", rt_candles_);
+    if (rt_mode_) chart_type_ = rt_candles_ ? ChartType::Candles : ChartType::Line;
     workspace::read(j, "rt_bubbles", rt_bubbles_);
     workspace::read(j, "rt_trade_line", rt_trade_line_);
     workspace::read(j, "rt_extend_depth", rt_extend_depth_);
-    workspace::read(j, "rt_auto_price", rt_auto_price_);
+    // A manual inspection is transient. Restored sessions start following price.
+    rt_auto_price_ = true;
     workspace::read(j, "rt_auto_bubbles", rt_auto_bubbles_);
     workspace::read(j, "rt_min_notional", rt_min_notional_, 0, 1000000000000.0);
     workspace::read(j, "rt_span_ms", rt_span_ms_, 1000, 1800000);

@@ -145,6 +145,14 @@ bool LayoutManager::layout_matches(const std::string& exchange,
     return is_initialized && layout_exchange == exchange && layout_symbol == symbol;
 }
 
+void LayoutManager::restore_layout_for(const std::string& exchange, const std::string& symbol) {
+    is_initialized = true;
+    layout_exchange = exchange;
+    layout_symbol = symbol;
+    pending_exchange.clear();
+    pending_symbol.clear();
+}
+
 void LayoutManager::reset_layout() {
     is_initialized = false;
     pending_exchange.clear();
