@@ -77,8 +77,8 @@ int test_archive_capture() {
     for(size_t i=0;i<RealtimeTradeHistory::max_trades;++i)
         recent.push_back({100,1,int64_t(2000+i),true});
     expect(!refresh_realtime_trade_tail(displayed,recent,1000,30000) &&
-        displayed.size()==2 && displayed.back().timestamp_ms==1001,
-        "rolling ring exhaustion cannot erase previously displayed tail");
+        displayed.size()==20001 && displayed[1].timestamp_ms==1001 && displayed.back().timestamp_ms==21999,
+        "rolling ring exhaustion retains displayed history and advances current trades");
     displayed={{100,1,22000,true}};
     recent={{100,2,22001,true},{100,2,22001,true},{100,3,22002,false}};
     expect(refresh_realtime_trade_tail(displayed,recent,22000,22001) && displayed.size()==3,

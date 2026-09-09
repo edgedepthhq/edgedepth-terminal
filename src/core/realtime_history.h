@@ -106,19 +106,26 @@ private:
     std::function<void(const Terminal::Trade*)> observer_;
 };
 
-// Replace a snapshot's live tail only when the recent ring still covers the
-// snapshot boundary. Otherwise retain the displayed tail until a fresh query
-// arrives; rebuilding from a truncated ring would erase already shown trades.
+// Keep observations already displayed before the recent ring's complete tail.
+// A retired boundary requires a new archive query, but must not freeze live
+// bubbles while storage catches up. The oldest timestamp in a full ring can
+// be partial; retain its displayed records rather than replacing them.
+inline bool realtime_trade_tail_retired(const std::deque<Terminal::Trade>& recent, int64_t cutoff) {
+    return !recent.empty() &&
+        ((recent.size() >= RealtimeTradeHistory::max_trades && recent.front().timestamp_ms > cutoff) ||
+         recent.back().timestamp_ms - RealtimeDepthHistory::retention_ms >= cutoff);
+}
 inline bool refresh_realtime_trade_tail(std::deque<Terminal::Trade>& displayed,
     const std::deque<Terminal::Trade>& recent, int64_t cutoff, int64_t clock) {
-    if (recent.size() >= RealtimeTradeHistory::max_trades &&
-        recent.front().timestamp_ms > cutoff) return false;
-    while (!displayed.empty() && displayed.back().timestamp_ms > cutoff)
+    const bool retired = realtime_trade_tail_retired(recent, cutoff);
+    const int64_t seam = retired ? std::max(cutoff, recent.front().timestamp_ms -
+        (recent.size() < RealtimeTradeHistory::max_trades ? 1 : 0)) : cutoff;
+    while (!displayed.empty() && displayed.back().timestamp_ms > seam)
         displayed.pop_back();
     for (const auto& trade : recent)
-        if (trade.timestamp_ms > cutoff && trade.timestamp_ms <= clock)
+        if (trade.timestamp_ms > seam && trade.timestamp_ms <= clock)
             displayed.push_back(trade);
-    return true;
+    return !retired;
 }
 
 // A bounded, as-of market scale shared by live, paused and replay rendering.

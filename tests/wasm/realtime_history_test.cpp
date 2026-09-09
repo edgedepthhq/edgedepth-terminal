@@ -32,6 +32,47 @@ int main() {
     view.build(observed.trades(),0,2000,1);
     expect(!view.grouped && view.count==100 && view.records[0].timestamp_ms==1000,"detail view restores individual records and original timestamps");
 
+    // Ten minutes at 100 executions/sec: count retirement precedes age
+    // retirement, while a deliberately stalled archive cutoff never moves.
+    RealtimeTradeHistory busy;
+    std::deque<Terminal::Trade> displayed;
+    bool compacted=false;
+    for (int second=0;second<600;++second) {
+        for(int i=0;i<100;++i) busy.append({100.0+(i%3),2.0,10000+second*1000+i,bool(i%2)});
+        refresh_realtime_trade_tail(displayed,busy.trades(),9999,10000+second*1000+999);
+        compacted=bound_realtime_trade_tail(displayed,busy.trades(),view) || compacted;
+        expect(displayed.size()<=40000,"stalled archive trade display stays bounded");
+        expect(displayed.back().timestamp_ms==10000+second*1000+99,"live bubbles keep advancing after retention boundaries");
+    }
+    double retained_qty=0,retained_notional=0;
+    int64_t previous_trade=0;
+    for(const auto& t:displayed) {
+        retained_qty+=t.qty;retained_notional+=t.price*t.qty;
+        expect(t.timestamp_ms>=previous_trade,"compacted tail stays chronological");previous_trade=t.timestamp_ms;
+    }
+    expect(compacted && std::abs(retained_qty-120000)<1e-6 && std::abs(retained_notional-12118800)<1e-5,
+        "bounded stalled view preserves all observed quantity and price-weighted notional");
+    const auto retained_size=displayed.size();
+    refresh_realtime_trade_tail(displayed,busy.trades(),9999,610000);
+    expect(displayed.size()==retained_size,"repeated stale-tail merge cannot duplicate executions");
+    std::deque<Terminal::Trade> sparse{{100,1,400000,true},{100,2,400001,true}};
+    displayed={{100,3,1000,true},{100,4,2000,true}};
+    expect(!refresh_realtime_trade_tail(displayed,sparse,1000,400001) && displayed.size()==4,
+        "time retirement below the count cap retains good history and the complete sparse tail");
+
+    std::deque<Terminal::Trade> partial;
+    partial.push_back({100,2,2000,true});
+    for(int i=1;i<20000;++i) partial.push_back({101,1,2000+i,false});
+    displayed={{100,2,2000,true},{100,2,2000,true},{100,2,2000,true}};
+    refresh_realtime_trade_tail(displayed,partial,1000,22000);
+    expect(displayed.size()==20002 && displayed[0].qty+displayed[1].qty+displayed[2].qty==6,
+        "a partial oldest timestamp cannot erase already displayed duplicate multiplicity");
+
+    expect(realtime_query_start_matches(true,1200,1000,100),"following clock can advance while a snapshot loads");
+    expect(!realtime_query_start_matches(true,1000,1500,100),"zoom out cannot accept a later-starting snapshot");
+    expect(!realtime_query_start_matches(false,1500,1000,100),"pan rejects an old range even at unchanged fidelity");
+    expect(realtime_query_start_matches(false,1100,1000,100),"one aligned-bin margin remains valid");
+
     const auto zoom_in = realtime_zoom(60000, 1, 0.1, true, false);
     const auto zoom_out = realtime_zoom(60000, -1, 0.1, true, false);
     expect(zoom_in.follow && zoom_in.span_ms < 60000, "zoom in retains follow and narrows time");

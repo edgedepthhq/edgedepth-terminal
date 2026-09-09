@@ -334,7 +334,8 @@ private:
     bool rt_history_view_ = false;
     uint64_t rt_archive_generation_ = 0;
     int64_t rt_query_from_ = 0, rt_query_to_ = 0, rt_query_step_ = 0;
-    int64_t rt_loaded_to_ = 0;
+    int64_t rt_loaded_to_ = 0, rt_loaded_step_ = 100;
+    bool rt_trade_tail_waiting_ = false;
     double rt_query_at_ = 0;
     int rt_query_multiplier_ = 5;
     void capture_realtime_archive();

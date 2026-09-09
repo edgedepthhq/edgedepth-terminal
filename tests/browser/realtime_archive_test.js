@@ -49,6 +49,34 @@ document.querySelector('#run').onclick=async()=>{
         check(times.join(',')==='3001,3501,5001,5501','late seed is queried before live depth with a preserved seam');
         check(messages.find(m=>m.type==='view').tradeCount===2,'seed and live trades both survive IndexedDB ordering');
         await send({type:'clear',id:'seeded'});
+        // A slow historical read must not block live durability or change its
+        // as-of cutoff. Delay only fixture decompression, not production code.
+        worker.terminate();
+        worker=make("const NativeDecompression=DecompressionStream;DecompressionStream=function(format){const delay=new TransformStream({async transform(chunk,c){await new Promise(r=>setTimeout(r,250));c.enqueue(chunk);}});return {writable:delay.writable,readable:delay.readable.pipeThrough(new NativeDecompression(format))};};");
+        await append('concurrent',[...depth(1001,2,1),...trade(1002)]);
+        messages=await new Promise((resolve,reject)=>{
+            const events=[];let acknowledgements=0;
+            const timeout=setTimeout(()=>reject(Error('Concurrent worker timeout')),10000);
+            worker.onmessage=e=>{events.push(e.data);if(e.data.type==='ack' && ++acknowledgements===2){clearTimeout(timeout);resolve(events);}};
+            worker.postMessage({type:'query',id:'concurrent',from:1000,to:1100,cutoff:1100,step:100,tick:1,request:17});
+            worker.postMessage({type:'append',id:'concurrent',buffer:new Float64Array([...depth(1201,4),...trade(1202)]).buffer});
+        });
+        check(messages.findIndex(m=>m.type==='ack' && !m.request)<messages.findIndex(m=>m.type==='view'),
+            'live append is durable before a delayed archive query completes');
+        view=messages.find(m=>m.type==='view');
+        check(view.tradeCount===1 && view.depthCount===1,'concurrent live writes cannot leak past the query cutoff');
+        messages=await query('concurrent',1000,1300,100);
+        check(messages.find(m=>m.type==='view').tradeCount===2,'next zoom query includes the newly captured trade');
+        messages=await new Promise((resolve,reject)=>{
+            const events=[];let acknowledgements=0;
+            const timeout=setTimeout(()=>reject(Error('Reset worker timeout')),10000);
+            worker.onmessage=e=>{events.push(e.data);if(e.data.type==='ack' && ++acknowledgements===2){clearTimeout(timeout);resolve(events);}};
+            worker.postMessage({type:'query',id:'concurrent',from:1000,to:1300,cutoff:1300,step:100,tick:1,request:18});
+            worker.postMessage({type:'clear',id:'concurrent'});
+        });
+        check(!messages.some(m=>m.type==='view' && m.buffer.byteLength),
+            'reset during a delayed query cannot publish old observations');
+        worker.terminate();worker=make();
         // Thirty minutes of 100ms, 1024-level books and 300 records/second.
         // Deliberately labelled synthetic; not a hosted-throughput claim.
         const t0=10000000, begin=performance.now(), timings=[];let rawBytes=0,status;

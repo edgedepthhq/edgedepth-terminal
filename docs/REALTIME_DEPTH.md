@@ -375,3 +375,27 @@ Grouped quantities include all volume consistently on both sides of the seam.
 Both isolated Release builds and focused RT/transport regressions pass. Tests
 cover ring exhaustion, duplicate multiplicity, replay cutoff and capture flush
 ordering. Local only; hosted acceptance still requires deployment.
+
+## RT live history under delayed queries (2026-09-10, local)
+
+Archive reads have a separate serial worker queue from capture. A query waits
+for earlier writes to become durable, while later appends can complete during
+its decompression. Reset discards in-flight results. The 256 MiB origin budget,
+2 MiB transport budget and single active query materialization remain bounded.
+
+A retired trade-ring boundary now preserves the displayed prefix and merges
+the complete current tail while requesting a replacement. It also detects
+five-minute time retirement below the count cap. A partial oldest timestamp
+cannot replace an already displayed complete timestamp group. Above 40,000
+display records, only the nonreplaceable prefix is compacted through the existing
+volume-weighted bubble aggregator; original archive records remain unchanged.
+Displayed depth-bin width is separate from pending query width, so navigation
+cannot rebuild retained observations on the next query's grid before it arrives.
+
+Focused regressions reproduce the old worker blockage and frozen trade tail.
+Ten-minute synthetic market-time tests preserve 60,000 trades' quantity and
+price-weighted notional through retirement and bounded compaction. Real IndexedDB
+checks cover concurrent appends, delayed queries, reset, exact quantities, gaps,
+30-minute capture and eviction. Production observation is recorded in the task
+handoff. This does not reconstruct the earlier missing-depth interval or prove
+its cause. Production deployment remains James's.

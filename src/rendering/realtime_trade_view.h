@@ -44,3 +44,19 @@ struct RealtimeTradeView {
         }
     }
 };
+
+// Bound a stalled archive view without discarding its observed volume. Only
+// compact the prefix before the replaceable live tail, so grouped records can
+// never overlap the next ring merge. Original executions remain in the archive.
+inline bool bound_realtime_trade_tail(std::deque<Terminal::Trade>& displayed,
+    const std::deque<Terminal::Trade>& recent, RealtimeTradeView& scratch) {
+    if (displayed.size() <= RealtimeTradeHistory::max_trades * 2 || recent.empty()) return false;
+    const int64_t seam = recent.front().timestamp_ms -
+        (recent.size() < RealtimeTradeHistory::max_trades ? 1 : 0);
+    scratch.build(displayed, displayed.front().timestamp_ms, seam, 0, true);
+    while (!displayed.empty() && displayed.front().timestamp_ms <= seam) displayed.pop_front();
+    std::sort(scratch.records.begin(), scratch.records.begin() + scratch.count,
+        [](const auto& a, const auto& b) { return a.timestamp_ms < b.timestamp_ms; });
+    displayed.insert(displayed.begin(), scratch.records.begin(), scratch.records.begin() + scratch.count);
+    return true;
+}

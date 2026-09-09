@@ -107,7 +107,11 @@ function archiveWorker() {
         await flush(s);s.seed=false; await status(s);
     }
     async function query(m) {
-        const s = state(m.id); await flush(s);
+        const s = sessions.get(m.id); // Earlier append acknowledgements are durable.
+        if (!s) {
+            postMessage({type:'view',id:m.id,request:m.request,step:m.step,depthCount:0,tradeCount:0,grouped:false,buffer:new ArrayBuffer(0)});
+            return;
+        }
         const rows = (await metadata(m.id)).filter(r=>r.max>=m.from-m.step && r.min<=Math.min(m.to,m.cutoff))
             .sort((a,b)=>Number(!!b.seed)-Number(!!a.seed) || a.seq-b.seq);
         const db = await database(), trades = [], tradeBins = new Map();
@@ -125,6 +129,7 @@ function archiveWorker() {
             previous=bin.b;
         }
         for (const row of rows) {
+            if (sessions.get(m.id)!==s) return;
             const packed = await request(db.transaction('data').objectStore('data').get(row.key));
             if (!packed) {flushBin();previous=-Infinity;continue;}
             const a = new Float64Array(await codec(packed,true));
@@ -167,17 +172,27 @@ function archiveWorker() {
         const visibleTrades=grouped ? [...tradeBins.values()].map(t=>[t[0],t[1]/t[2],t[2],t[3]]).sort((a,b)=>a[0]-b[0]) : trades;
         for (const t of visibleTrades) {out.set([2,t[0],6,t[1],t[2],t[3]],used);used+=6;}
         const buffer=out.buffer.slice(0,used*8);
+        if (sessions.get(m.id)!==s) return;
         postMessage({type:'view',id:m.id,request:m.request,step:m.step,depthCount,tradeCount,grouped,buffer},[buffer]);
     }
-    let chain=Promise.resolve();
+    // Capture stays ordered and durable, but decompression of a historical
+    // view must not hold up new observations. Queries have a separate serial
+    // lane and wait for the writes already queued when they were requested.
+    let chain=Promise.resolve(), queries=Promise.resolve();
     onmessage = e => {
         const m=e.data;
-        chain=chain.then(async()=>{
-            if (m.type==='append') await append(m);
-            else if (m.type==='query') await query(m);
-            else if (m.type==='clear') {sessions.delete(m.id);await remove(m.id);}
-        }).catch(error=>postMessage({type:'error',id:m.id,message:String(error.name || 'Error')+': '+error.message}))
-        .then(()=>postMessage({type:'ack',id:m.id,bytes:m.buffer ? m.buffer.byteLength:0,request:m.request || 0}));
+        const finish = promise => promise
+            .catch(error=>postMessage({type:'error',id:m.id,message:String(error.name || 'Error')+': '+error.message}))
+            .then(()=>postMessage({type:'ack',id:m.id,bytes:m.buffer ? m.buffer.byteLength:0,request:m.request || 0}));
+        if (m.type==='query') {
+            const captured=chain;
+            queries=finish(queries.then(()=>captured).then(()=>query(m)));
+        } else {
+            chain=finish(chain.then(async()=>{
+                if (m.type==='append') await append(m);
+                else if (m.type==='clear') {sessions.delete(m.id);await remove(m.id);}
+            }));
+        }
     };
 }
 const states=new Map(); let worker, inflight=0, pendingQueries=0, failed='';

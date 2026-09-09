@@ -37,6 +37,14 @@ inline bool realtime_view_has_live_edge(bool following, double right, int64_t cl
     return following || right >= double(clock);
 }
 
+// A following clock may move forward during a query. Widening the view may
+// not replace good history with a snapshot that starts later than requested.
+inline bool realtime_query_start_matches(bool following, int64_t desired_from,
+                                         int64_t queried_from, int64_t step) {
+    return following ? queried_from <= desired_from + step :
+        std::abs(desired_from - queried_from) <= step;
+}
+
 // Linked depth is a numeric ladder. Its fixed fidelity sets the price span;
 // neither history nor a volatile market may squeeze rows below the font height.
 struct RealtimePriceWindow {

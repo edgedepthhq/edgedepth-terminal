@@ -104,12 +104,13 @@ void ChartWidget::render_realtime_settings() {
             ImGui::Text("%s to %s", first, last);
         }
         if (rt_history_view_) ImGui::Text("History: %.1fs depth bins; %zu markers from %zu trades",
-            double(rt_query_step_)/1000, rt_archive_trades_.size(), a.view_trade_count);
+            double(rt_loaded_step_)/1000, rt_archive_trades_.size(), a.view_trade_count);
         if(!a.startup_status.empty()) {
             ImGui::TextWrapped("%s",a.startup_status.c_str());
             ImGui::TextWrapped("Startup depth: 500ms observations, up to 128 native levels per side. Trade coverage can be shorter during bursts. Current DOM uses live depth. Startup trades do not enter CVD or alerts.");
         }
         ImGui::TextUnformatted(a.error.empty() ? "Recording observed depth and received trades" : a.error.c_str());
+        if (rt_trade_tail_waiting_) ImGui::TextUnformatted("Refreshing older trades; current trades continue");
         if (a.dropped) ImGui::Text("Capture overload: %zu records missed; depth gaps preserved", a.dropped);
         if (ImGui::Button("Whole session")) { rt_span_ms_ = double(RealtimeArchive::target_ms) / 0.88; ctx_.candle_mgr().set_follow_live(true); }
         ImGui::SameLine();
@@ -128,6 +129,7 @@ void ChartWidget::on_rewind(int64_t) {
     rt_dom_frame_ = {};
     rt_auto_fit_ = {}; rt_price_window_ = {};
     rt_archive_samples_.clear(); rt_archive_trades_.clear();
+    rt_trade_tail_waiting_ = false;
     rt_history_view_ = false; rt_query_from_ = rt_query_to_ = rt_loaded_to_ = 0;
     rt_quote_ = {};
     if (rt_flow_) rt_flow_->reset();
@@ -443,7 +445,7 @@ void ChartWidget::capture_realtime_archive() {
 
 void ChartWidget::rebuild_realtime_view() {
     if (!rt_renderer_) return;
-    rt_renderer_->clear_realtime_view(rt_history_view_ ? rt_query_step_ : 100);
+    rt_renderer_->clear_realtime_view(rt_history_view_ ? rt_loaded_step_ : 100);
     rt_renderer_->set_observation_clock_ms(rt_clock_ms_);
     for (const auto& sample : realtime_samples()) {
         rt_prices_.clear();
@@ -472,6 +474,7 @@ void ChartWidget::update_realtime_archive_view() {
     const bool seeded = rt_archive_->startup_first>0 && from<rt_archive_->startup_end;
     const bool history = to > from && (seeded || trades_retired || to-from > 290000 || from < rt_clock_ms_ - 290000);
     if (!history) {
+        rt_trade_tail_waiting_ = false;
         int64_t discarded_step=100;
         rt_archive_->take_view(rt_archive_samples_, rt_archive_trades_, discarded_step);
         if (rt_history_view_) {
@@ -490,9 +493,8 @@ void ChartWidget::update_realtime_archive_view() {
     if (rt_archive_->take_view(received_samples, received_trades, received_step)) {
         // Navigation may have changed while a worker query was in flight.
         const bool tail_already_retired = realtime_live_edge() &&
-            recent_trades.size() >= RealtimeTradeHistory::max_trades &&
-            recent_trades.front().timestamp_ms > rt_query_to_;
-        if (tail_already_retired || step != rt_query_step_ || rt_query_multiplier_ != rt_bucket_multiplier_ || (!follow && std::abs(aligned-rt_query_from_)>step)) {
+            realtime_trade_tail_retired(recent_trades, rt_query_to_);
+        if (tail_already_retired || step != rt_query_step_ || rt_query_multiplier_ != rt_bucket_multiplier_ || !realtime_query_start_matches(follow, aligned, rt_query_from_, step)) {
             rt_archive_->view_trade_count = displayed_count;
             rt_archive_->view_trades_grouped = displayed_grouped;
             rt_query_from_ = 0;
@@ -501,7 +503,7 @@ void ChartWidget::update_realtime_archive_view() {
             rt_archive_samples_.swap(received_samples);
             rt_archive_trades_.swap(received_trades);
             rt_history_view_ = true;
-            rt_loaded_to_ = rt_query_to_; rt_query_step_ = received_step;
+            rt_loaded_to_ = rt_query_to_; rt_loaded_step_ = received_step;
             // Depth delivered while the query ran has already advanced rt_serial_.
             // Preserve that tail before rebuilding the GPU view.
             if (realtime_live_edge()) for (const auto& sample : rt_samples_)
@@ -518,9 +520,12 @@ void ChartWidget::update_realtime_archive_view() {
     if (realtime_live_edge() && rt_loaded_to_ > 0)
         tail_ready = refresh_realtime_trade_tail(rt_archive_trades_, recent_trades,
                                                 rt_loaded_to_, rt_clock_ms_);
+    rt_trade_tail_waiting_ = !tail_ready;
+    if (!tail_ready && bound_realtime_trade_tail(rt_archive_trades_, recent_trades, rt_trade_view_))
+        rt_archive_->view_trades_grouped = true;
     const double now = emscripten_get_now();
     if (!rt_archive_->loading && (!tail_ready || rt_query_from_==0 || step!=rt_query_step_ || rt_query_multiplier_!=rt_bucket_multiplier_ ||
-        (!follow && std::abs(aligned-rt_query_from_)>step) || (!rt_paused_ && to>rt_query_to_ && now-rt_query_at_>5000))) {
+        !realtime_query_start_matches(follow, aligned, rt_query_from_, step) || (!rt_paused_ && to>rt_query_to_ && now-rt_query_at_>5000))) {
         if (rt_archive_->query(aligned,to,rt_clock_ms_,step,tick_size_*rt_bucket_multiplier_)) {
             rt_query_from_=aligned;rt_query_to_=to;rt_query_step_=step;rt_query_at_=now;rt_query_multiplier_=rt_bucket_multiplier_;
         }
