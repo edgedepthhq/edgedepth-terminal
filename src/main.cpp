@@ -247,6 +247,9 @@ static void on_ws_message(const uint8_t* data, size_t len, WsLane lane) {
         }
     }
 
+    // An errored replay retains its frozen context until explicitly closed.
+    if (g_app.replay_mgr && g_app.replay_mgr->state() == ReplayManager::State::Error) return;
+
     // Binary protobuf path - route to replay or live context
     bool replay_active = g_app.replay_mgr && g_app.replay_mgr->is_active();
     bool has_replay_ctx = replay_active && g_app.replay_mgr->replay_context();

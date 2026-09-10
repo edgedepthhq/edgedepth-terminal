@@ -270,6 +270,15 @@ const Terminal::Orderbook* OrderbookManager::get_orderbook(const Terminal::Pair&
     return (it != orderbooks_.end()) ? &it->second.read_buf : nullptr;
 }
 
+bool OrderbookManager::realtime_ready(const Terminal::Pair& pair, int64_t clock_ms, int64_t required_ms) const {
+    const auto it = orderbooks_.find({pair.exchange, pair.symbol});
+    if (it == orderbooks_.end()) return false;
+    const auto& db = it->second;
+    std::lock_guard lock(db.write_mutex);
+    return realtime_transport_open_.load() && db.epoch == realtime_epoch_.load() &&
+        db.realtime.ready(clock_ms) && db.write_buf.timestamp_ms >= required_ms;
+}
+
 bool OrderbookManager::copy_realtime_since(const Terminal::Pair& pair, uint64_t serial,
     std::vector<RealtimeDepthHistory::SamplePtr>& out) const {
     out.clear();

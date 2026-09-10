@@ -247,6 +247,10 @@ int main() {
     auto* ask = seed.add_asks(); ask->set_price(101); ask->set_size(3);
     manager.apply_orderbook_snapshot_from_pb(pair, seed);
     expect(manager.copy_realtime_since(pair, 0, samples) && samples.size() == 1, "production snapshot records depth");
+    expect(manager.realtime_ready(pair, 10017), "seed is eligible at its actual observed time");
+    expect(!manager.realtime_ready(pair, 10016), "future depth cannot prime replay");
+    expect(!manager.realtime_ready(pair, 26000), "old seed cannot prime a later seek");
+    expect(!manager.realtime_ready(pair, 10317, 10317), "client waits for reconstruction already acknowledged on the JSON lane");
     pb::BookTickerUpdate quote;
     quote.set_timestamp_ms(99999); quote.set_best_bid(105); quote.set_best_bid_qty(10);
     manager.apply_book_ticker_from_pb(pair, quote);
@@ -276,9 +280,11 @@ int main() {
     delta.set_last_update_id(105); delta.set_previous_update_id(103);
     manager.apply_book_update_from_pb(pair, delta);
     expect(!manager.copy_realtime_since(pair, 0, samples) && samples.size() == 2, "legacy grace does not authorize RT gap carry");
+    expect(!manager.realtime_ready(pair, 10217), "legacy DOM ID cannot release a broken RT sequence");
     seed.set_timestamp_ms(10317); seed.set_last_update_id(106);
     manager.apply_orderbook_snapshot_from_pb(pair, seed);
     expect(manager.copy_realtime_since(pair, 0, samples) && samples.back()->segment_start, "production reseed restores RT");
+    expect(manager.realtime_ready(pair, 10317), "valid reseed restores readiness");
     manager.set_realtime_transport_open(false);
     manager.set_realtime_transport_open(true);
     expect(manager.realtime_quote(pair, 10040).timestamp_ms == 0, "reconnect cannot revive old native BBO");

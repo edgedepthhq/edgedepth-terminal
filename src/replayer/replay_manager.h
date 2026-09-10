@@ -238,9 +238,9 @@ public:
     void skip_backward_to(int64_t timestamp_ms);
 
     // ─── State Queries ───────────────────────────────────────────────────
-    bool is_active() const;     // Any state except Idle/Stopped/Error
+    bool is_active() const;     // Includes a retained, frozen error context.
     bool is_playing() const { return info_.state == State::Playing; }
-    bool is_paused() const { return info_.state == State::Paused; }
+    bool is_paused() const { return info_.state == State::Paused || info_.state == State::Error; }
     bool is_idle() const { return info_.state == State::Idle; }
     // Current playback speed multiplier (for the chart status chip).
     float current_speed() const { return SPEED_PRESETS[current_speed_preset_idx_]; }
@@ -582,14 +582,14 @@ public:
 private:
 
     // True once the replay context has real data: candle history populated and,
-    // when the effective session grant includes orderbook, an OB seed received.
+    // when the effective session grant includes orderbook, fresh synchronized RT depth.
     // Used by tick_buffering_gate to release the clock without waiting for a
     // stream the entitlement deliberately omitted.
+    bool orderbook_expected() const;
     bool context_primed() const;
-    // Safety valve: if data never arrives, release after this long in Buffering
-    // so a stalled/empty window doesn't hang the spinner forever. Sized to exceed
-    // the legitimate worst case - depth/DOM ticks come from TimescaleDB and can
-    // take ~10s to retrieve + buffer + send, while candles/heatmap are near-instant.
+    // Bound missing-data waits with an explicit error, never automatic playback.
+    bool server_depth_pending_ = false;
+    int64_t server_depth_asof_ms_ = 0;
     int64_t buffering_since_ms_ = 0;
     static constexpr int64_t BUFFERING_MAX_MS = 20000;
 

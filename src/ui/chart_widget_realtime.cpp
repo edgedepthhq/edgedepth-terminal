@@ -297,7 +297,10 @@ void ChartWidget::render_realtime() {
         }
         flush();
     }
-    if (rt_auto_bubbles_ && !rt_history_view_) rt_bubble_scale_.update(trades, rt_clock_ms_);
+    // Calibrate from original received records even while displaying an archive.
+    // Grouped archive markers are sums, not samples of individual trade sizes.
+    if (rt_auto_bubbles_) rt_bubble_scale_.update(
+        rt_paused_ ? rt_paused_trades_ : ctx_.candle_mgr().realtime_trades().trades(), rt_clock_ms_);
     const double minimum = rt_auto_bubbles_ ? rt_bubble_scale_.minimum() : rt_min_notional_;
     if (rt_bubbles_ && minimum > 0) {
         rt_trade_view_.build(trades, int64_t(limits.X.Min), std::min(rt_clock_ms_, int64_t(limits.X.Max)),

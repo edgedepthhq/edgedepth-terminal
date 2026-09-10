@@ -98,6 +98,8 @@ public:
 
     Terminal::BookTicker realtime_quote(const Terminal::Pair& pair, int64_t clock) const;
 
+    // Uses the strict RT chain under its owning write lock, never legacy DOM IDs.
+    bool realtime_ready(const Terminal::Pair& pair, int64_t clock_ms, int64_t required_ms = 0) const;
     bool copy_realtime_since(const Terminal::Pair& pair, uint64_t serial,
         std::vector<RealtimeDepthHistory::SamplePtr>& out) const;
     void interrupt_realtime() { realtime_epoch_.fetch_add(1); }

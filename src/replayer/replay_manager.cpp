@@ -768,7 +768,7 @@ void ReplayManager::resume() {
     // the clock forward by (pause_duration * speed).
     info_.last_status_update = now_ms();
     send_control("resume");
-    transition(State::Playing);
+    transition(context_primed() ? State::Playing : State::Buffering);
 }
 
 void ReplayManager::toggle_pause() {
@@ -1008,8 +1008,10 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
         pending_skip_needs_flush_ = false;
     }
 
-    // Check if buffer can handle this rewind purely client-side
-    bool buffer_hit = history_buffer_ && history_buffer_->contains(timestamp_ms) && replay_ctx_;
+    // Cached DOM snapshots have no verified sequence anchor. Depth-dependent
+    // rewinds must reconstruct from the source seed and complete delta chain.
+    const bool buffer_hit = !orderbook_expected() && history_buffer_ &&
+        history_buffer_->contains(timestamp_ms) && replay_ctx_;
 
     if (!buffer_hit) {
         // Out-of-buffer: full seek via backend. Gate all binary frames until
@@ -1070,7 +1072,7 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
     }
 
     // Try client-side replay from history buffer
-    if (history_buffer_ && history_buffer_->contains(timestamp_ms) && replay_ctx_) {
+    if (buffer_hit) {
         // OB restore callback - applies snapshot directly to the OB manager
         auto ob_restore = [this](const ReplayHistoryBuffer::OBSnapshot& snap) {
             if (!replay_ctx_ || !replay_ctx_->orderbooks) return;
@@ -1171,43 +1173,36 @@ bool ReplayManager::is_active() const {
         case State::Paused:
         case State::Seeking:
             return true;
+        case State::Error:
+            return replay_ctx_ != nullptr;
         default:
             return false;
     }
 }
 
+bool ReplayManager::orderbook_expected() const {
+    // Older servers and pack lifecycle frames omit streams. Preserve the safe
+    // default; explicit tape-only grants do not wait for excluded depth.
+    return info_.streams.empty() ||
+        std::find(info_.streams.begin(), info_.streams.end(), "orderbook") != info_.streams.end() ||
+        std::find(info_.streams.begin(), info_.streams.end(), "depth") != info_.streams.end();
+}
+
 bool ReplayManager::context_primed() const {
+    if (server_depth_pending_) return false;
     if (!replay_ctx_ || !replay_ctx_->candles) return false;
     if (replay_ctx_->candles->count() == 0) return false;       // chart still empty
 
-    // Old servers and local pack lifecycle frames may omit `streams`; preserve
-    // the safe historical default and require the book in that case. When the
-    // server supplies its effective grant, do not wait for a stream it excluded.
-    const bool orderbook_expected = info_.streams.empty() ||
-        std::find(info_.streams.begin(), info_.streams.end(), "orderbook") != info_.streams.end() ||
-        std::find(info_.streams.begin(), info_.streams.end(), "depth") != info_.streams.end();
-    if (!orderbook_expected) return true;
+    if (!orderbook_expected()) return true;
 
     if (!replay_ctx_->orderbooks) return false;
     if (info_.symbols.empty()) return false;
     const Terminal::Pair pair{"binancef", info_.symbols[0]};
-    const Terminal::Orderbook* ob = replay_ctx_->orderbooks->get_orderbook(pair);
-    if (!ob) return false;
-    // Renderable as soon as the chart has candles AND the OB seed has filled the
-    // book (last_update_id is set by the snapshot). The seed is a real full-depth
-    // snapshot, so the terminal shows true market state immediately; live depth
-    // deltas then animate it.
-    //
-    // We previously required >=5 INCREMENTAL deltas here. But the playback clock
-    // runs at 1x while in Buffering, so a window that starts in a depth-sparse
-    // stretch made the gate wait that many seconds of *market* time before the
-    // first frame - measured ~8-10s on btcusdt even though the seed + candles were
-    // ready in ~1s. delta_updates is still tracked (diagnostics / smoothness), it's
-    // just no longer the readiness bar.
-    return ob->last_update_id != 0;
+    return replay_ctx_->orderbooks->realtime_ready(pair, info_.current_time_ms, server_depth_asof_ms_);
 }
 
 void ReplayManager::tick_buffering_gate() {
+    if (info_.state == State::Playing && !context_primed()) transition(State::Buffering);
     if (info_.state != State::Buffering) {
         buffering_since_ms_ = 0;
         return;
@@ -1218,9 +1213,15 @@ void ReplayManager::tick_buffering_gate() {
     const bool primed   = context_primed();
     const bool timed_out = (now_ms() - buffering_since_ms_) > BUFFERING_MAX_MS;
 
-    // Release to Playing once the context has real data, OR after the safety
-    // window so an empty/stalled session can't hang the spinner forever.
-    if (primed || timed_out) {
+    // Timeout is an unavailable result, never permission to play an invalid book.
+    if (timed_out && !primed) {
+        send_control("pause");
+        info_.error_message = "Replay depth unavailable: recorded depth could not be synchronized. Reopen at another time or retry.";
+        transition(State::Error);
+        buffering_since_ms_ = 0;
+        return;
+    }
+    if (primed) {
         // Re-anchor the interpolation clock so the held wall-time doesn't get
         // counted as elapsed market time on the first Playing frame.
         info_.last_status_update = now_ms();
@@ -1285,6 +1286,17 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
     }
 
     if (type == "replay_status") {
+        if (data.contains("extra") && data["extra"].contains("depth_ready")) {
+            server_depth_pending_ = !data["extra"]["depth_ready"].get<bool>();
+            server_depth_asof_ms_ = data["extra"].value("depth_timestamp", int64_t(0));
+            if (server_depth_pending_ && info_.state == State::Playing) transition(State::Buffering);
+        }
+        if (data.value("status", "") == "error") {
+            const auto extra = data.value("extra", json::object());
+            info_.error_message = extra.value("message", "Replay data unavailable.");
+            transition(State::Error);
+            return true;
+        }
         // While seeking (scrubber drag), ignore status updates entirely.
         if (info_.state == State::Seeking) {
             return true;
@@ -1382,7 +1394,7 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
             if (status == "paused") {
                 transition(State::Paused);
             } else if (status == "playing") {
-                transition(State::Playing);
+                transition(context_primed() ? State::Playing : State::Buffering);
             }
         }
         return true;
@@ -1442,10 +1454,9 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
             }
         }
 
-        // Restore playback state. The backend auto-resumes after seek,
-        // so transition back to Playing (or stay Paused if we were paused).
+        // Seek acknowledgement releases frame delivery, not depth readiness.
         if (info_.state == State::Seeking) {
-            transition(State::Playing);
+            transition(State::Buffering);
         }
         return true;
     }
@@ -1592,8 +1603,12 @@ void ReplayManager::transition(State new_state) {
     const auto& boot = EducationBoot::instance();
     const bool retain_historical_frame =
         new_state == State::Stopped && (boot.is_event() || boot.is_lesson());
-    if ((new_state == State::Stopped && !retain_historical_frame) ||
-        new_state == State::Error) {
+    if (new_state == State::Error) {
+        // Keep the failed replay isolated and frozen until Close replay. Never
+        // replace a recording gap with a live chart behind an error notice.
+        transport_interrupted_ = true;
+    }
+    if (new_state == State::Stopped && !retain_historical_frame) {
         LayoutManager::bottom_reserve = 0.0f;
         destroy_replay_data_context();
     }
@@ -1609,6 +1624,9 @@ void ReplayManager::reset() {
     pack_mode_ = false;
     LayoutManager::bottom_reserve = 0.0f;
     info_ = SessionInfo{};
+    server_depth_pending_ = false;
+    server_depth_asof_ms_ = 0;
+    buffering_since_ms_ = 0;
     transport_interrupted_ = false;
     pending_ = PendingRequest{};
     scrubber_dragging_ = false;
@@ -2561,8 +2579,8 @@ void ReplayManager::render_control_bar() {
         return;
     }
 
-    // Show stopped/error states briefly (3 seconds) then auto-dismiss
-    if (info_.state == State::Stopped || info_.state == State::Error) {
+    // Completed playback dismisses; errors remain until explicitly closed.
+    if (info_.state == State::Stopped) {
         int64_t elapsed = now_ms() - info_.last_status_update;
         if (info_.last_status_update == 0) {
             info_.last_status_update = now_ms();
@@ -2603,6 +2621,17 @@ void ReplayManager::render_control_bar() {
         // border-top
         dl->AddLine(ImVec2(wp.x, wp.y + 0.5f), ImVec2(wp.x + ww, wp.y + 0.5f),
                     tok(Theme::Tokens::BD2), 1.0f);
+
+        if (info_.state == State::Error) {
+            ImGui::SetCursorPosY(12);
+            if (ImGui::Button("Close replay")) { stop(); reset(); }
+            ImGui::SameLine();
+            ImGui::TextWrapped("%s", info_.error_message.c_str());
+            ImGui::End();
+            ImGui::PopStyleColor();
+            ImGui::PopStyleVar(3);
+            return;
+        }
 
         // ── Measure the right-aligned group (speeds + buffer + close) so the
         //    scrubber can fill the gap and the group sits flush at the right edge.

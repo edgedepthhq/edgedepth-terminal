@@ -29,6 +29,12 @@ public:
     void seed() { if (!valid_) segment_start_ = true; valid_ = true; first_delta_ = true; }
     void interrupt() { valid_ = false; }
     bool valid() const { return valid_; }
+    bool ready(int64_t clock_ms) const {
+        const auto end = std::upper_bound(samples_.begin(), samples_.end(), clock_ms,
+            [](int64_t clock, const SamplePtr& sample) { return clock < sample->timestamp_ms; });
+        return valid_ && end != samples_.begin() &&
+            clock_ms - (*std::prev(end))->timestamp_ms <= 15000;
+    }
     void check_delta(int64_t prior, int64_t first, int64_t last, int64_t previous) {
         if (!valid_ || last <= prior) return;
         const bool bridge = first_delta_ && first > 0 && first <= prior + 1 && last >= prior;

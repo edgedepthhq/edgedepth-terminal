@@ -310,7 +310,25 @@ int main() {
     r.sync_gpu_from_timeline();
     assert(r.realtime_normalization(0, 1000) == peak);
     r.recalibrate_realtime_colors();
-    assert(r.realtime_normalization(100, 102) == 900000);
+    assert(r.realtime_normalization(100, 102) == 70); // Brief wall does not dominate recalibration.
+    // A persistent wall occupies more than 2% of a narrow grouped view.
+    // It must stay large without turning ordinary 5-25M rows nearly black.
+    r.clear(); r.configure_realtime(1); r.set_bucket_multiplier(1);
+    std::unordered_map<double, float> wall_book;
+    for (int i = 0; i < 40; ++i) wall_book[100 + i] = (5 + i % 21) * 1000000.0f;
+    wall_book[120] = 205300000;
+    for (int i = 0; i < 64; ++i)
+        r.finalize_column(epoch + i * 100, wall_book, i == 0, 120);
+    r.set_observation_clock_ms(epoch + 6500);
+    r.sync_gpu_from_timeline();
+    const auto wall_peak = r.realtime_normalization(100, 140);
+    assert(wall_peak >= 20000000 && wall_peak <= 25000000);
+    assert(r.get_value_at_price_and_time(120.5, epoch + 3000) == 205300000);
+    r.set_observation_clock_ms(epoch + 7000);
+    wall_book[120] = 500000000;
+    r.finalize_column(epoch + 6900, wall_book, false, 120);
+    r.sync_gpu_from_timeline();
+    assert(r.realtime_normalization(100, 140) == wall_peak);
     // Surviving columns must preserve both metadata and uploaded values across
     // direct arrivals, rebuilds and retirement of their original predecessor.
     for (int mult : {1, 2, 5, 10, 20}) {

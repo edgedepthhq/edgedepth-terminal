@@ -880,7 +880,7 @@ void ShaderHeatmapRenderer::mark_dirty() {
 
 // Sample at most 64 eligible columns and 1024 rows per column. Normalizing
 // grouped visible rows prevents a distant wall or price grouping from washing
-// out the active market. The 98th percentile leaves only the strongest 2 percent
+// out the active market. The 90th percentile leaves the strongest 10 percent
 // at the ramp ceiling. Original quantities and historical rendering stay intact.
 float ShaderHeatmapRenderer::realtime_normalization(double price_min, double price_max) {
     if (replay_cutoff_ms_ < realtime_peak_clock_ms_) realtime_peak_ = 0;
@@ -906,7 +906,8 @@ float ShaderHeatmapRenderer::realtime_normalization(double price_min, double pri
         }
     }
     if (!values.empty()) {
-        const size_t index = std::min(values.size() - 1, values.size() * 98 / 100);
+        const size_t index = values.size() < 10 ? values.size() - 1 :
+            (values.size() - 1) * 90 / 100;
         std::nth_element(values.begin(), values.begin() + index, values.end());
         realtime_peak_ = values[index];
     }
