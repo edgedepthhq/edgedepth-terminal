@@ -106,7 +106,7 @@ DOMWidget::DOMWidget(const Terminal::Pair& pair, const AppContext& ctx,
     : pair_(pair)
     , ctx_(ctx)
     , stream_key_{pair, Terminal::Stream::Orderbook, 0}
-    , title_(std::string("DOM · ") + pair.symbol + " · " + widget_venue_label(pair.exchange) + "###dom_" + pair.exchange + "_" + pair.symbol)
+    , title_(std::string("     DOM  ") + widget_symbol_label(pair.symbol) + "###dom_" + pair.exchange + "_" + pair.symbol)
     , tick_size_(tick_size)
     , levels_per_side_(levels_per_side)
     , fmt_(SymbolRegistry::instance().get_formatter(pair.exchange, pair.symbol))
@@ -399,16 +399,22 @@ void DOMWidget::render() {
         return;
     }
 
-    ImGui::Checkbox("Link RT", &link_rt_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Shares the matching RT chart's depth, trade-flow clock and price positions. Rows use heatmap fidelity with readable numbers. Choose coarser fidelity for a wider price range. Turn off for independent centering and reset controls.");
+    if (rt_frame_) {
+        ImGui::Checkbox("Follow RT chart", &link_rt_);
+        if (ImGui::IsItemHovered()) Theme::tooltip("Keep this order book aligned with the matching real-time chart. Turn off to scroll and center it independently.");
+    }
     if (link_rt_ && rt_frame_) {
+        ImGui::PushFont(Theme::Fonts::mono_sm());
+        const float min_width = ImGui::CalcTextSize("000000.000").x +
+                                5 * ImGui::CalcTextSize("+0000").x + 52;
+        ImGui::SetNextWindowContentSize(ImVec2(std::max(min_width, ImGui::GetContentRegionAvail().x), 0));
+        ImGui::BeginChild("##linked_book", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
         render_linked_ladder(*rt_frame_);
+        ImGui::EndChild();
+        ImGui::PopFont();
         ImGui::End();
         return;
     }
-    ImGui::TextColored(Theme::Tokens::TX2, "%s / independent%s",
-        ctx_.replay_mgr().is_active() ? (ctx_.replay_mgr().is_paused() ? "Replay paused" : "Replay") : "Live",
-        link_rt_ ? " (no matching RT chart)" : "");
     const Terminal::Orderbook* ob = ctx_.ob_mgr().get_orderbook(pair_);
     if (!ob || !ob->snapshot || ob->asks.empty() || ob->bids.empty()) {
         ImGui::PushFont(Theme::Fonts::ui());
@@ -432,140 +438,52 @@ void DOMWidget::render() {
 
 void DOMWidget::render_controls() {
     using namespace Theme;
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 org = ImGui::GetCursorScreenPos();
-    const float ww = ImGui::GetContentRegionAvail().x;
-    const float PADX = 14.0f, TIER = 30.0f, GAPV = 9.0f;
-    const float block_h = 12.0f + TIER + GAPV + TIER + 12.0f;   // pad 12 : two 30 tiers : gap 9
-
-    dl->AddRectFilled(org, ImVec2(org.x + ww, org.y + block_h), u32(Tokens::PANEL));
-    dl->AddLine(ImVec2(org.x, org.y + block_h - 0.5f), ImVec2(org.x + ww, org.y + block_h - 0.5f),
-                u32(Tokens::BD1), 1.0f);
-
-    // v2 segmented group: optional leading label cell (bg-2) + option cells split
-    // by 1px dividers; selected option = accent-soft fill + accent-text. Returns the
-    // group's total width; out_clk = clicked option index, or -1.
-    auto seg_group = [&](const char* id, const char* label, const char* const* opts, int n,
-                         int active, float x, float y, int& out_clk) -> float {
-        const float H = TIER;
-        out_clk = -1;
-        float lbl_w = 0.0f;
-        if (label && label[0]) {
-            ImGui::PushFont(Fonts::label());
-            lbl_w = ImGui::CalcTextSize(label).x + 18.0f;
-            ImGui::PopFont();
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(9, 5));
+    if (choice_button("Auto center", auto_center_)) {
+        auto_center_ = !auto_center_;
+        if (auto_center_) scroll_offset_ = 0;
+    }
+    ImGui::SameLine();
+    char settings_label[64];
+    const auto reset_mode = trade_accumulator_.reset_mode();
+    const int64_t interval = trade_accumulator_.reset_interval_sec();
+    const char* flow = reset_mode == AccumulatorResetMode::Manual ? "Manual" :
+        reset_mode == AccumulatorResetMode::Session ? "Session" :
+        interval <= 300 ? "5m" : interval <= 900 ? "15m" : "1h";
+    snprintf(settings_label, sizeof(settings_label), "%s / %s  Settings", display_usd_ ? "USD" : "Coin", flow);
+    if (ImGui::Button(settings_label)) ImGui::OpenPopup("##book_settings");
+    ImGui::PopStyleVar();
+    if (Theme::begin_popup("##book_settings")) {
+        section_label("PRICE GROUPING");
+        const int multipliers[] = {1, 10, 100};
+        for (int i = 0; i < 3; ++i) {
+            if (i) ImGui::SameLine();
+            char label[32];
+            snprintf(label, sizeof(label), fmt_.price_fmt, tick_size_ * multipliers[i]);
+            if (choice_button(label, group_mult_ == multipliers[i])) {
+                group_mult_ = multipliers[i]; auto_center_ = true; scroll_offset_ = 0;
+            }
         }
-        float opt_w[8]; float total = lbl_w;
-        ImGui::PushFont(Fonts::mono_sm());
-        for (int i = 0; i < n && i < 8; ++i) { opt_w[i] = ImGui::CalcTextSize(opts[i]).x + 16.0f; total += opt_w[i]; }
-        ImGui::PopFont();
-
-        dl->AddRectFilled(ImVec2(x, y), ImVec2(x + total, y + H), u32(Tokens::PANEL), 0.0f);
-        if (lbl_w > 0.0f) {
-            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + lbl_w, y + H), u32(Tokens::ELEV), Radius::R2);
-            ImGui::PushFont(Fonts::label());
-            dl->AddText(ImVec2(x + 9.0f, y + (H - ImGui::GetFontSize()) * 0.5f), u32(Tokens::TX3), label);
-            ImGui::PopFont();
+        section_label("DISPLAY UNITS");
+        if (choice_button("Coin", !display_usd_)) display_usd_ = false;
+        ImGui::SameLine();
+        if (choice_button("USD", display_usd_)) display_usd_ = true;
+        section_label("CUMULATIVE FLOW");
+        const auto mode = trade_accumulator_.reset_mode();
+        int selection = mode == AccumulatorResetMode::Manual ? 0 :
+            mode == AccumulatorResetMode::Session ? 4 :
+            trade_accumulator_.reset_interval_sec() <= 300 ? 1 :
+            trade_accumulator_.reset_interval_sec() <= 900 ? 2 : 3;
+        ImGui::SetNextItemWidth(240);
+        if (ImGui::Combo("##flow_window", &selection, "Manual\0Every 5 minutes\0Every 15 minutes\0Every hour\0Session\0")) {
+            if (selection == 0) trade_accumulator_.set_reset_mode(AccumulatorResetMode::Manual);
+            else if (selection == 4) trade_accumulator_.set_reset_mode(AccumulatorResetMode::Session);
+            else trade_accumulator_.set_reset_mode(AccumulatorResetMode::Periodic,
+                selection == 1 ? ResetPresets::FIVE_MIN : selection == 2 ? ResetPresets::FIFTEEN_MIN : ResetPresets::ONE_HOUR);
         }
-        float ox = x + lbl_w;
-        for (int i = 0; i < n && i < 8; ++i) {
-            char cid[24]; snprintf(cid, sizeof(cid), "##%s%d", id, i);
-            ImGui::SetCursorScreenPos(ImVec2(ox, y));
-            const bool clk = ImGui::InvisibleButton(cid, ImVec2(opt_w[i], H));
-            const bool hov = ImGui::IsItemHovered();
-            const bool on  = (i == active);
-            if (on) dl->AddRectFilled(ImVec2(ox + 1.0f, y + 1.0f), ImVec2(ox + opt_w[i] - 1.0f, y + H - 1.0f),
-                                      u32(Tokens::ELEV));
-            else if (i > 0) dl->AddLine(ImVec2(ox, y + 6.0f), ImVec2(ox, y + H - 6.0f), u32(Tokens::BD1), 1.0f);
-            ImGui::PushFont(Fonts::mono_sm());
-            const float tw = ImGui::CalcTextSize(opts[i]).x;
-            dl->AddText(ImVec2(ox + (opt_w[i] - tw) * 0.5f, y + (H - ImGui::GetFontSize()) * 0.5f),
-                        u32((on || hov) ? Tokens::TX1 : Tokens::TX2), opts[i]);
-            ImGui::PopFont();
-            if (clk) out_clk = i;
-            ox += opt_w[i];
-        }
-        dl->AddRect(ImVec2(x, y), ImVec2(x + total, y + H), u32(Tokens::BD2), 0.0f, 0, 1.0f);
-        return total;
-    };
-
-    int clk = -1;
-
-    // Tier 1: TICK aggregation (labels = the coin's tick x 1/10/100) + UNIT (USD/COIN).
-    const float y1 = org.y + 12.0f;
-    float x = org.x + PADX;
-    const int kMults[3] = {1, 10, 100};
-    char t0[24], t1[24], t2[24];
-    snprintf(t0, sizeof(t0), fmt_.price_fmt, tick_size_ * 1.0);
-    snprintf(t1, sizeof(t1), fmt_.price_fmt, tick_size_ * 10.0);
-    snprintf(t2, sizeof(t2), fmt_.price_fmt, tick_size_ * 100.0);
-    const char* tick_opts[3] = { t0, t1, t2 };
-    const int tick_active = (group_mult_ == 1) ? 0 : (group_mult_ == 10 ? 1 : 2);
-    x += seg_group("tk", "", tick_opts, 3, tick_active, x, y1, clk) + 9.0f;
-    if (clk >= 0 && group_mult_ != kMults[clk]) { group_mult_ = kMults[clk]; auto_center_ = true; scroll_offset_ = 0; }
-
-    const char* unit_opts[2] = { "USD", "COIN" };
-    seg_group("un", "", unit_opts, 2, display_usd_ ? 0 : 1, x, y1, clk);
-    if (clk == 0) display_usd_ = true; else if (clk == 1) display_usd_ = false;
-
-    // Tier 2: Auto (auto-center toggle) / Reset (clear cumulative), + a right-aligned
-    // CUMULATIVE chip and the flow-window readout (click to change the window).
-    const float y2 = y1 + TIER + GAPV;
-    x = org.x + PADX;
-    const char* ar_opts[2] = { "Auto", "Reset" };
-    seg_group("ar", "", ar_opts, 2, auto_center_ ? 0 : -1, x, y2, clk);
-    if (clk == 0) { auto_center_ = !auto_center_; if (auto_center_) scroll_offset_ = 0; }
-    else if (clk == 1) trade_accumulator_.reset();
-
-    const auto mode = trade_accumulator_.reset_mode();
-    int mode_idx = 0;
-    if (mode == AccumulatorResetMode::Manual)       mode_idx = 0;
-    else if (mode == AccumulatorResetMode::Session) mode_idx = 4;
-    else { const int64_t sec = trade_accumulator_.reset_interval_sec();
-           mode_idx = (sec <= 300) ? 1 : (sec <= 900 ? 2 : 3); }
-    static const char* kWin[5] = { "MANUAL", "5M", "15M", "1H", "SESSION" };
-    char flow_buf[40]; snprintf(flow_buf, sizeof(flow_buf), "%s FLOW", kWin[mode_idx]);
-    ImGui::PushFont(Fonts::label());
-    const float flow_w = ImGui::CalcTextSize(flow_buf).x;
-    const float cum_tw = ImGui::CalcTextSize("CUMULATIVE").x;
-    ImGui::PopFont();
-    const float cum_w = cum_tw + 16.0f;
-    const float chip_y = y2 + (TIER - 22.0f) * 0.5f;
-
-    float rx = org.x + ww - PADX - flow_w;
-    ImGui::PushFont(Fonts::label());
-    dl->AddText(ImVec2(rx, y2 + (TIER - ImGui::GetFontSize()) * 0.5f), u32(Tokens::TX3), flow_buf);
-    ImGui::PopFont();
-    ImGui::SetCursorScreenPos(ImVec2(rx, y2));
-    ImGui::InvisibleButton("##dom_flow", ImVec2(flow_w, TIER));
-    if (ImGui::IsItemClicked(ImGuiMouseButton_Left) || ImGui::IsItemClicked(ImGuiMouseButton_Right))
-        ImGui::OpenPopup("dom_flow_window");
-    if (ImGui::IsItemHovered()) Theme::tooltip("Click to change the cumulative-flow window");
-
-    rx -= 8.0f + cum_w;
-    dl->AddRect(ImVec2(rx, chip_y), ImVec2(rx + cum_w, chip_y + 22.0f), u32(Tokens::BD2), Radius::R1, 0, 1.0f);
-    ImGui::PushFont(Fonts::label());
-    dl->AddText(ImVec2(rx + (cum_w - cum_tw) * 0.5f, chip_y + (22.0f - ImGui::GetFontSize()) * 0.5f),
-                u32(Tokens::TX3), "CUMULATIVE");
-    ImGui::PopFont();
-
-    if (ImGui::BeginPopup("dom_flow_window")) {
-        if (ImGui::MenuItem("Manual",  nullptr, mode_idx == 0))
-            trade_accumulator_.set_reset_mode(AccumulatorResetMode::Manual);
-        if (ImGui::MenuItem("5m",      nullptr, mode_idx == 1))
-            trade_accumulator_.set_reset_mode(AccumulatorResetMode::Periodic, ResetPresets::FIVE_MIN);
-        if (ImGui::MenuItem("15m",     nullptr, mode_idx == 2))
-            trade_accumulator_.set_reset_mode(AccumulatorResetMode::Periodic, ResetPresets::FIFTEEN_MIN);
-        if (ImGui::MenuItem("1h",      nullptr, mode_idx == 3))
-            trade_accumulator_.set_reset_mode(AccumulatorResetMode::Periodic, ResetPresets::ONE_HOUR);
-        if (ImGui::MenuItem("Session", nullptr, mode_idx == 4))
-            trade_accumulator_.set_reset_mode(AccumulatorResetMode::Session);
+        if (ImGui::Button("Reset accumulated flow")) trade_accumulator_.reset();
         ImGui::EndPopup();
     }
-
-    // Consume the fixed block so the ladder table begins directly below it.
-    ImGui::SetCursorScreenPos(org);
-    ImGui::Dummy(ImVec2(ww, block_h));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -580,11 +498,18 @@ void DOMWidget::render_ladder(const Terminal::Orderbook& ob) {
     ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(6.0f, pad_y));
 
     const int num_columns = show_trade_columns_ ? 6 : 3;
-    const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_NoHostExtendX;
+    const ImGuiTableFlags flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX |
+                                 ImGuiTableFlags_NoHostExtendX;
+    char measured_price[32];
+    fmt_.format_price(measured_price, sizeof(measured_price), ob.last_price);
+    const float number_w = ImGui::CalcTextSize("+00.000").x;
+    const float inner_width = std::max(
+        ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ScrollbarSize,
+        ImGui::CalcTextSize(measured_price).x + 24 + (num_columns - 1) * (number_w + 12));
 
     // Reserve a fixed band at the bottom for the book-imbalance meter (drawn after).
     const ImVec2 tbl_size(0.0f, std::max(60.0f, ImGui::GetContentRegionAvail().y));
-    if (!ImGui::BeginTable("DOMTable", num_columns, flags, tbl_size)) {
+    if (!ImGui::BeginTable("DOMTable", num_columns, flags, tbl_size, inner_width)) {
         ImGui::PopStyleVar();
         ImGui::PopFont();
         return;
@@ -592,13 +517,16 @@ void DOMWidget::render_ladder(const Terminal::Orderbook& ob) {
 
     // Column grid (design: 44px · 1fr · 58px · 1fr · 44px · 42px, scaled to font)
     if (show_trade_columns_)
-        ImGui::TableSetupColumn("BUYS", ImGuiTableColumnFlags_WidthFixed, 46.0f);
+        ImGui::TableSetupColumn("BUYS", ImGuiTableColumnFlags_WidthFixed, number_w);
     ImGui::TableSetupColumn("BIDS",  ImGuiTableColumnFlags_WidthStretch, 1.0f);
-    ImGui::TableSetupColumn("PRICE", ImGuiTableColumnFlags_WidthFixed, 62.0f);
+    char price_label[32];
+    fmt_.format_price(price_label, sizeof(price_label), ob.last_price);
+    ImGui::TableSetupColumn("PRICE", ImGuiTableColumnFlags_WidthFixed,
+                            ImGui::CalcTextSize(price_label).x + 12);
     ImGui::TableSetupColumn("ASKS",  ImGuiTableColumnFlags_WidthStretch, 1.0f);
     if (show_trade_columns_) {
-        ImGui::TableSetupColumn("SELLS", ImGuiTableColumnFlags_WidthFixed, 46.0f);
-        ImGui::TableSetupColumn("DELTA", ImGuiTableColumnFlags_WidthFixed, 46.0f);
+        ImGui::TableSetupColumn("SELLS", ImGuiTableColumnFlags_WidthFixed, number_w);
+        ImGui::TableSetupColumn("DELTA", ImGuiTableColumnFlags_WidthFixed, number_w);
     }
     ImGui::TableSetupScrollFreeze(0, 1);
 
@@ -623,7 +551,7 @@ void DOMWidget::render_ladder(const Terminal::Orderbook& ob) {
         head("ASKS", 0, false);
         if (show_trade_columns_) {
             head("SELLS", 2, false);
-            head("\u0394", 2, true);  // Δ - JetBrains Mono carries Greek
+            head("DELTA", 2, false);
         }
         ImGui::PopStyleColor();
     }
@@ -640,6 +568,7 @@ void DOMWidget::render_ladder(const Terminal::Orderbook& ob) {
 
         // ── Current-price row ──
         render_current_row(ob, dl, pad_y);
+        if (auto_center_) ImGui::SetScrollHereY(0.5f);
 
         // ── Bid levels (bottom, highest bid first) ──
         for (int i = 0; i < static_cast<int>(levels_per_side_); i++) {
@@ -838,7 +767,6 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
         ImGui::TextWrapped("RT chart is not visible. Show it to align depth.");
         return;
     }
-    ImGui::SameLine();
     ImGui::TextColored(Theme::Tokens::TX2, "%s%s",
         frame.replay ? "Replay" : "Live", frame.paused ? " paused" : "");
     ImGui::SameLine();
@@ -932,12 +860,14 @@ void DOMWidget::render_linked_ladder(const RealtimeDOMFrame& frame) {
     }
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const char* names[] = {"BUYS", "BIDS", "PRICE", "ASKS", "SELLS", "DELTA"};
+    ImGui::PushFont(Theme::Fonts::label());
     for (int c = 0; c < 6; ++c) {
         dl->PushClipRect(ImVec2(edges[c], org.y), ImVec2(edges[c+1], bottom), true);
         dl->AddText(ImVec2((edges[c] + edges[c+1] - ImGui::CalcTextSize(names[c]).x) * 0.5f, org.y),
             Theme::u32(Theme::Tokens::TX2), names[c]);
         dl->PopClipRect();
     }
+    ImGui::PopFont();
     const float row_h = float(step / (frame.price_max - frame.price_min) * (frame.bottom - frame.top));
     char grouping[96]; snprintf(grouping, sizeof(grouping), "%s%d ticks / row; prices are centers", frame.automatic_grouping ? "Auto: " : "", frame.bucket_ticks);
     dl->AddText(ImVec2(org.x, org.y + text_h + 3), Theme::u32(Theme::Tokens::TX2), grouping);

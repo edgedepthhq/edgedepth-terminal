@@ -7,6 +7,28 @@
 namespace workspace {
 inline constexpr size_t max_bytes = 262144;
 inline constexpr size_t max_named = 20;
+
+inline void remap_window_title(std::string& ini, const std::string& old_title,
+                              const std::string& new_title) {
+    if (old_title.empty()) return;
+    const auto old_id = old_title.rfind("###"), new_id = new_title.rfind("###");
+    const std::string target = "[Window][" + new_title.substr(
+        new_id == std::string::npos ? 0 : new_id + 3) + "]";
+    const auto replace_header = [&](const std::string& title) {
+        const std::string header = "[Window][" + title + "]";
+        if (header == target) return;
+        for (size_t pos = 0; (pos = ini.find(header, pos)) != std::string::npos; pos += target.size())
+            ini.replace(pos, header.size(), target);
+    };
+    // Current ImGui writes only the ID after ###. Also accept older exports
+    // retaining the marker and verbose exports retaining the visible title.
+    replace_header(old_title);
+    if (old_id != std::string::npos) {
+        replace_header(old_title.substr(old_id));
+        replace_header(old_title.substr(old_id + 3));
+    }
+}
+
 inline bool valid_document(const Json& j) {
     if (!j.is_object()) return false;
     auto version = j.find("version"), widgets = j.find("widgets"), ini = j.find("layout");

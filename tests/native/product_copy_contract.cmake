@@ -6,6 +6,9 @@ set(product_surfaces
 
 set(retired_offer_copy
     "last 30 days"
+    "30-DAY REPLAY"
+    "every layer"
+    "Full archive, replay layers, lessons, scanner and alerts"
     "30-day tick replay"
     "Unlock 30-day replay"
     "550+"

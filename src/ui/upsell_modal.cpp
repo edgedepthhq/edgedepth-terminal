@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include "upsell_modal.h"
+#include <algorithm>
 
 #include "imgui.h"
 #include <cstdio>
@@ -70,16 +71,16 @@ static const char* default_subline(UpsellModal::Trigger t, bool login) {
     if (login) return "Replay a full Free day from any account, then review Pro and Research when you need deeper history.";
     switch (t) {
         case T::Range:
-        case T::Preset:     return "Free replays one archived day (shown below). Anything newer or older is Pro.";
+        case T::Preset:     return "Free replays one archived day (shown below). Pro adds a rolling replay window; Research reaches older available recordings.";
         case T::Speed:      return "Free replay plays up to 2\xc3\x97. Pro plays up to 4\xc3\x97.";
         case T::Symbol:     return "Free replay covers 6 majors. Pro replays every recorded pair.";
-        case T::Layer:      return "The Liquidation Field is free. Levels, Observed and per-tier LIQ-LEV isolation are Pro layers.";
+        case T::Layer:      return "Basic modeled heatmaps are free. Pro adds Hyperliquid position levels, reported liquidations and leverage filters.";
         case T::Events:     return "This archived event is outside the free recent window.";
         case T::Lesson:     return "This lesson is available to Pro subscribers.";
         case T::Daily:      return "You've used all 6 free replays for today - they reset at 00:00 UTC.";
         case T::ServerTier: return "That replay is outside your free window.";
         case T::Research:   return "Reading the record at a past minute is a Pro feature. The live read (this minute) stays free.";
-        default:            return "A Free replay day is included. Pro unlocks deeper replay, every recorded pair and every layer.";
+        default:            return "A Free replay day is included. Pro adds live RT, sub-minute candles and deeper replay.";
     }
 }
 
@@ -87,7 +88,7 @@ static const char* modal_headline(UpsellModal::Trigger t, bool login) {
     if (login) return "Log in to replay";
     if (t == UpsellModal::Trigger::Research) return "Investigate past moments with Pro";
     if (t == UpsellModal::Trigger::Range) return "Replay this exact moment";
-    return "Unlock more of the recorded market";
+    return "Unlock advanced terminal tools";
 }
 
 void UpsellModal::open(Trigger t, const char* detail, const char* layer) {
@@ -126,7 +127,12 @@ void UpsellModal::set_dismiss_redirect(const char* symbol) {
 // With a redirect armed (event/lesson boot denial) this leaves the dead embedded
 // chrome for the live terminal via a FULL navigation (the embedded page can't be
 // repurposed in place); otherwise it just closes.
+bool UpsellModal::blocks_replay_shortcuts() const {
+    return open_ || want_open_ || dismissed_frame_ == ImGui::GetFrameCount();
+}
+
 void UpsellModal::dismiss() {
+    dismissed_frame_ = ImGui::GetFrameCount();
 #ifdef __EMSCRIPTEN__
     if (!dismiss_redirect_.empty()) {
         EM_ASM({ window.location.assign(UTF8ToString($0)); }, dismiss_redirect_.c_str());
@@ -148,30 +154,23 @@ void UpsellModal::render() {
 
     if (want_open_) {
         want_open_ = false;
-        const uint32_t bit = 1u << static_cast<uint8_t>(trigger_);
-        // Full modal the first time a surface fires; a slim toast on repeats so the
-        // funnel never nags (login always shows the full prompt).
-        const bool repeat = !login_variant_ && (full_shown_mask_ & bit) != 0;
-        if (repeat) {
-            toast_text_   = "Pro unlocks this - see pricing";
-            toast_active_ = true;
-            toast_until_  = ImGui::GetTime() + 3.2;
-            emit_upsell_usage("upsell_impression", trigger_, login_variant_, layer_,
-                              {{"surface", "toast"}});
-        } else {
-            full_shown_mask_ |= bit;
-            ImGui::OpenPopup("##edx_upsell");
-            open_ = true;
-            emit_upsell_usage("upsell_impression", trigger_, login_variant_, layer_,
-                              {{"surface", "modal"}});
-        }
+        // Every explicit locked action opens the same reviewable plan dialog.
+        toast_active_ = false;
+        ImGui::OpenPopup("##edx_upsell");
+        open_ = true;
+        emit_upsell_usage("upsell_impression", trigger_, login_variant_, layer_,
+                          {{"surface", "modal"}});
     }
 
     render_toast();
 
     const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(444.0f, 0.0f), ImGuiCond_Appearing);
+    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    const ImVec2 viewport_size = ImGui::GetMainViewport()->Size;
+    const float modal_width = std::min(560.0f, viewport_size.x - 32.0f);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(modal_width, 0.0f),
+                                       ImVec2(modal_width, viewport_size.y - 32.0f));
+    ImGui::SetNextWindowSize(ImVec2(modal_width, 0.0f), ImGuiCond_FirstUseEver);
 
     ImGui::PushStyleColor(ImGuiCol_PopupBg, Tokens::PANEL);
     ImGui::PushStyleColor(ImGuiCol_Border, Tokens::BD2);
@@ -193,7 +192,7 @@ void UpsellModal::render() {
     ImGui::PopStyleColor(3);
 }
 
-// ── Slim repeat-trigger toast (bottom-center, above the transport) ───────────
+// ── Non-blocking session notice (bottom-center, above the transport) ───────────
 void UpsellModal::render_toast() {
     if (!toast_active_) return;
     const double now = ImGui::GetTime();
@@ -224,181 +223,112 @@ void UpsellModal::render_modal_body() {
     using namespace Theme;
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
-    // Headline
-    ImGui::PushFont(Fonts::heading());
-    ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX1);
-    ImGui::TextUnformatted(modal_headline(trigger_, login_variant_));
-    ImGui::PopStyleColor();
+    const float width = ImGui::GetContentRegionAvail().x;
+    ImGui::PushFont(Fonts::label());
+    ImGui::TextColored(Tokens::TX2, "%s", login_variant_ ? "YOUR FREE ACCOUNT" : "EDGEDEPTH PRO");
     ImGui::PopFont();
+    ImGui::SameLine(width - 2.0f);
+    if (ImGui::SmallButton("X##close_upgrade")) { dismiss(); return; }
+    if (ImGui::IsItemHovered()) Theme::tooltip("Close");
+    ImGui::Dummy(ImVec2(0, 10));
 
-    // Contextual subline
-    ImGui::Dummy(ImVec2(0.0f, 2.0f));
-    ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
-    ImGui::PushTextWrapPos(0.0f);
-    ImGui::TextUnformatted(detail_.empty() ? default_subline(trigger_, login_variant_)
-                                           : detail_.c_str());
+    const char* headline = modal_headline(trigger_, login_variant_);
+    const char* context = default_subline(trigger_, login_variant_);
+    if (!login_variant_ && trigger_ == Trigger::Layer) {
+        if (layer_ == "hl_liq_levels" || layer_ == "hl_history") {
+            headline = "See where positions are exposed.";
+            context = "Add Hyperliquid liquidation levels and explore how the recorded position sample changed.";
+        } else if (layer_ == "liq_observed") {
+            headline = "See the liquidations that printed.";
+            context = "Put reported liquidation events alongside price and order flow.";
+        } else {
+            headline = "Read the market in more detail.";
+        }
+    }
+    ImGui::PushFont(Fonts::heading());
+    ImGui::PushTextWrapPos(0);
+    ImGui::TextColored(Tokens::TX1, "%s", headline);
     ImGui::PopTextWrapPos();
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0, 4));
+    ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
+    ImGui::TextWrapped("%s", detail_.empty() ? context : detail_.c_str());
     ImGui::PopStyleColor();
 
-    // Concrete "from … up until …" window line for the window-related surfaces.
     if (trigger_ == Trigger::Range || trigger_ == Trigger::Preset || trigger_ == Trigger::Auth) {
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
-        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::BRAND_TX);
-        ImGui::Text("Free replay window (UTC): %s", Entitlements::free_window_label().c_str());
-        ImGui::PopStyleColor();
+        ImGui::TextWrapped("Free replay window (UTC): %s", Entitlements::free_window_label().c_str());
     }
-
-    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ImGui::Dummy(ImVec2(0, 12));
     ImGui::Separator();
-    ImGui::Dummy(ImVec2(0.0f, 8.0f));
+    ImGui::Dummy(ImVec2(0, 10));
 
-    // Proof bullets - accent dot + primary text
-    auto bullet = [&](const char* s) {
-        const ImVec2 p = ImGui::GetCursorScreenPos();
-        const float cy = p.y + ImGui::GetTextLineHeight() * 0.5f;
-        dl->AddCircleFilled(ImVec2(p.x + 3.0f, cy), 2.5f, u32(Tokens::BRAND));
-        ImGui::Indent(15.0f);
-        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX1);
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextUnformatted(s);
-        ImGui::PopTextWrapPos();
-        ImGui::PopStyleColor();
-        ImGui::Unindent(15.0f);
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
-    };
-    char replay_proof[128];
-    snprintf(replay_proof, sizeof(replay_proof),
-             "%d-day tick replay across every recorded pair, up to 4\xc3\x97",
-             Entitlements::pro_lookback_days());
-    bullet(replay_proof);
-    bullet("Full archive, replay layers, lessons, scanner and alerts");
-
-    if (!login_variant_) {
-        ImGui::Dummy(ImVec2(0.0f, 8.0f));
-        ImGui::PushFont(Fonts::label());
-        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX3);
-        ImGui::TextUnformatted("CHOOSE BILLING");
-        ImGui::PopStyleColor();
+    // A short outcome and its concrete tools, rather than a feature inventory.
+    auto benefit = [&](const char* title, const char* description) {
+        ImGui::PushFont(Fonts::ui_semibold());
+        ImGui::TextWrapped("%s", title);
         ImGui::PopFont();
-        ImGui::Dummy(ImVec2(0.0f, 3.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
+        ImGui::TextWrapped("%s", description);
+        ImGui::PopStyleColor();
+        ImGui::Dummy(ImVec2(0, 9));
+    };
+    benefit("Read the live pressure", "Real-time depth, trade bubbles and sub-minute candles.");
+    benefit("Add liquidation context", "Hyperliquid sampled-position levels, available history and reported events.");
+    char replay[128];
+    snprintf(replay, sizeof(replay), "%d-day tick replay. Every recorded pair. Up to 4\xc3\x97 speed.", Entitlements::pro_lookback_days());
+    benefit("Go back and study the move", replay);
 
-        const float gap = 8.0f;
-        const float choice_w = (ImGui::GetContentRegionAvail().x - gap) * 0.5f;
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0, 10));
+    if (!login_variant_) {
+        const float choice_w = (ImGui::GetContentRegionAvail().x - 8) * 0.5f;
         auto billing_option = [&](const char* label, bool yearly) {
             const bool selected = yearly_billing_ == yearly;
-            ImGui::PushStyleColor(ImGuiCol_Button,
-                                  selected ? Tokens::BRAND_SOFT : ImVec4(0, 0, 0, 0));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::HOVER);
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, Tokens::ACTIVE);
-            ImGui::PushStyleColor(ImGuiCol_Text, selected ? Tokens::BRAND_TX : Tokens::TX1);
-            ImGui::PushStyleColor(ImGuiCol_Border, selected ? Tokens::BRAND_LINE : Tokens::BD2);
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Radius::R2);
-            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-            ImGui::PushFont(Fonts::ui_semibold());
-            if (ImGui::Button(label, ImVec2(choice_w, 50.0f))) yearly_billing_ = yearly;
-            ImGui::PopFont();
-            ImGui::PopStyleVar(2);
-            ImGui::PopStyleColor(5);
+            if (Theme::choice_button(label, selected, ImVec2(choice_w, 32))) yearly_billing_ = yearly;
         };
-        billing_option("Annual\n$240/year - save $108##billing_yearly", true);
-        ImGui::SameLine(0.0f, gap);
-        billing_option("Monthly\n$29/month##billing_monthly", false);
-
-        ImGui::Dummy(ImVec2(0.0f, 5.0f));
+        billing_option("Annual · save $108", true);
+        ImGui::SameLine(0, 8);
+        billing_option("Monthly", false);
+        ImGui::Dummy(ImVec2(0, 7));
+        ImGui::PushFont(Fonts::heading());
+        ImGui::TextUnformatted(yearly_billing_ ? "$20 / month" : "$29 / month");
+        ImGui::PopFont();
         ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
-        ImGui::TextUnformatted(yearly_billing_
-            ? "$20/mo effective. $240 billed today, then yearly."
-            : "Lower upfront cost. $29 billed today, then monthly.");
+        ImGui::TextWrapped("%s", yearly_billing_
+            ? "$240 billed yearly on card. Founder rate locks while subscribed."
+            : "$29 billed monthly on card. Founder rate locks while subscribed.");
         ImGui::PopStyleColor();
+        ImGui::Dummy(ImVec2(0, 6));
+        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
+        ImGui::TextWrapped("Need deeper research? Research includes Pro, more credits and deeper available replay history.");
+        ImGui::PopStyleColor();
+    } else {
+        ImGui::TextWrapped("Free includes a daily replay window, research credits and supported setup monitoring on the web.");
     }
 
-    // ── CTAs ─────────────────────────────────────────────────────────────────
-    // Upgrade: review the three plans with the selected billing period already
-    // applied. Login: a single solid "Log in".
-    ImGui::Dummy(ImVec2(0.0f, 12.0f));
-    const float w = ImGui::GetContentRegionAvail().x;
-
-    if (login_variant_) {
-        ImGui::PushStyleColor(ImGuiCol_Button, Tokens::BRAND);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::BRAND_TX);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, Tokens::BRAND);
-        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::BRAND_INK);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Radius::R2);
-        ImGui::PushFont(Fonts::ui_semibold());
-        if (ImGui::Button("Log in", ImVec2(w, 38.0f))) {
+    ImGui::Dummy(ImVec2(0, 10));
+    ImGui::Separator();
+    ImGui::Dummy(ImVec2(0, 10));
+    const float dismiss_w = std::min(136.0f, width * 0.35f);
+    ImGui::PushStyleColor(ImGuiCol_Button, Tokens::PANEL);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::HOVER);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, Tokens::ACTIVE);
+    if (ImGui::Button(login_variant_ ? "Not now" : "Maybe later", ImVec2(dismiss_w, 40))) dismiss();
+    ImGui::PopStyleColor(3);
+    ImGui::SameLine(0, 8);
+    ImGui::PushFont(Fonts::ui_semibold());
+    if (Theme::choice_button(login_variant_ ? "Log in" : "Explore Pro plans", true, ImVec2(width - dismiss_w - 8, 40))) {
+        if (login_variant_) {
             emit_upsell_usage("login_click", trigger_, true, layer_);
             Entitlements::open_login();
-            ImGui::CloseCurrentPopup();
-            open_ = false;
-        }
-        ImGui::PopFont();
-        ImGui::PopStyleVar();
-        ImGui::PopStyleColor(4);
-    } else {
-        const char* billing = yearly_billing_ ? "yearly" : "monthly";
-        const char* review_label = yearly_billing_
-            ? "Review plans - Annual selected"
-            : "Review plans - Monthly selected";
-
-        // One next step. Plan and payment rail are chosen on the pricing page.
-        ImGui::PushStyleColor(ImGuiCol_Button, Tokens::BRAND);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::BRAND_TX);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, Tokens::BRAND);
-        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::BRAND_INK);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Radius::R2);
-        ImGui::PushFont(Fonts::ui_semibold());
-        if (ImGui::Button(review_label, ImVec2(w, 38.0f))) {
+        } else {
+            const char* billing = yearly_billing_ ? "yearly" : "monthly";
             emit_upsell_usage("upgrade_click", trigger_, false, layer_,
                               {{"plan", "unselected"}, {"billing", billing}, {"rail", "pricing"}});
             Entitlements::open_pricing(billing);
-            ImGui::CloseCurrentPopup();
-            open_ = false;
         }
-        ImGui::PopFont();
-        ImGui::PopStyleVar();
-        ImGui::PopStyleColor(4);
-
-        // Explain why this does not jump straight into a payment form.
-        ImGui::Dummy(ImVec2(0.0f, 8.0f));
-        ImGui::PushFont(Fonts::label());
-        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX3);
-        {
-            const char* note = "COMPARE FREE, PRO AND RESEARCH BEFORE CHECKOUT";
-            const float nw = ImGui::CalcTextSize(note).x;
-            if (nw < w) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (w - nw) * 0.5f);
-            ImGui::TextUnformatted(note);
-        }
-        ImGui::PopStyleColor();
-        ImGui::PopFont();
-    }
-
-    // Ghost dismiss.
-    ImGui::Dummy(ImVec2(0.0f, 4.0f));
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::HOVER);
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, Tokens::ACTIVE);
-    ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
-    if (ImGui::Button(login_variant_ ? "Not now" : "Maybe later", ImVec2(w, 26.0f))) {
-        dismiss();
-    }
-    ImGui::PopStyleColor(4);
-
-    // Footer founder line - amber, with a drawn diamond (no U+25C6 in the atlas).
-    ImGui::Dummy(ImVec2(0.0f, 6.0f));
-    ImGui::PushFont(Fonts::label());
-    if (login_variant_) {
-        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX3);
-        ImGui::TextUnformatted("A FREE 24H REPLAY WINDOW EVERY DAY - ANY LOGGED-IN ACCOUNT");
-        ImGui::PopStyleColor();
-    } else {
-        const ImVec2 fp = ImGui::GetCursorScreenPos();
-        const float fcy = fp.y + ImGui::GetFontSize() * 0.5f, dr = 3.3f;
-        const ImU32 wc = u32(Tokens::WARN);
-        dl->AddQuadFilled(ImVec2(fp.x + dr, fcy - dr), ImVec2(fp.x + dr * 2.0f, fcy),
-                          ImVec2(fp.x + dr, fcy + dr), ImVec2(fp.x, fcy), wc);
-        dl->AddText(ImVec2(fp.x + dr * 2.0f + 6.0f, fp.y), wc,
-                    "FOUNDER RATE LOCKS WHILE SUBSCRIBED");
-        ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeight()));
+        ImGui::CloseCurrentPopup();
+        open_ = false;
     }
     ImGui::PopFont();
 

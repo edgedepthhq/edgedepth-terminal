@@ -152,7 +152,25 @@ void LiquidationHeatmapManager::apply_census_update(
     const pb::LiquidationHeatmapUpdate& update_pb)
 {
     const LiqHeatmapKey key{pair.exchange, pair.symbol};
-    auto& snapshot = census_snapshots_[key];
+    Terminal::LiquidationHeatmapSnapshot snapshot;
+    snapshot.census_status = update_pb.census_status().empty() ? "legacy" : update_pb.census_status();
+    snapshot.census_observed_at_ms = update_pb.census_observed_at_ms();
+    snapshot.census_quality.version = update_pb.census_quality().version();
+    snapshot.census_quality.venue_received_at_ms = update_pb.census_quality().venue_received_at_ms();
+    snapshot.census_quality.weighted_wallet_age_ms = update_pb.census_quality().weighted_wallet_age_ms();
+    snapshot.census_quality.p95_wallet_age_ms = update_pb.census_quality().p95_wallet_age_ms();
+    snapshot.census_quality.sampled_positions = update_pb.census_quality().sampled_positions();
+    snapshot.census_quality.usable_positions = update_pb.census_quality().usable_positions();
+    snapshot.census_quality.unlocated_positions = update_pb.census_quality().unlocated_positions();
+    snapshot.census_quality.stale_positions = update_pb.census_quality().stale_positions();
+    snapshot.census_quality.sampled_notional_usd = update_pb.census_quality().sampled_notional_usd();
+    snapshot.census_quality.usable_notional_usd = update_pb.census_quality().usable_notional_usd();
+    snapshot.census_quality.unlocated_notional_usd = update_pb.census_quality().unlocated_notional_usd();
+    snapshot.census_quality.stale_notional_usd = update_pb.census_quality().stale_notional_usd();
+    snapshot.census_quality.coverage_denominator_usd = update_pb.census_quality().coverage_denominator_usd();
+    snapshot.census_quality.far_filtered_positions = update_pb.census_quality().far_filtered_positions();
+    snapshot.census_quality.far_filtered_notional_usd = update_pb.census_quality().far_filtered_notional_usd();
+
 
     snapshot.timestamp_ms = update_pb.timestamp_ms();
     snapshot.mark_price = update_pb.mark_price();
@@ -165,6 +183,8 @@ void LiquidationHeatmapManager::apply_census_update(
     snapshot.flow_intensity = update_pb.flow_intensity();
 
     const int band_count = update_pb.price_mid_size();
+    if (band_count > static_cast<int>(census_history::kMaxBands) ||
+        update_pb.est_long_usd_size() != band_count || update_pb.est_short_usd_size() != band_count) return;
     snapshot.bands.resize(band_count);
     for (int i = 0; i < band_count; ++i) {
         auto& band = snapshot.bands[i];
@@ -181,6 +201,13 @@ void LiquidationHeatmapManager::apply_census_update(
         band.est_75x_usd  = (i < update_pb.est_75x_usd_size())  ? update_pb.est_75x_usd(i)  : 0.0;
         band.est_100x_usd = (i < update_pb.est_100x_usd_size()) ? update_pb.est_100x_usd(i) : 0.0;
     }
+    if (!census_history_.contains(key) && census_history_.size() >= 4)
+        census_history_.erase(census_history_.begin());
+    if (!census_history_[key].insert(snapshot)) return;
+    const auto latest = census_snapshots_.find(key);
+    if (latest == census_snapshots_.end() || latest->second.timestamp_ms <= snapshot.timestamp_ms)
+        census_snapshots_[key] = *census_history_[key].at(snapshot.timestamp_ms);
+
 }
 
 const Terminal::LiquidationHeatmapSnapshot*
@@ -199,6 +226,7 @@ void LiquidationHeatmapManager::clear(const Terminal::Pair& pair) {
     const LiqHeatmapKey key{pair.exchange, pair.symbol};
     snapshots_.erase(key);
     census_snapshots_.erase(key);
+    census_history_.erase(key);
     obs_peaks_.erase(key);
     raw_timeline_protos_.erase(key);
     last_reach_mark_.erase(key);
@@ -211,6 +239,7 @@ void LiquidationHeatmapManager::clear(const Terminal::Pair& pair) {
 void LiquidationHeatmapManager::clear_all() {
     snapshots_.clear();
     census_snapshots_.clear();
+    census_history_.clear();
     obs_peaks_.clear();
     raw_timeline_protos_.clear();
     timeline_heatmaps_.clear();
@@ -630,4 +659,10 @@ pb::HeatmapSnapshot LiquidationHeatmapManager::convert_to_heatmap_snapshot(
     snapshot.set_mode("liq");
 
     return snapshot;
+}
+
+const LiquidationHeatmapManager::CensusHistory*
+LiquidationHeatmapManager::get_census_history(const Terminal::Pair& pair) const {
+    const auto it = census_history_.find({pair.exchange, pair.symbol});
+    return it == census_history_.end() ? nullptr : &it->second;
 }

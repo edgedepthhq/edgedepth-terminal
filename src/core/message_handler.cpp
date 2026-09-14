@@ -1,5 +1,6 @@
 #include "message_handler.h"
 #include "message_parser.h"
+#include "realtime_archive.h"
 #include "stream_presence.h"
 #include "performance_tracker.h"
 #include "data_thread.h"
@@ -54,6 +55,20 @@ void MessageHandler::route_parsed(const pb::WSPayload& ws_payload, const Message
 
 void MessageHandler::route_message(const pb::WSPayload& ws_payload, const MessageContext& ctx) {
     // PERF_TIMER("route_message");
+
+    // Startup responses must never advance clocks or enter live managers.
+    if(ws_payload.stream()==pb::STREAM_RT_HISTORY) {
+        if(ws_payload.data().size()>4*1024*1024)return;
+        auto history=std::make_shared<pb::RealtimeHistory>();
+        if(!history->ParseFromString(ws_payload.data()) || history->request_id().empty() ||
+           history->request_id().size()>160 || history->records_size()>181*2055 || history->trades_size()>16384 || history->trade_bins_size()>1800)return;
+        Terminal::Pair pair{ws_payload.pair().exchange(),ws_payload.pair().symbol()};
+        if(ctx.dispatch_queue)ctx.dispatch_queue->push({[history,pair](StreamManager& streams) {
+            if(!streams.is_replay_mode())RealtimeArchive::receive_startup(*history,pair);
+        }});
+        else if(ctx.streams && !ctx.streams->is_replay_mode())RealtimeArchive::receive_startup(*history,pair);
+        return;
+    }
 
     // Set timestamp from the outer WSPayload envelope. The backend sets event_time_ms
     // on every message during replay (from the NATS Binance-Time header). This replaces
@@ -817,12 +832,15 @@ void MessageHandler::handle_historical_liq_heatmap_batch(
             continue;
         }
 
-        liq_heatmap_mgr->apply_timeline_snapshot(pair, *inner_update);
+        if (pair.exchange == "hl")
+            liq_heatmap_mgr->apply_census_update(pair, *inner_update);
+        else
+            liq_heatmap_mgr->apply_timeline_snapshot(pair, *inner_update);
         applied++;
     }
 
     // Force grid rebuild so newly loaded liq heatmap data becomes visible
-    liq_heatmap_mgr->mark_timeline_dirty(pair);
+    if (pair.exchange != "hl") liq_heatmap_mgr->mark_timeline_dirty(pair);
 }
 
 void MessageHandler::handle_heatmap_snapshot(const Terminal::Pair& pair, const pb::HeatmapSnapshot& snapshot_pb, HeatmapManager* heatmap_mgr) {

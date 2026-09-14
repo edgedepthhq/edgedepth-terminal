@@ -44,16 +44,17 @@ namespace Indicators {
 
     float IndicatorManager::pane_height() const {
         if (indicators.empty() || pane_hidden_) return 0.0f;
+        // Collapsed: only the slim strip that holds the tabs and the expand
+        // chevron. Expanded: the plots alone. The tabs, live value, collapse
+        // and close controls are drawn INSIDE the top plot, so the pane no
+        // longer carries a header band between the chart and the first plot.
         if (collapsed_) return Theme::Layout::PANEL_HEADER_H;
-        // Per-indicator heights (drag-resizable) instead of a fixed slice
-        // per plot; splitter strips sit between stacked plots.
         const std::vector<int> idx = stacked_plot_indices();
-        float h = Theme::Layout::PANEL_HEADER_H;
+        float h = 0.0f;
         for (int i : idx) h += indicators[i]->get_height_pixels();
         if (idx.size() > 1)
             h += kIndiSplitterH * static_cast<float>(idx.size() - 1);
-        if (idx.empty())
-            h += Theme::Layout::INDI_PANE_H - Theme::Layout::PANEL_HEADER_H;
+        if (idx.empty()) h += Theme::Layout::INDI_PANE_H;
         return h;
     }
 
@@ -63,8 +64,9 @@ namespace Indicators {
 
     // ═══════════════════════════════════════════════════════════════════════
     // Tabbed indicator pane (.indi-pane)
-    //   31px header: tab pills · live value (right) · collapse · close
-    //   below: single ImPlot of the active indicator, x-linked to the chart
+    //   controls (tab pills · live value · collapse · close) drawn inside the
+    //   top plot's upper band, or in a slim strip while collapsed
+    //   below: stacked ImPlots (pinned + active), x-linked to the chart
     // ═══════════════════════════════════════════════════════════════════════
 
     void IndicatorManager::render_tabbed(double x_min, double x_max,
@@ -81,109 +83,109 @@ namespace Indicators {
         if (active_tab_ < 0) active_tab_ = 0;
         IndicatorBase* active = indicators[active_tab_].get();
 
-        const float header_h = Theme::Layout::PANEL_HEADER_H;
         const float avail_w = ImGui::GetContentRegionAvail().x;
         const ImVec2 h0 = ImGui::GetCursorScreenPos();
         ImDrawList* dl = ImGui::GetWindowDrawList();
 
-        // ── Header strip - ELEV fill, BD2 top hairline, BD1 bottom ──
-        dl->AddRectFilled(h0, ImVec2(h0.x + avail_w, h0.y + header_h),
-                          Theme::u32(Theme::Tokens::ELEV));
-        dl->AddLine(ImVec2(h0.x, h0.y + 0.5f),
-                    ImVec2(h0.x + avail_w, h0.y + 0.5f), Theme::u32(Theme::Tokens::BD2));
-        dl->AddLine(ImVec2(h0.x, h0.y + header_h - 0.5f),
-                    ImVec2(h0.x + avail_w, h0.y + header_h - 0.5f), Theme::u32(Theme::Tokens::BD1));
-
         int pending_delete = -1;
 
-        // ── Tab pills (left) - small tabs, active = brand-soft / brand text ──
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 2.5f));
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.0f, 0.0f));
-        ImGui::SetCursorScreenPos(ImVec2(h0.x + 8.0f, h0.y + (header_h - 21.0f) * 0.5f));
+        // ── Pane controls: tab pills (left) · live value · collapse · close
+        //    (right). Drawn INSIDE the top plot (over its top padding) so the
+        //    volume bars sit flush under the chart, or in a slim strip while
+        //    collapsed. ImPlot registers its frame with AllowOverlap, so items
+        //    submitted after EndPlot take the hover over the plot. ──
+        auto draw_controls = [&](ImVec2 o, float w, float h) {
+            const float row_h = 20.0f;
+            const float row_y = o.y + (h - row_h) * 0.5f;
+            // Over a plot the band sits on the tallest bars; a soft backdrop
+            // keeps the labels legible without reserving a header.
+            if (!collapsed_)
+                dl->AddRectFilled(o, ImVec2(o.x + w, o.y + h), Theme::u32(Theme::Tokens::BASE, 0.78f));
 
-        for (int i = 0; i < static_cast<int>(indicators.size()); ++i) {
-            if (i) ImGui::SameLine();
-            ImGui::PushID(i);
-            const bool on = (i == active_tab_);
-            const bool pin = (i < static_cast<int>(pinned_.size()) && pinned_[i]);
-            if (on) {
-                ImGui::PushStyleColor(ImGuiCol_Button,        Theme::Tokens::BRAND_SOFT);
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Theme::Tokens::BRAND_SOFT);
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive,  Theme::Tokens::BRAND_SOFT);
-                ImGui::PushStyleColor(ImGuiCol_Text,          Theme::Tokens::BRAND);
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(7.0f, 2.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2.0f, 0.0f));
+            ImGui::PushFont(Theme::Fonts::ui());
+            ImGui::SetCursorScreenPos(ImVec2(o.x + 6.0f, row_y + (row_h - ImGui::GetFrameHeight()) * 0.5f));
+            for (int i = 0; i < static_cast<int>(indicators.size()); ++i) {
+                if (i) ImGui::SameLine();
+                ImGui::PushID(i);
+                const bool on = (i == active_tab_);
+                const bool pin = (i < static_cast<int>(pinned_.size()) && pinned_[i]);
+                ImGui::PushStyleColor(ImGuiCol_Button,        on ? Theme::Tokens::ELEV : ImVec4(0, 0, 0, 0));
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Theme::Tokens::HOVER);
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive,  Theme::Tokens::ACTIVE);
-                ImGui::PushStyleColor(ImGuiCol_Text,
-                                      pin ? Theme::Tokens::TX2 : Theme::Tokens::TX3);
-            }
-            // Pinned tabs get a leading dot so stacked-but-inactive ones read as "kept"
-            char tab_label[80];
-            snprintf(tab_label, sizeof(tab_label), "%s%s",
-                     pin ? "\xe2\x80\xa2 " : "", indicators[i]->get_name());
-            if (ImGui::SmallButton(tab_label)) {
-                active_tab_ = i;
-                collapsed_ = false;
-            }
-            // Right-click → tab context menu (F2 pilot): stack/unstack,
-            // per-indicator Settings… (when declared), remove. Replaces the
-            // old immediate pin toggle so settings have a discoverable home.
-            if (ImGui::BeginPopupContextItem("indi_tab_ctx")) {
-                if (ImGui::MenuItem(pin ? "Unstack" : "Stack")) {
-                    if (i < static_cast<int>(pinned_.size())) pinned_[i] = !pinned_[i];
+                ImGui::PushStyleColor(ImGuiCol_Text, on ? Theme::Tokens::TX1
+                                                       : (pin ? Theme::Tokens::TX2 : Theme::Tokens::TX3));
+                // Pinned (stacked) tabs are told apart by ink alone: the old
+                // "\u2022 " prefix is not in the atlas and rendered as "?".
+                if (ImGui::SmallButton(indicators[i]->get_name())) {
+                    active_tab_ = i;
+                    collapsed_ = false;
                 }
-                if (indicators[i]->has_settings() &&
-                    ImGui::MenuItem("Settings...")) {
-                    settings_open_idx_ = i;
-                    settings_popup_pending_ = true;
+                // Right-click: stack/unstack, per-indicator Settings, remove.
+                if (ImGui::BeginPopupContextItem("indi_tab_ctx")) {
+                    if (ImGui::MenuItem(pin ? "Unstack" : "Stack")) {
+                        if (i < static_cast<int>(pinned_.size())) pinned_[i] = !pinned_[i];
+                    }
+                    if (indicators[i]->has_settings() && ImGui::MenuItem("Settings...")) {
+                        settings_open_idx_ = i;
+                        settings_popup_pending_ = true;
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Remove")) pending_delete = i;
+                    ImGui::EndPopup();
                 }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Remove")) pending_delete = i;
-                ImGui::EndPopup();
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Middle) ||
+                    (ImGui::IsItemClicked() && ImGui::GetIO().KeyCtrl)) {
+                    pending_delete = i;
+                }
+                if (ImGui::IsItemHovered())
+                    Theme::tooltip("%s\nright-click: menu \xc2\xb7 middle-click: remove",
+                                   indicators[i]->get_name());
+                ImGui::PopStyleColor(4);
+                ImGui::PopID();
             }
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Middle) ||
-                (ImGui::IsItemClicked() && ImGui::GetIO().KeyCtrl)) {
-                pending_delete = i;
+            ImGui::PopFont();
+            ImGui::PopStyleVar(2);
+
+            // Right cluster, drawn glyphs on 18px hit targets (no letter "v"/"x").
+            const float btn = 18.0f;
+            const float by = row_y + (row_h - btn) * 0.5f;
+            float rx = o.x + w - 8.0f - btn;
+            {
+                ImGui::SetCursorScreenPos(ImVec2(rx, by));
+                const bool clk = ImGui::InvisibleButton("##indi_close", ImVec2(btn, btn));
+                const bool hov = ImGui::IsItemHovered();
+                if (hov) dl->AddRectFilled(ImVec2(rx, by), ImVec2(rx + btn, by + btn),
+                                           Theme::u32(Theme::Tokens::HOVER), 2.0f);
+                const ImU32 c = Theme::u32(hov ? Theme::Tokens::TX1 : Theme::Tokens::TX3);
+                const float cx = rx + btn * 0.5f, cy = by + btn * 0.5f, r = 3.5f;
+                dl->AddLine(ImVec2(cx - r, cy - r), ImVec2(cx + r, cy + r), c, 1.3f);
+                dl->AddLine(ImVec2(cx - r, cy + r), ImVec2(cx + r, cy - r), c, 1.3f);
+                if (hov) Theme::tooltip("Close pane");
+                if (clk) pane_hidden_ = true;
             }
-            if (ImGui::IsItemHovered())
-                Theme::tooltip("%s\nright-click: menu · middle-click: remove",
-                                  indicators[i]->get_name());
-            ImGui::PopStyleColor(4);
-            ImGui::PopID();
-        }
-        ImGui::PopStyleVar(2);
+            rx -= btn + 2.0f;
+            {
+                ImGui::SetCursorScreenPos(ImVec2(rx, by));
+                const bool clk = ImGui::InvisibleButton("##indi_col", ImVec2(btn, btn));
+                const bool hov = ImGui::IsItemHovered();
+                if (hov) dl->AddRectFilled(ImVec2(rx, by), ImVec2(rx + btn, by + btn),
+                                           Theme::u32(Theme::Tokens::HOVER), 2.0f);
+                const ImU32 c = Theme::u32(hov ? Theme::Tokens::TX1 : Theme::Tokens::TX3);
+                const float cx = rx + btn * 0.5f, cy = by + btn * 0.5f;
+                // chevron: down while expanded (collapse), up while collapsed (expand)
+                const float d = collapsed_ ? -1.0f : 1.0f;
+                const ImVec2 pts[3] = { ImVec2(cx - 4.0f, cy - 2.0f * d),
+                                        ImVec2(cx,        cy + 2.0f * d),
+                                        ImVec2(cx + 4.0f, cy - 2.0f * d) };
+                dl->AddPolyline(pts, 3, c, 0, 1.4f);
+                if (hov) Theme::tooltip(collapsed_ ? "Expand" : "Collapse");
+                if (clk) collapsed_ = !collapsed_;
+            }
 
-        // ── Right cluster: live value · collapse · close ──
-        {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Theme::Tokens::HOVER);
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive,  Theme::Tokens::ACTIVE);
-            ImGui::PushStyleColor(ImGuiCol_Text,          Theme::Tokens::TX3);
-            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5.0f, 2.5f));
-
-            const float btn_y = h0.y + (header_h - 21.0f) * 0.5f;
-            float rx = h0.x + avail_w - 8.0f;
-
-            // close (hides the pane; re-adding an indicator re-shows it)
-            rx -= ImGui::CalcTextSize("x").x + 10.0f;
-            ImGui::SetCursorScreenPos(ImVec2(rx, btn_y));
-            if (ImGui::SmallButton("x##indi_close")) pane_hidden_ = true;
-            if (ImGui::IsItemHovered()) Theme::tooltip("Close pane");
-
-            // collapse / expand chevron
-            const char* chev = collapsed_ ? "^##indi_col" : "v##indi_col";
-            rx -= ImGui::CalcTextSize("v").x + 14.0f;
-            ImGui::SetCursorScreenPos(ImVec2(rx, btn_y));
-            if (ImGui::SmallButton(chev)) collapsed_ = !collapsed_;
-            if (ImGui::IsItemHovered())
-                Theme::tooltip(collapsed_ ? "Expand" : "Collapse");
-
-            ImGui::PopStyleVar();
-            ImGui::PopStyleColor(4);
-
-            // live value of the active indicator - mono; explicit tag color
-            // (SPEC §0.2 - e.g. Toxicity regime) wins over direction coloring
+            // Live value of the active tab, right of the plot, left of the buttons.
+            // Explicit tag color (regime etc.) wins over direction coloring.
             double latest = 0.0;
             if (active && active->get_latest_value(latest)) {
                 char vbuf[32];
@@ -200,51 +202,60 @@ namespace Indicators {
                 }
                 ImGui::PushFont(Theme::Fonts::mono_sm());
                 const float tw = ImGui::CalcTextSize(vbuf).x;
-                dl->AddText(ImVec2(rx - tw - 12.0f,
-                                   h0.y + (header_h - ImGui::GetFontSize()) * 0.5f),
+                dl->AddText(ImVec2(rx - tw - 10.0f, row_y + (row_h - ImGui::GetFontSize()) * 0.5f),
                             vcol, vbuf);
                 ImGui::PopFont();
             }
-        }
 
-        // ── F2 pilot: per-indicator settings popover ──
-        if (settings_open_idx_ >= 0) {
-            if (settings_open_idx_ < static_cast<int>(indicators.size()) &&
-                indicators[settings_open_idx_]->has_settings()) {
-                if (settings_popup_pending_) {
-                    ImGui::OpenPopup("indi_settings_popover");
+            // Per-indicator settings popover (opened from the tab menu).
+            if (settings_open_idx_ >= 0) {
+                if (settings_open_idx_ < static_cast<int>(indicators.size()) &&
+                    indicators[settings_open_idx_]->has_settings()) {
+                    if (settings_popup_pending_) {
+                        ImGui::OpenPopup("indi_settings_popover");
+                        settings_popup_pending_ = false;
+                    }
+                    if (ImGui::BeginPopup("indi_settings_popover")) {
+                        ImGui::PushFont(Theme::Fonts::label());
+                        ImGui::TextDisabled("%s", indicators[settings_open_idx_]->get_name());
+                        ImGui::PopFont();
+                        ImGui::Separator();
+                        indicators[settings_open_idx_]->render_settings();
+                        ImGui::EndPopup();
+                    } else {
+                        settings_open_idx_ = -1;  // dismissed by outside click
+                    }
+                } else {
+                    settings_open_idx_ = -1;      // indicator removed under us
                     settings_popup_pending_ = false;
                 }
-                if (ImGui::BeginPopup("indi_settings_popover")) {
-                    ImGui::PushFont(Theme::Fonts::label());
-                    ImGui::TextDisabled("%s", indicators[settings_open_idx_]->get_name());
-                    ImGui::PopFont();
-                    ImGui::Separator();
-                    indicators[settings_open_idx_]->render_settings();
-                    ImGui::EndPopup();
-                } else {
-                    settings_open_idx_ = -1;  // dismissed by outside click
-                }
-            } else {
-                settings_open_idx_ = -1;      // indicator removed under us
-                settings_popup_pending_ = false;
             }
-        }
+        };
 
-        // advance layout past the header
-        ImGui::SetCursorScreenPos(ImVec2(h0.x, h0.y + header_h));
-        ImGui::Dummy(ImVec2(0.0f, 0.0f));
-
-        if (pending_delete >= 0) {
+        auto apply_pending_delete = [&]() -> bool {
+            if (pending_delete < 0) return false;
             indicators.erase(indicators.begin() + pending_delete);
             if (pending_delete < static_cast<int>(pinned_.size()))
                 pinned_.erase(pinned_.begin() + pending_delete);
-            if (indicators.empty()) return;
+            pending_delete = -1;
+            if (indicators.empty()) return true;
             if (active_tab_ >= static_cast<int>(indicators.size()))
                 active_tab_ = static_cast<int>(indicators.size()) - 1;
-        }
+            return false;
+        };
 
-        if (collapsed_) return;
+        // Seam between the chart and the pane: one hairline, no band.
+        dl->AddLine(ImVec2(h0.x, h0.y + 0.5f), ImVec2(h0.x + avail_w, h0.y + 0.5f),
+                    Theme::u32(Theme::Tokens::BD1));
+
+        if (collapsed_) {
+            const float strip_h = Theme::Layout::PANEL_HEADER_H;
+            draw_controls(h0, avail_w, strip_h);
+            ImGui::SetCursorScreenPos(ImVec2(h0.x, h0.y + strip_h));
+            ImGui::Dummy(ImVec2(0.0f, 0.0f));
+            apply_pending_delete();
+            return;
+        }
 
         // ── Stacked indicator plots - one per pinned indicator + the active
         //    tab; the last one owns the time axis. All x-linked to the chart.
@@ -291,8 +302,10 @@ namespace Indicators {
                 ImPlot::SetupAxisLinks(ImAxis_X1, nullptr, nullptr);
                 ind->render_content(x_min, x_max);
 
-                // Indicator name tag, top-left of each stacked plot
-                {
+                // Indicator name tag, top-left of the LOWER stacked plots. The
+                // top plot carries the tab row instead (draw_controls below),
+                // which is what used to print the name twice on the Vol pane.
+                if (slot > 0) {
                     const ImVec2 pp = ImPlot::GetPlotPos();
                     ImGui::PushFont(Theme::Fonts::label());
                     dl->AddText(ImVec2(pp.x + 6.0f, pp.y + 4.0f),
@@ -343,6 +356,15 @@ namespace Indicators {
                 }
 
                 ImPlot::EndPlot();
+
+                // Pane controls ride the top plot's upper band. Restore the
+                // layout cursor afterwards so the next stacked plot lands
+                // where EndPlot left it.
+                if (slot == 0) {
+                    const ImVec2 after = ImGui::GetCursorScreenPos();
+                    draw_controls(plot_pos, plot_size.x, 24.0f);
+                    ImGui::SetCursorScreenPos(after);
+                }
             }
             ImPlot::PopStyleVar();
 
@@ -371,6 +393,7 @@ namespace Indicators {
                 ImGui::PopID();
             }
         }
+        apply_pending_delete();
     }
 
     void IndicatorManager::update_all() {

@@ -1,6 +1,8 @@
 #include "custom_implot.h"
 #include "implot_internal.h"
 #include <algorithm>
+#include <cmath>
+#include "rendering/theme.h"
 
 // Helper functions
 namespace CustomImPlot {
@@ -207,9 +209,13 @@ namespace CustomImPlot {
         const ImVec2 r_max(box_left + box_w, box_top + box_h);
         dl->AddRectFilled(r_min, r_max, bg_color, 2.0f);
 
-        // White text, centered.
+        // Select readable ink for both light and dark user palettes.
+        const ImVec4 bg = ImGui::ColorConvertU32ToFloat4(bg_color);
+        const auto linear = [](float c) { return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f); };
+        const float luminance = 0.2126f * linear(bg.x) + 0.7152f * linear(bg.y) + 0.0722f * linear(bg.z);
+        const ImU32 ink = Theme::u32(luminance > 0.179f ? Theme::Tokens::BASE : Theme::Tokens::TX1);
         dl->AddText(ImVec2(box_left + pad_x, box_top + pad_y),
-                    IM_COL32(255, 255, 255, 255), text);
+                    ink, text);
 
         dl->PopClipRect();
     }

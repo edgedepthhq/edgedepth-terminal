@@ -35,8 +35,8 @@ struct WatchlistVenue {
 };
 
 constexpr WatchlistVenue kWatchlistVenues[] = {
-    {"binancef", "BINANCE",     "BINANCE"},
-    {"hl",       "HYPERLIQUID", "HYPERLIQ"},
+    {"binancef", "Binance",     "Binance"},
+    {"hl",       "Hyperliquid", "Hyperliquid"},
 };
 
 int64_t now_ms() {
@@ -224,7 +224,7 @@ void WatchlistWidget::render() {
 
     auto& reg = SymbolRegistry::instance();
     if (!reg.is_loaded()) {
-        ImGui::TextColored(Theme::Tokens::TX3, "  Loading symbols\xE2\x80\xA6");
+        ImGui::TextColored(Theme::Tokens::TX2, "  Loading symbols\xE2\x80\xA6");
         ImGui::End();
         return;
     }
@@ -275,11 +275,11 @@ void WatchlistWidget::render_title_bar() {
                       ImVec2(p0.x + 16.0f, cy + 3.0f),
                       Theme::u32(Theme::Tokens::UP));            // live dot 6x6
 
-    ImGui::PushFont(Theme::Fonts::label());
+    ImGui::PushFont(Theme::Fonts::ui());
     dl->AddText(ImVec2(p0.x + 23.0f, cy - ImGui::GetFontSize() * 0.5f),
-                Theme::u32(Theme::Tokens::TX2), "WATCHLIST");
+                Theme::u32(Theme::Tokens::TX1), "Watchlist");
 
-    const ImU32 tx3 = Theme::u32(Theme::Tokens::TX3);
+    const ImU32 tx3 = Theme::u32(Theme::Tokens::TX2);
     float x = p0.x + w - 10.0f;
 
     // close glyph (x)
@@ -290,7 +290,7 @@ void WatchlistWidget::render_title_bar() {
     x = close_x0 - 9.0f;
 
     // pair count "N PAIRS"
-    char cnt[24]; snprintf(cnt, sizeof(cnt), "%d PAIRS", all_count_);
+    char cnt[24]; snprintf(cnt, sizeof(cnt), "%d pairs", all_count_);
     const float cnt_w = ImGui::CalcTextSize(cnt).x;
     dl->AddText(ImVec2(x - cnt_w, cy - ImGui::GetFontSize() * 0.5f), tx3, cnt);
     x -= cnt_w + 9.0f;
@@ -298,7 +298,7 @@ void WatchlistWidget::render_title_bar() {
 
     // compact toggle - 3 stacked ticks (accent when on)
     const float gx0 = x - 12.0f, gy = cy - 4.0f;
-    const ImU32 gc = Theme::u32(compact_ ? Theme::Tokens::BRAND_TX : Theme::Tokens::TX3);
+    const ImU32 gc = Theme::u32(compact_ ? Theme::Tokens::BRAND_TX : Theme::Tokens::TX2);
     for (int i = 0; i < 3; ++i)
         dl->AddLine(ImVec2(gx0, gy + i * 4.0f), ImVec2(gx0 + 12.0f, gy + i * 4.0f), gc, 1.3f);
 
@@ -324,11 +324,13 @@ void WatchlistWidget::render_filter_bar() {
     ImGui::SetCursorPos(ImVec2(pad, ImGui::GetCursorPosY() + 8.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(9.0f, 6.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Theme::Radius::R2);
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
 
     // Full-width filter input; volume sorting lives in the sort-header chips.
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - pad);
+    ImGui::PushStyleColor(ImGuiCol_TextDisabled, Theme::Tokens::TX2);
     ImGui::InputTextWithHint("##wl_search", "Filter pairs", search_buf_, sizeof(search_buf_));
+    ImGui::PopStyleColor();
 
     ImGui::PopStyleVar(3);
 
@@ -351,16 +353,16 @@ void WatchlistWidget::render_category_selector() {
     const float w = ImGui::GetContentRegionAvail().x - pad;   // inset both sides
     const ImVec2 p0 = ImGui::GetCursorScreenPos();
     const float selector_gap = 6.0f;
-    const float venue_w = std::clamp(w * 0.39f, 92.0f, 108.0f);
+    const float venue_w = std::clamp(w * 0.48f, 126.0f, 150.0f);
     const float category_w = w - selector_gap - venue_w;
     const ImVec2 venue_p(p0.x + category_w + selector_gap, p0.y);
 
-    ImGui::PushStyleColor(ImGuiCol_Button,        Theme::Tokens::ELEV);
+    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0, 0, 0, 0));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Theme::Tokens::ELEV);
     ImGui::PushStyleColor(ImGuiCol_ButtonActive,  Theme::Tokens::ELEV);
     ImGui::PushStyleColor(ImGuiCol_Border,        Theme::Tokens::BD2);
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Theme::Radius::R2);
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
     if (ImGui::Button("##wl_cat", ImVec2(category_w, h))) ImGui::OpenPopup("##wl_cat_pop");
     ImGui::SetCursorScreenPos(venue_p);
     if (ImGui::Button("##wl_venue", ImVec2(venue_w, h))) ImGui::OpenPopup("##wl_venue_pop");
@@ -381,7 +383,7 @@ void WatchlistWidget::render_category_selector() {
     const int ct = category_valid && selected_category_ < static_cast<int>(category_counts_.size())
                    ? category_counts_[selected_category_] : scoped_count_;
     char cbuf[16]; snprintf(cbuf, sizeof(cbuf), "%d", ct);
-    ImGui::PushFont(Theme::Fonts::label());
+    ImGui::PushFont(Theme::Fonts::ui());
     const float count_w = ImGui::CalcTextSize(cbuf).x;
     const float count_x = p0.x + category_w - 27.0f - count_w;
     ImGui::PopFont();
@@ -392,14 +394,14 @@ void WatchlistWidget::render_category_selector() {
                 Theme::u32(Theme::Tokens::TX1), name);
     dl->PopClipRect();
     ImGui::PopFont();
-    ImGui::PushFont(Theme::Fonts::label());
+    ImGui::PushFont(Theme::Fonts::ui());
     dl->AddText(ImVec2(count_x, p0.y + h*0.5f - ImGui::GetFontSize()*0.5f),
-                Theme::u32(Theme::Tokens::TX3), cbuf);
+                Theme::u32(Theme::Tokens::TX2), cbuf);
     ImGui::PopFont();
 
     const float qx = p0.x + category_w - 15.0f, qy = p0.y + h*0.5f;
     dl->AddTriangleFilled(ImVec2(qx, qy-2.0f), ImVec2(qx+7.0f, qy-2.0f),
-                          ImVec2(qx+3.5f, qy+3.0f), Theme::u32(Theme::Tokens::TX3));
+                          ImVec2(qx+3.5f, qy+3.0f), Theme::u32(Theme::Tokens::TX2));
 
     // Venue overlay. A compact exchange mark is useful here; the top-level
     // symbol selector remains coin-only as requested.
@@ -407,7 +409,7 @@ void WatchlistWidget::render_category_selector() {
     for (const auto& venue : kWatchlistVenues) {
         if (selected_exchange_ == venue.id) { selected_venue = &venue; break; }
     }
-    const char* venue_label = selected_venue ? selected_venue->compact_label : "ALL VENUES";
+    const char* venue_label = selected_venue ? selected_venue->compact_label : "All venues";
     float venue_text_x = venue_p.x + 8.0f;
     if (selected_venue) {
         constexpr float logo_size = 13.0f;
@@ -418,10 +420,10 @@ void WatchlistWidget::render_category_selector() {
         const float gx = venue_p.x + 9.0f, gy = venue_p.y + h * 0.5f - 4.0f;
         for (int i = 0; i < 3; ++i)
             dl->AddLine(ImVec2(gx, gy + i * 4.0f), ImVec2(gx + 10.0f, gy + i * 4.0f),
-                        Theme::u32(Theme::Tokens::TX3), 1.0f);
+                        Theme::u32(Theme::Tokens::TX2), 1.0f);
         venue_text_x += 16.0f;
     }
-    ImGui::PushFont(Theme::Fonts::label());
+    ImGui::PushFont(Theme::Fonts::ui());
     dl->PushClipRect(ImVec2(venue_text_x, venue_p.y),
                      ImVec2(venue_p.x + venue_w - 17.0f, venue_p.y + h), true);
     dl->AddText(ImVec2(venue_text_x, venue_p.y + h*0.5f - ImGui::GetFontSize()*0.5f),
@@ -430,24 +432,26 @@ void WatchlistWidget::render_category_selector() {
     ImGui::PopFont();
     const float vqx = venue_p.x + venue_w - 14.0f;
     dl->AddTriangleFilled(ImVec2(vqx, qy-2.0f), ImVec2(vqx+6.0f, qy-2.0f),
-                          ImVec2(vqx+3.0f, qy+2.5f), Theme::u32(Theme::Tokens::TX3));
+                          ImVec2(vqx+3.0f, qy+2.5f), Theme::u32(Theme::Tokens::TX2));
 
     // taxonomy popover - searchable 2-column grid of name+count chips
     // It spans the full rail and is opaque so the selector underneath cannot
     // leak into the first All / AI row at the popup margins.
     ImGui::SetNextWindowPos(ImVec2(bp.x, p0.y + h + 4.0f));
-    ImGui::SetNextWindowSize(ImVec2(ww, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(std::min(std::max(ww, 440.0f), ImGui::GetMainViewport()->Size.x - 20.0f), 0.0f));
     ImGui::SetNextWindowBgAlpha(1.0f);
     ImGui::PushStyleColor(ImGuiCol_PopupBg, Theme::Tokens::PANEL);
     ImGui::PushStyleColor(ImGuiCol_Border,  Theme::Tokens::BD2);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(9.0f, 9.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, Theme::Radius::R3);
     ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.0f);
-    if (ImGui::BeginPopup("##wl_cat_pop")) {
+    if (Theme::begin_popup("##wl_cat_pop")) {
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, Theme::Radius::R2);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
         ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::PushStyleColor(ImGuiCol_TextDisabled, Theme::Tokens::TX2);
         ImGui::InputTextWithHint("##wl_cat_search", "Search categories", cat_search_, sizeof(cat_search_));
+        ImGui::PopStyleColor();
         ImGui::PopStyleVar(2);
         ImGui::Dummy(ImVec2(0, 3.0f));
 
@@ -472,9 +476,10 @@ void WatchlistWidget::render_category_selector() {
             cdl->AddRectFilled(cp, ImVec2(cp.x+cw, cp.y+ch),
                 Theme::u32(active ? Theme::Tokens::BRAND_SOFT
                                   : (hov ? Theme::Tokens::ELEV : Theme::Tokens::PANEL)), Theme::Radius::R2);
-            cdl->AddRect(cp, ImVec2(cp.x+cw, cp.y+ch),
-                Theme::u32(active ? Theme::Tokens::BRAND : Theme::Tokens::BD2), Theme::Radius::R2);
-            ImGui::PushFont(Theme::Fonts::label());
+            if (active)
+                cdl->AddLine(ImVec2(cp.x + 8, cp.y + ch - 1), ImVec2(cp.x + cw - 8, cp.y + ch - 1),
+                    Theme::u32(Theme::Tokens::BRAND), 2);
+            ImGui::PushFont(Theme::Fonts::ui());
             char nb[16]; snprintf(nb, sizeof(nb), "%d", count);
             const float nbw = ImGui::CalcTextSize(nb).x;
             cdl->PushClipRect(ImVec2(cp.x + 9.0f, cp.y),
@@ -483,7 +488,7 @@ void WatchlistWidget::render_category_selector() {
                 Theme::u32(active ? Theme::Tokens::BRAND_TX : Theme::Tokens::TX2), label);
             cdl->PopClipRect();
             cdl->AddText(ImVec2(cp.x+cw-9.0f-nbw, cp.y+ch*0.5f-ImGui::GetFontSize()*0.5f),
-                Theme::u32(Theme::Tokens::TX3), nb);
+                Theme::u32(Theme::Tokens::TX2), nb);
             ImGui::PopFont();
             ImGui::PopID();
             if (clicked) { selected_category_ = catidx; ImGui::CloseCurrentPopup(); }
@@ -503,7 +508,11 @@ void WatchlistWidget::render_category_selector() {
     ImGui::PopStyleColor(2);
 
     // Venue popover - a compact three-row filter, defaulting to All venues.
-    const float venue_popup_w = std::min(160.0f, ww);
+    // Reserve both text and count columns, plus logo, gutters and popup padding.
+    ImGui::PushFont(Theme::Fonts::ui());
+    const float venue_popup_w = std::max(220.0f,
+        ImGui::CalcTextSize("Hyperliquid").x + ImGui::CalcTextSize("9999").x + 75.0f);
+    ImGui::PopFont();
     ImGui::SetNextWindowPos(ImVec2(bp.x + ww - venue_popup_w, p0.y + h + 4.0f));
     ImGui::SetNextWindowSize(ImVec2(venue_popup_w, 0.0f));
     ImGui::SetNextWindowBgAlpha(1.0f);
@@ -512,7 +521,7 @@ void WatchlistWidget::render_category_selector() {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6.0f, 6.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, Theme::Radius::R3);
     ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.0f);
-    if (ImGui::BeginPopup("##wl_venue_pop")) {
+    if (Theme::begin_popup("##wl_venue_pop")) {
         ImDrawList* venue_dl = ImGui::GetWindowDrawList();
         auto venue_row = [&](const char* id, const char* label, int count, int row_id) {
             const bool active = selected_exchange_ == id;
@@ -538,7 +547,7 @@ void WatchlistWidget::render_category_selector() {
                     ImVec2(tx, rp.y + (rh - logo_size) * 0.5f), logo_size);
                 tx += logo_size + 6.0f;
             }
-            ImGui::PushFont(Theme::Fonts::label());
+            ImGui::PushFont(Theme::Fonts::ui());
             char nb[16]; snprintf(nb, sizeof(nb), "%d", count);
             const float nbw = ImGui::CalcTextSize(nb).x;
             venue_dl->PushClipRect(ImVec2(tx, rp.y), ImVec2(rp.x + rw - nbw - 15.0f, rp.y + rh), true);
@@ -546,7 +555,7 @@ void WatchlistWidget::render_category_selector() {
                               Theme::u32(active ? Theme::Tokens::BRAND_TX : Theme::Tokens::TX2), label);
             venue_dl->PopClipRect();
             venue_dl->AddText(ImVec2(rp.x + rw - 8.0f - nbw, rp.y + (rh - ImGui::GetFontSize()) * 0.5f),
-                              Theme::u32(Theme::Tokens::TX3), nb);
+                              Theme::u32(Theme::Tokens::TX2), nb);
             ImGui::PopFont();
 
             if (clicked) {
@@ -557,7 +566,7 @@ void WatchlistWidget::render_category_selector() {
                 ImGui::CloseCurrentPopup();
             }
         };
-        venue_row("", "ALL VENUES", all_count_, 0);
+        venue_row("", "All venues", all_count_, 0);
         for (size_t i = 0; i < exchange_counts_.size(); ++i)
             venue_row(kWatchlistVenues[i].id, kWatchlistVenues[i].label,
                       exchange_counts_[i], static_cast<int>(i) + 1);
@@ -573,79 +582,76 @@ void WatchlistWidget::render_category_selector() {
     dl->AddLine(ImVec2(bp.x, hy), ImVec2(bp.x + ww, hy), Theme::u32(Theme::Tokens::BD1));
 }
 
-// ── Sort header - SYMBOL(+total) left, LAST / 24H% right; active chip arrow ───
+// ── Sort header - one flat row in the list's own column grid ─────────────────
+// SYMBOL and VOL sit where the rows print the name and its 24h volume, LAST and
+// 24H% right-align on the same edges as the row figures. Every column carries
+// the up/down sort chevrons; the active direction is bright. No chip boxes:
+// this reads as the first line of the list, not as a toolbar above it.
 
 void WatchlistWidget::render_sort_header() {
-    const float pad = 10.0f;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 bp = ImGui::GetCursorScreenPos();
-    const float ww = ImGui::GetContentRegionAvail().x;
-    const float ph = 18.0f;
-    const float cy = bp.y + 7.0f + ph * 0.5f;
+    const float w = ImGui::GetContentRegionAvail().x;
+    const float hh = 24.0f;
+    const float cy = bp.y + hh * 0.5f;
+
+    // Same grid as render_rows (keep the two in step).
+    const float pad_l = 8.0f, pad_r = 10.0f, gap = 8.0f;
+    const float star_w = 15.0f, spark_w = 52.0f, chg_w = 88.0f;
+    const bool  compact = compact_ || w < 410.0f;
+    const bool  show_spark = !compact;
+    const bool  stacked = w < 410.0f;
+    const float chg_right  = w - pad_r;
+    const float last_right = stacked ? chg_right : chg_right - chg_w - gap;
+    const float sym_left   = show_spark ? (pad_l + star_w + gap + spark_w + gap)
+                                        : (pad_l + star_w + gap);
 
     ImGui::PushFont(Theme::Fonts::label());
+    const float fs = ImGui::GetFontSize();
 
-    auto pill_w = [&](const char* label, int count, bool /*active*/) {
-        float lw = ImGui::CalcTextSize(label).x, nbw = 0.0f;
-        if (count >= 0) { char nb[12]; snprintf(nb,sizeof(nb),"%d",count); nbw = 4.0f + ImGui::CalcTextSize(nb).x; }
-        return 9.0f + lw + nbw + 12.0f + 9.0f;   // always reserve the sort chevron
-    };
-    auto draw_chip = [&](const char* label, int count, Sort col, float x_left) {
+    // label + chevron pair; `x` is the left edge (or the right edge when
+    // right_align). Returns the drawn width. Click toggles / switches the sort.
+    auto cell = [&](const char* label, Sort col, float x, bool right_align) -> float {
         const bool active = (sort_ == col);
-        const float pw = pill_w(label, count, active);
-        const ImVec2 cp(x_left, cy - ph * 0.5f);
-        // Active sort is shown by the teal arrow only (SPEC); the chip body stays
-        // neutral like the rest - active just brightens the label to text-1.
-        dl->AddRectFilled(cp, ImVec2(cp.x+pw, cp.y+ph), Theme::u32(Theme::Tokens::PANEL), ph * 0.5f);
-        dl->AddRect(cp, ImVec2(cp.x+pw, cp.y+ph), Theme::u32(Theme::Tokens::BD2), ph * 0.5f);
         const float lw = ImGui::CalcTextSize(label).x;
-        dl->AddText(ImVec2(cp.x+9.0f, cy - ImGui::GetFontSize()*0.5f),
-            Theme::u32(active ? Theme::Tokens::TX1 : Theme::Tokens::TX2), label);
-        if (count >= 0) {
-            char nb[12]; snprintf(nb,sizeof(nb),"%d",count);
-            dl->AddText(ImVec2(cp.x+9.0f+lw+4.0f, cy - ImGui::GetFontSize()*0.5f),
-                Theme::u32(Theme::Tokens::TX3), nb);
-        }
-        // Binance-style sort chevron on every chip: up + down triangles. The
-        // active direction is teal (accent), the other dim; both dim when this
-        // column is not the active sort.
-        const float chx = cp.x + pw - 9.0f - 7.0f;
-        const ImU32 hot = Theme::u32(Theme::Tokens::TX1);   // active direction: white
-        const ImU32 dim = Theme::u32(Theme::Tokens::TX3);
-        const ImU32 up_c = (active && !sort_desc_) ? hot : dim;
-        const ImU32 dn_c = (active &&  sort_desc_) ? hot : dim;
-        dl->AddTriangleFilled(ImVec2(chx, cy - 1.5f), ImVec2(chx + 7.0f, cy - 1.5f),
-                              ImVec2(chx + 3.5f, cy - 5.5f), up_c);
-        dl->AddTriangleFilled(ImVec2(chx, cy + 1.5f), ImVec2(chx + 7.0f, cy + 1.5f),
-                              ImVec2(chx + 3.5f, cy + 5.5f), dn_c);
-        ImGui::SetCursorScreenPos(cp);
+        const float chev_w = 7.0f, chev_gap = 5.0f;
+        const float cw = lw + chev_gap + chev_w;
+        const float x0 = right_align ? x - cw : x;
+        ImGui::SetCursorScreenPos(ImVec2(x0 - 4.0f, bp.y));
         ImGui::PushID(static_cast<int>(col) + 40);
-        if (ImGui::InvisibleButton("##sc", ImVec2(pw, ph))) {
+        const bool clk = ImGui::InvisibleButton("##sc", ImVec2(cw + 8.0f, hh));
+        const bool hov = ImGui::IsItemHovered();
+        ImGui::PopID();
+        dl->AddText(ImVec2(x0, cy - fs * 0.5f),
+                    Theme::u32(active || hov ? Theme::Tokens::TX1 : Theme::Tokens::TX3), label);
+        const float chx = x0 + lw + chev_gap;
+        const ImU32 hot = Theme::u32(Theme::Tokens::TX1);
+        const ImU32 dim = Theme::u32(hov ? Theme::Tokens::TX3 : Theme::Tokens::TX4);
+        dl->AddTriangleFilled(ImVec2(chx, cy - 1.5f), ImVec2(chx + chev_w, cy - 1.5f),
+                              ImVec2(chx + chev_w * 0.5f, cy - 5.5f), (active && !sort_desc_) ? hot : dim);
+        dl->AddTriangleFilled(ImVec2(chx, cy + 1.5f), ImVec2(chx + chev_w, cy + 1.5f),
+                              ImVec2(chx + chev_w * 0.5f, cy + 5.5f), (active && sort_desc_) ? hot : dim);
+        if (clk) {
             if (sort_ == col) sort_desc_ = !sort_desc_;
             else { sort_ = col; sort_desc_ = (col != Sort::Symbol); }
         }
-        ImGui::PopID();
+        return cw;
     };
 
-    // Left group: SYMBOL (+ total) then VOL, same chip style as the rest.
-    const int   sym_ct = static_cast<int>(visible_.size());
-    const float w_sym  = pill_w("SYMBOL", sym_ct, sort_ == Sort::Symbol);
-    draw_chip("SYMBOL", sym_ct, Sort::Symbol, bp.x + pad);
-    draw_chip("VOL",    -1,     Sort::Volume, bp.x + pad + w_sym + 6.0f);
-
-    // Right group: LAST then 24H%, pinned to the right edge.
-    const float w_chg  = pill_w("24H%", -1, sort_ == Sort::Change);
-    const float w_last = pill_w("LAST", -1, sort_ == Sort::Price);
-    const float x_chg  = bp.x + ww - pad - w_chg;
-    draw_chip("LAST", -1, Sort::Price,  x_chg - 8.0f - w_last);
-    draw_chip("24H%", -1, Sort::Change, x_chg);
+    const float sym_w = cell("SYMBOL", Sort::Symbol, bp.x + sym_left, false);
+    cell("VOL", Sort::Volume, bp.x + sym_left + sym_w + 14.0f, false);
+    const float chg_cell_w = cell("24H%", Sort::Change, bp.x + chg_right, true);
+    // Narrow rail: the rows print LAST under 24H%, so the header keeps LAST
+    // sortable just left of 24H% instead of on its own column edge.
+    cell("LAST", Sort::Price, stacked ? bp.x + chg_right - chg_cell_w - 14.0f
+                                      : bp.x + last_right, true);
 
     ImGui::PopFont();
 
     ImGui::SetCursorScreenPos(bp);
-    ImGui::Dummy(ImVec2(ww, 7.0f + ph + 7.0f));
-    const float hy = bp.y + 7.0f + ph + 7.0f - 1.0f;
-    dl->AddLine(ImVec2(bp.x, hy), ImVec2(bp.x + ww, hy), Theme::u32(Theme::Tokens::BD1));
+    ImGui::Dummy(ImVec2(w, hh));
+    dl->AddLine(ImVec2(bp.x, bp.y + hh - 1.0f), ImVec2(bp.x + w, bp.y + hh - 1.0f),
+                Theme::u32(Theme::Tokens::BD1));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -673,16 +679,17 @@ void WatchlistWidget::render_rows() {
     const float star_w = 15.0f, spark_w = 52.0f, last_w = 92.0f, chg_w = 88.0f;
     const bool  compact = compact_ || w < 410.0f;
     const bool  show_spark = !compact;
-    const float content_h = compact ? 22.0f : 27.0f;
-    const float vol_h = 12.0f;                      // dim 24h-volume figure line
+    const bool stacked = w < 410.0f;
+    const float content_h = compact ? 24.0f : 27.0f;
+    const float vol_h = 20.0f;                      // dim 24h-volume figure line
     const float pitch = content_h + vol_h + 1.0f;   // content + volume + 1px hairline
 
     const float chg_right  = w - pad_r;
-    const float last_right = chg_right - chg_w - gap;
+    const float last_right = stacked ? chg_right : chg_right - chg_w - gap;
     const float last_left  = last_right - last_w;
     const float sym_left   = show_spark ? (pad_l + star_w + gap + spark_w + gap)
                                         : (pad_l + star_w + gap);
-    const float sym_right  = last_left - gap;
+    const float sym_right = stacked ? chg_right - chg_w - gap : last_left - gap;
 
     ImGuiListClipper clipper;
     clipper.Begin(static_cast<int>(visible_.size()), pitch);
@@ -698,6 +705,7 @@ void WatchlistWidget::render_rows() {
             const ImVec2 row_min = ImGui::GetCursorScreenPos();
             const bool clicked = ImGui::InvisibleButton("##row", ImVec2(w, pitch));
             const bool hovered = ImGui::IsItemHovered();
+            if (hovered) Theme::tooltip("%s · %s", meta->symbol.c_str(), widget_venue_label(meta->exchange));
             const float cy_line = row_min.y + content_h * 0.5f;
 
             if (selected) {
@@ -730,7 +738,7 @@ void WatchlistWidget::render_rows() {
                                    ? Theme::Tokens::DOWN : Theme::Tokens::UP;
 
             draw_star(dl, ImVec2(row_min.x + pad_l + star_w * 0.5f, cy_line), 5.0f, fav,
-                      Theme::u32(fav ? Theme::Tokens::TX1 : Theme::Tokens::TX3));
+                      Theme::u32(fav ? Theme::Tokens::TX1 : Theme::Tokens::TX2));
 
             if (show_spark) {
                 auto sit = sparks_.find(meta->pair_key);
@@ -782,7 +790,7 @@ void WatchlistWidget::render_rows() {
                         ImGui::PushFont(Theme::Fonts::ui());
                         const float qy = cy_line - ImGui::GetFontSize() * 0.5f;
                         const float qw = ImGui::CalcTextSize(quote).x;
-                        dl->AddText(ImVec2(sxl + base_w + 1.0f, qy), Theme::u32(Theme::Tokens::TX3),
+                        dl->AddText(ImVec2(sxl + base_w + 1.0f, qy), Theme::u32(Theme::Tokens::TX2),
                                     (base_w + qw <= avail) ? quote : ell);
                         ImGui::PopFont();
                     }
@@ -812,7 +820,9 @@ void WatchlistWidget::render_rows() {
             if (t && t->last_price > 0.0) {
                 char pbuf[32];
                 meta->fmt.format_price(pbuf, sizeof(pbuf), t->last_price);
-                dl->AddText(ImVec2(row_min.x + last_right - ImGui::CalcTextSize(pbuf).x, ly),
+                const float price_y = stacked ? row_min.y + content_h +
+                    (vol_h - ImGui::GetFontSize()) * 0.5f : ly;
+                dl->AddText(ImVec2(row_min.x + last_right - ImGui::CalcTextSize(pbuf).x, price_y),
                             Theme::u32(Theme::Tokens::TX1), pbuf);
             }
             if (t) {
@@ -831,7 +841,7 @@ void WatchlistWidget::render_rows() {
                 ImGui::PushFont(Theme::Fonts::mono_sm());
                 const float vy = row_min.y + content_h + (vol_h - ImGui::GetFontSize()) * 0.5f;
                 dl->AddText(ImVec2(row_min.x + sym_left, vy),
-                            Theme::u32(Theme::Tokens::TX3), vbuf);
+                            Theme::u32(Theme::Tokens::TX2), vbuf);
                 ImGui::PopFont();
             }
 

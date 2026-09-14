@@ -7,7 +7,7 @@
 
 OrderbookWidget::OrderbookWidget(const Terminal::Pair &pair, const AppContext& ctx, const PriceFormatter& fmt, const size_t depth)
     : pair_(pair)
-    , title_("Depth " + pair.exchange + " " + pair.symbol)
+    , title_("     Depth · " + pair.symbol + "###Depth " + pair.exchange + " " + pair.symbol)
     , stream_key_{pair, Terminal::Stream::Orderbook, 0}
     , ctx_(ctx)
     , depth_(depth)

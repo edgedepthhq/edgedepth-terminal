@@ -5,12 +5,12 @@
 // Locked range / preset / speed / symbol / layer pill, a TIER_* server error, the
 // /events padlock, and a lesson lock ALL call UpsellModal::open(...) - a single,
 // consistent conversion surface instead of scattered ad-hoc nudges. Primary CTA is
-// "Go Pro - pay with Bitcoin" → /pricing (Entitlements::open_upgrade). AUTH_REQUIRED
+// "Explore Pro plans" -> /pricing (Entitlements::open_pricing). AUTH_REQUIRED
 // / GRANT_REQUIRED route to a login variant instead (Entitlements::open_login).
 //
-// Shown at most once per surface per session; a repeat gate shows a slim toast so
-// the funnel never nags (§8.3). render() is called once per frame from the main
-// loop; open(...) can be called from anywhere (it just latches).
+// Every explicit locked action opens this dialog, including repeated actions.
+// render() is called once per frame from the main loop; open(...) can be called
+// from anywhere (it just latches). Toasts are reserved for session notices.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 #include <cstdint>
@@ -20,8 +20,8 @@ namespace ui {
 
 class UpsellModal {
 public:
-    // Which gate opened it - drives the contextual subline + the once-per-surface
-    // de-dupe. Auth is the login variant (not logged in / no grant).
+    // Which gate opened it drives the contextual subline and analytics.
+    // Auth is the login variant (not logged in / no grant).
     enum class Trigger : uint8_t {
         Generic = 0, Range, Preset, Speed, Symbol, Layer,
         ServerTier, Events, Lesson, Daily, Auth, Research, _Count
@@ -59,6 +59,7 @@ public:
     void render();
 
     bool is_open() const { return open_; }
+    bool blocks_replay_shortcuts() const;
 
 private:
     UpsellModal() = default;
@@ -72,10 +73,10 @@ private:
     std::string dismiss_redirect_;   // full path ("/terminal/<sym>"); empty = just close
     bool        login_variant_ = false;
 
+    int      dismissed_frame_ = -1;   // do not pass the closing Escape to replay
     bool     want_open_ = false;      // latched by open(), consumed by render()
     bool     open_      = false;      // popup currently on screen
     bool     yearly_billing_ = true;  // annual default; user may choose monthly
-    uint32_t full_shown_mask_ = 0;    // bit per Trigger already shown as a full modal
 
     bool        toast_active_ = false;
     double      toast_until_  = 0.0;  // ImGui::GetTime() deadline

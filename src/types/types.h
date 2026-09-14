@@ -138,6 +138,9 @@ namespace Terminal {
         int64_t timestamp_ms;
         bool is_buy;
         int64_t agg_trade_id = 0;
+        // Display-only grouped archive records. Zero count means an original trade.
+        double summary_low = 0, summary_high = 0;
+        uint64_t summary_count = 0;
     };
 
     struct Candle {
@@ -357,8 +360,29 @@ namespace Terminal {
         double short_stop_density = 0.0;  // Buy stops above price (shorts defending) 0-1
     };
 
+    struct CensusQuality {
+        uint32_t version = 0;
+        int64_t venue_received_at_ms = 0;
+        double weighted_wallet_age_ms = 0;
+        int64_t p95_wallet_age_ms = 0;
+        uint32_t sampled_positions = 0;
+        uint32_t usable_positions = 0;
+        uint32_t unlocated_positions = 0;
+        uint32_t stale_positions = 0;
+        double sampled_notional_usd = 0;
+        double usable_notional_usd = 0;
+        double unlocated_notional_usd = 0;
+        double stale_notional_usd = 0;
+        double coverage_denominator_usd = 0;
+        uint32_t far_filtered_positions = 0;
+        double far_filtered_notional_usd = 0;
+    };
+
     // Full liquidation heatmap state for one symbol
     struct LiquidationHeatmapSnapshot {
+        CensusQuality census_quality;
+        std::string census_status; // HL only: sampled, unavailable, legacy
+        int64_t census_observed_at_ms = 0; // oldest wallet receipt; 0 unknown
         int64_t timestamp_ms = 0;
         double mark_price = 0.0;
         double total_long_risk_usd = 0.0;

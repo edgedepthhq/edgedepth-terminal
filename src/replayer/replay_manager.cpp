@@ -2290,7 +2290,8 @@ int64_t ReplayManager::prev_candle_boundary(int64_t ms) const {
 
 bool ReplayManager::process_keyboard_shortcuts() {
     // Don't consume shortcuts when typing in an input field
-    if (ImGui::GetIO().WantTextInput) return false;
+    if (ImGui::GetIO().WantTextInput ||
+        ui::UpsellModal::instance().blocks_replay_shortcuts()) return false;
 
     const ImGuiIO& io = ImGui::GetIO();
 
@@ -2731,8 +2732,8 @@ void ReplayManager::render_status_badge() {
     const float cy = p.y + pill_h * 0.5f;
 
     // Soft pill fill + hairline outline, in the state color (cyan/amber/red/grey).
-    dl->AddRectFilled(p, pmax, tok(color, 0.14f), pill_h * 0.5f);
-    dl->AddRect(p, pmax, tok(color, 0.45f), pill_h * 0.5f, 0, 1.0f);
+    dl->AddRectFilled(p, pmax, tok(color, 0.14f), Theme::Radius::R1);
+    dl->AddRect(p, pmax, tok(color, 0.45f), Theme::Radius::R1, 0, 1.0f);
     // Status dot - gentle pulse while connecting/buffering/seeking.
     float dot_a = 1.0f;
     if (info_.state == State::Creating || info_.state == State::Joining ||
@@ -2784,7 +2785,7 @@ void ReplayManager::render_transport_controls() {
         ImGui::EndDisabled();
         const ImVec2 c = ImVec2(p.x + sz * 0.5f, p.y + sz * 0.5f);
         if (hovered && can_control)
-            dl->AddRectFilled(p, ImVec2(p.x + sz, p.y + sz), tok(Theme::Tokens::HOVER), 6.0f);
+            dl->AddRectFilled(p, ImVec2(p.x + sz, p.y + sz), tok(Theme::Tokens::HOVER), Theme::Radius::R2);
         const ImU32 ic = !can_control ? tok(Theme::Tokens::TX4)
                        : hovered      ? tok(Theme::Tokens::TX1)
                                       : tok(Theme::Tokens::TX3);
@@ -2813,7 +2814,7 @@ void ReplayManager::render_transport_controls() {
 
     // ── Play / pause orb (38px circle, brand on hover, spinner while loading) ──
     {
-        const float sz = 36.0f, r = 18.0f;
+        const float sz = 36.0f;
         center_item_y(sz);
         const ImVec2 p = ImGui::GetCursorScreenPos();
         ImGui::BeginDisabled(!can_control);
@@ -2826,13 +2827,9 @@ void ReplayManager::render_transport_controls() {
         const ImVec2 c = ImVec2(p.x + sz * 0.5f, p.y + sz * 0.5f);
         const bool loading = (info_.state == State::Creating || info_.state == State::Joining ||
                               info_.state == State::Buffering || info_.state == State::Seeking);
-        const ImU32 orb_bg = !can_control ? tok(Theme::Tokens::INPUT)
-                           : hovered      ? tok(Theme::Tokens::BRAND)
-                                          : tok(Theme::Tokens::ACTIVE);
-        dl->AddCircleFilled(c, r, orb_bg);
-        const ImU32 glyph = !can_control ? tok(Theme::Tokens::TX3)
-                          : hovered      ? tok(Theme::Tokens::BRAND_INK)
-                                         : tok(Theme::Tokens::TX1);
+        if (hovered && can_control)
+            dl->AddRectFilled(p, ImVec2(p.x + sz, p.y + sz), tok(Theme::Tokens::HOVER));
+        const ImU32 glyph = tok(can_control ? Theme::Tokens::TX1 : Theme::Tokens::TX3);
         if (loading) {
             const float t = (float)ImGui::GetTime();
             dl->PathClear();
@@ -2899,10 +2896,10 @@ void ReplayManager::render_record_button() {
         const bool f_hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled);
         const ImVec2 fmax(fp.x + pill_w, fp.y + pill_h);
         if (focus_on) {
-            dl->AddRectFilled(fp, fmax, tok(Theme::Tokens::ACTIVE), pill_h * 0.5f);
-            dl->AddRect(fp, fmax, tok(Theme::Tokens::BRAND_LINE), pill_h * 0.5f, 0, 1.0f);
+            dl->AddLine(ImVec2(fp.x + 6, fmax.y - 1), ImVec2(fmax.x - 6, fmax.y - 1),
+                        tok(Theme::Tokens::TX1), 2);
         } else if (f_hovered && !recording && !saving) {
-            dl->AddRectFilled(fp, fmax, tok(Theme::Tokens::HOVER), pill_h * 0.5f);
+            dl->AddRectFilled(fp, fmax, tok(Theme::Tokens::HOVER), Theme::Radius::R1);
         }
         const ImU32 f_txt = focus_on              ? tok(Theme::Tokens::BRAND_TX)
                           : (recording || saving) ? tok(Theme::Tokens::TX4)
@@ -2941,7 +2938,7 @@ void ReplayManager::render_record_button() {
 
     const ImVec2 c(p.x + sz * 0.5f, p.y + sz * 0.5f);
     if (hovered && enabled)
-        dl->AddRectFilled(p, ImVec2(p.x + sz, p.y + sz), tok(Theme::Tokens::HOVER), 6.0f);
+        dl->AddRectFilled(p, ImVec2(p.x + sz, p.y + sz), tok(Theme::Tokens::HOVER), Theme::Radius::R2);
 
     if (recording) {
         // ⏹ - filled square + blinking ring (mirrors the burned badge's REC dot).
@@ -3022,9 +3019,9 @@ void ReplayManager::render_speed_control() {
         const bool locked = !Entitlements::speed_allowed(SPEED_PRESETS[i]);
         const bool active = (i == current_speed_preset_idx_) && !locked;
         if (active)
-            dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + pill_h),
-                              tok(Theme::Tokens::ACTIVE), Theme::Radius::R1);
-        else if (hovered && (can_control || locked))
+            dl->AddLine(ImVec2(x + 6, y + pill_h - 1), ImVec2(x + w - 6, y + pill_h - 1),
+                        tok(Theme::Tokens::TX1), 2);
+        if (hovered && (can_control || locked))
             dl->AddRectFilled(ImVec2(x, y), ImVec2(x + w, y + pill_h),
                               tok(Theme::Tokens::HOVER), Theme::Radius::R1);
 
@@ -3246,12 +3243,12 @@ void ReplayManager::render_timeline_scrubber() {
     // Soft amber grab-glow on hover/drag for an easy target.
     if (hovered || scrubber_dragging_) {
         dl->AddCircleFilled(head_center, 7.0f + scrubber_hover_anim_ * 2.0f,
-                            tok(Theme::Tokens::WARN, 0.18f));
+                            tok(Theme::Tokens::TX2, 0.18f));
     }
     const float ph_h = 14.0f;
     dl->AddRectFilled(ImVec2(fill_x - 1.0f, head_center.y - ph_h * 0.5f),
                       ImVec2(fill_x + 1.0f, head_center.y + ph_h * 0.5f),
-                      tok(Theme::Tokens::WARN), 1.0f);
+                      tok(Theme::Tokens::TX1), 0.0f);
 
     // ─── Source caption + window bounds (above the track) ────────────
     // "tick-by-tick · binancef · <30d|24h> archive" centered, with the window's

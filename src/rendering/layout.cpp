@@ -20,7 +20,8 @@ void LayoutManager::setup_default_layout(const std::string& exchange, const std:
     ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
     ImGui::DockBuilderRemoveNode(dockspace_id);
     ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-    ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
+    ImGui::DockBuilderSetNodePos(dockspace_id, ImGui::GetWindowPos());
+    ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetWindowSize());
 
     ImGuiID dock_main = dockspace_id;
 
@@ -40,7 +41,7 @@ void LayoutManager::setup_default_layout(const std::string& exchange, const std:
         // rightmost columns + the tape's TIME column on narrower canvases (a laptop,
         // or the lesson with its left rail eating width). Clamp to a sane band so it
         // can't swallow the chart on small screens or look lost on huge ones.
-        const float vw = ImGui::GetMainViewport()->Size.x;
+        const float vw = ImGui::GetWindowSize().x;
         const float right_ratio =
             std::clamp(Theme::Layout::RIGHTCOL_W / std::max(vw, 1.0f), 0.22f, 0.42f);
         ImGuiID dock_right;
@@ -64,7 +65,7 @@ void LayoutManager::setup_default_layout(const std::string& exchange, const std:
     }
 
     // Watchlist sidebar - fixed-ish WATCHLIST_W via ratio of viewport width
-    const float vw = ImGui::GetMainViewport()->Size.x;
+    const float vw = ImGui::GetWindowSize().x;
     const float wl_ratio = std::clamp(Theme::Layout::WATCHLIST_W / std::max(vw, 1.0f), 0.10f, 0.30f);
     ImGuiID dock_left;
     ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Left, wl_ratio, &dock_left, &dock_main);
@@ -74,7 +75,8 @@ void LayoutManager::setup_default_layout(const std::string& exchange, const std:
     // available via +Widget.) Sized in PIXELS (~RIGHTCOL_W) so the ladder's fixed
     // columns can't clip; clamped so it can't swallow the chart or look lost.
     const float right_ratio =
-        std::clamp(Theme::Layout::RIGHTCOL_W / std::max(vw, 1.0f), 0.22f, 0.40f);
+        std::clamp(Theme::Layout::RIGHTCOL_W /
+            std::max(ImGui::DockBuilderGetNode(dock_main)->Size.x, 1.0f), 0.22f, 0.48f);
     ImGuiID dock_right;
     ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, right_ratio, &dock_right, &dock_main);
 

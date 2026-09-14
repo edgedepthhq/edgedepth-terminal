@@ -59,6 +59,12 @@ void expect_route(const std::string& path, const std::string& search,
 }
 
 void test_default_route() {
+    expect_route("/terminal/%E7%89%9B%E6%9D%A5USDT", "", "binancef", "牛来usdt", "encoded Chinese route");
+    expect_route("/terminal/牛来USDT", "", "binancef", "牛来usdt", "literal Chinese route");
+    expect_route("/terminal/%E7%89%9B", "?exchange=hl", "hl", "牛", "UTF-8 across venues");
+    expect_route("/terminal/%2541", "", "binancef", "%41", "decode only once");
+    expect_route("/terminal/%GG%", "", "binancef", "%gg%", "malformed escapes stay literal");
+    expect_route("/terminal/%00BTC", "", "binancef", "%00btc", "do not introduce NUL");
     const Route fresh;
     expect_eq(fresh.exchange, "binancef", "a fresh Route defaults to binance futures");
     expect_eq(fresh.symbol, "", "a fresh Route has no symbol");

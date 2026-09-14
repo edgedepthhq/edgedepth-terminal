@@ -94,11 +94,6 @@ bool persist() {
     last_written = bytes;
     return true;
 }
-void replace_all(std::string& text, const std::string& from, const std::string& to) {
-    if (from.empty() || from == to) return;
-    for (size_t at = 0; (at = text.find(from, at)) != std::string::npos; at += to.size())
-        text.replace(at, from.size(), to);
-}
 void apply(const Json& doc) {
     if (!valid_document(doc)) return;
     const auto fmt = SymbolRegistry::instance().get_formatter(active_pair.exchange, active_pair.symbol);
@@ -120,18 +115,34 @@ void apply(const Json& doc) {
         else if (type == "paper") w = std::make_unique<PositionsPanel>(*context);
         if (!w) continue;
         w->load_settings(row["settings"]);
-        replace_all(ini, row["title"].get<std::string>(), w->title());
-        // Chart's ### ID is stored without its changing visible title by ImGui.
-        const auto old = row["title"].get<std::string>();
-        const std::string fresh = w->title();
-        if (old.find("###") != std::string::npos && fresh.find("###") != std::string::npos)
-            replace_all(ini, old.substr(old.find("###")), fresh.substr(fresh.find("###")));
+        remap_window_title(ini, row["title"].get<std::string>(), w->title());
         panels->push_back(std::move(w));
     }
     ImGui::ClearIniSettings();
     if (!ini.empty()) {
         ImGui::LoadIniSettingsFromMemory(ini.c_str(),ini.size());
-        LayoutManager::restore_layout_for(active_pair.exchange,active_pair.symbol);
+        // An INI can be syntactically valid while its main panels are floating
+        // (or its watchlist shares the chart tab). Never restore that at boot.
+        bool docked = true;
+        ImGuiID chart_dock = 0, watchlist_dock = 0;
+        for (const auto& w : *panels) {
+            if (w->type() != WidgetType::Chart && w->type() != WidgetType::DOM &&
+                w->type() != WidgetType::Watchlist) continue;
+            const auto* settings = ImGui::FindWindowSettingsByID(ImHashStr(w->title()));
+            const auto* node = settings ? ImGui::DockBuilderGetNode(settings->DockId) : nullptr;
+            const auto* root = node;
+            while (root && root->ParentNode) root = root->ParentNode;
+            docked &= root && root->IsDockSpace() && node->Size.x >= 200 && node->Size.y >= 160;
+            if (w->type() == WidgetType::Chart) chart_dock = settings ? settings->DockId : 0;
+            if (w->type() == WidgetType::Watchlist) watchlist_dock = settings ? settings->DockId : 0;
+        }
+        if (docked && (!watchlist_dock || chart_dock != watchlist_dock)) {
+            LayoutManager::restore_layout_for(active_pair.exchange,active_pair.symbol);
+        } else {
+            ImGui::ClearIniSettings();
+            LayoutManager::reset_layout_for(active_pair.exchange,active_pair.symbol);
+            notice = "Panel layout repaired. Your chart settings are preserved.";
+        }
     }
     else LayoutManager::reset_layout_for(active_pair.exchange,active_pair.symbol);
 }

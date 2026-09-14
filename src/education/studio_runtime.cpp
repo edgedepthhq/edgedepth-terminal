@@ -542,6 +542,7 @@ void StudioRuntime::emit_state(const AppContext& ctx) {
     const bool active  = rm.is_active();
     const bool playing = rm.is_playing();
     const bool paused  = rm.is_paused();
+    const bool unavailable = !rm.info().error_message.empty();
     const bool loading = rm.is_loading() || rm.state() == ReplayManager::State::Seeking;
     const float speed  = rm.info().speed;
 
@@ -561,6 +562,7 @@ void StudioRuntime::emit_state(const AppContext& ctx) {
     hasher.mix(active  ? 1u : 0u);
     hasher.mix(playing ? 1u : 0u);
     hasher.mix(paused  ? 1u : 0u);
+    hasher.mix(unavailable ? 1u : 0u);
     hasher.mix(loading ? 1u : 0u);
     hasher.mix(static_cast<uint64_t>(static_cast<int>(speed * 100.0f)));
     hasher.mix(static_cast<uint64_t>(export_phase_) + 100u);
@@ -590,6 +592,8 @@ void StudioRuntime::emit_state(const AppContext& ctx) {
     st["active"]  = active;
     st["playing"] = playing;
     st["paused"]  = paused;
+    // Additive v2 field: older hosts ignore it; newer hosts also accept old clients.
+    st["replayUnavailable"] = unavailable;
     st["loading"] = loading;
     st["speed"]   = speed;
     {

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
+#include "core/workspace_settings.h"
 #include <implot.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten/em_asm.h>
@@ -27,9 +29,11 @@ namespace Theme {
         ImFont* f_mono_lg     = nullptr;
 
         // tweak state
-        Accent           g_accent  = Accent::Teal;
+        Accent           g_accent  = Accent::Mono;
         CandleConvention g_candles = CandleConvention::TealMag;
         int              g_density = 8;
+        uint32_t g_custom_up = 0x2fd6ad, g_custom_down = 0xee5c78;
+        bool g_preferences_saved = true;
 
         ImVec4 with_a(const ImVec4& c, float a) { return ImVec4(c.x, c.y, c.z, a); }
     }
@@ -50,7 +54,7 @@ namespace Theme {
         switch (a) {
             case Accent::Indigo: hex = 0x6d8bff; tx = 0x8ba3ff; soft = 0.15f; line = 0.55f; break;
             case Accent::Amber:  hex = 0xf0b350; tx = 0xf6c76e; soft = 0.15f; line = 0.55f; break;
-            case Accent::Mono:   hex = 0xaab8c4; tx = 0xc0ccd6; soft = 0.13f; line = 0.45f; break;
+            case Accent::Mono:   hex = 0xe7e9ed; tx = 0xffffff; soft = 0.13f; line = 0.45f; break;
             case Accent::Teal:   // design default: accent #35c9c4, textTint #3fe0d0
             default:             hex = 0x35c9c4; tx = 0x3fe0d0; soft = 0.14f; line = 0.55f; break;
         }
@@ -65,6 +69,8 @@ namespace Theme {
         g_candles = c;
         uint32_t up, down; float line = 0.50f;
         switch (c) {
+            case CandleConvention::BlueWhite: up = 0x5ba9ff; down = 0xf2f2f2; break;
+            case CandleConvention::Custom: up = g_custom_up; down = g_custom_down; break;
             case CandleConvention::Classic: up = 0x26d07a; down = 0xff4d5e; break;
             case CandleConvention::Muted:   up = 0x41a583; down = 0xcf6173; line = 0.45f; break;
             case CandleConvention::TealMag: // design tokens: up #2fd6ad / down #ee5c78
@@ -76,6 +82,81 @@ namespace Theme {
         Tokens::DOWN_SOFT = from_hex(down, 0.13f);
         Tokens::UP_LINE   = from_hex(up, line);
         Tokens::DOWN_LINE = from_hex(down, line);
+    }
+
+
+    // Appearance is a browser preference, shared by live charts and replay.
+    // Keep it independent of live-only workspace capture.
+    void load_preferences() {
+#ifdef __EMSCRIPTEN__
+        char* text = reinterpret_cast<char*>(EM_ASM_PTR({
+            try {
+                const value = localStorage.getItem('edgedepth.appearance.v1');
+                return value && value.length < 4096 ? stringToNewUTF8(value) : 0;
+            } catch (_) { return 0; }
+        }));
+        if (!text) return;
+        const auto j = workspace::Json::parse(text, nullptr, false);
+        free(text);
+        if (!j.is_object()) return;
+        int version = 0;
+        workspace::read(j, "version", version, 1, 1);
+        if (version != 1) return;
+        workspace::read(j, "accent", g_accent, 0, 3);
+        workspace::read(j, "candles", g_candles, 0, 4);
+        workspace::read(j, "up", g_custom_up, 0, 0xffffff);
+        workspace::read(j, "down", g_custom_down, 0, 0xffffff);
+        set_accent(g_accent);
+        set_candle_convention(g_candles);
+#endif
+    }
+
+    void render_appearance_controls() {
+        bool changed = false;
+        int palette = int(candles());
+        ImGui::TextUnformatted("Market colors");
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::Combo("##market_palette", &palette,
+            "Teal / rose\0Green / red\0Muted\0Blue / white\0Custom\0")) {
+            set_candle_convention(CandleConvention(palette));
+            changed = true;
+        }
+        ImVec4 up = Tokens::UP, down = Tokens::DOWN;
+        const bool up_changed = ImGui::ColorEdit3("Up / buy", &up.x, ImGuiColorEditFlags_NoInputs);
+        const bool down_changed = ImGui::ColorEdit3("Down / sell", &down.x, ImGuiColorEditFlags_NoInputs);
+        if (up_changed || down_changed) {
+            const auto hex = [](ImVec4 c) {
+                return (uint32_t(c.x * 255 + 0.5f) << 16) |
+                       (uint32_t(c.y * 255 + 0.5f) << 8) | uint32_t(c.z * 255 + 0.5f);
+            };
+            g_custom_up = hex(up); g_custom_down = hex(down);
+            set_candle_convention(CandleConvention::Custom);
+            changed = true;
+        }
+        ImGui::TextWrapped("Applies to candles, trade bubbles and signed market data throughout the terminal.");
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Interface accent");
+        int a = int(accent());
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::Combo("##interface_accent", &a, "Teal\0Indigo\0Amber\0Neutral\0")) {
+            set_accent(Accent(a)); changed = true;
+        }
+        if (ImGui::Button("Reset appearance")) {
+            set_candle_convention(CandleConvention::TealMag);
+            set_accent(Accent::Mono); changed = true;
+        }
+        if (changed) {
+#ifdef __EMSCRIPTEN__
+            const auto text = workspace::Json({{"version",1}, {"accent",int(accent())},
+                {"candles",int(candles())}, {"up",g_custom_up}, {"down",g_custom_down}}).dump();
+            g_preferences_saved = EM_ASM_INT({
+                try { localStorage.setItem('edgedepth.appearance.v1', UTF8ToString($0)); return 1; }
+                catch (_) { return 0; }
+            }, text.c_str());
+#endif
+        }
+        if (!g_preferences_saved)
+            ImGui::TextWrapped("Browser storage is unavailable. These colors apply until you reload.");
     }
 
     namespace {
@@ -121,7 +202,7 @@ namespace Theme {
         // ── windows / surfaces ───────────────────────────────────────────────
         c[ImGuiCol_WindowBg]          = PANEL;
         c[ImGuiCol_ChildBg]           = ImVec4(0, 0, 0, 0);  // children inherit
-        c[ImGuiCol_PopupBg]           = with_a(PANEL, 0.98f);
+        c[ImGuiCol_PopupBg]           = ELEV;
         c[ImGuiCol_MenuBarBg]         = ELEV;
         c[ImGuiCol_Border]            = BD2;
         c[ImGuiCol_BorderShadow]      = ImVec4(0, 0, 0, 0);
@@ -141,7 +222,7 @@ namespace Theme {
         c[ImGuiCol_TitleBgCollapsed]  = PANEL;
         c[ImGuiCol_Tab]               = PANEL;
         c[ImGuiCol_TabHovered]        = HOVER;
-        c[ImGuiCol_TabActive]         = ACTIVE;
+        c[ImGuiCol_TabActive]         = PANEL;
         c[ImGuiCol_TabUnfocused]      = PANEL;
         c[ImGuiCol_TabUnfocusedActive]= ELEV;
 
@@ -151,7 +232,7 @@ namespace Theme {
         c[ImGuiCol_HeaderActive]      = with_a(BRAND, 0.22f);
 
         // ── buttons ──────────────────────────────────────────────────────────
-        c[ImGuiCol_Button]            = INPUT;
+        c[ImGuiCol_Button]            = ImVec4(0, 0, 0, 0);
         c[ImGuiCol_ButtonHovered]     = HOVER;
         c[ImGuiCol_ButtonActive]      = ACTIVE;
         c[ImGuiCol_CheckMark]         = BRAND;
@@ -190,22 +271,23 @@ namespace Theme {
         // ── metrics (IMGUI-NOTES §1) ─────────────────────────────────────────
         s.WindowRounding    = 0.0f;   // docked panels are square (chrome rules)
         s.ChildRounding     = 0.0f;
-        s.FrameRounding     = 5.0f;   // --r2
-        s.GrabRounding      = 5.0f;
+        s.FrameRounding     = Radius::R2;   // --r2
+        s.GrabRounding      = Radius::R1;
         s.PopupRounding     = Radius::R3;   // floating chrome: radius 6
         s.TabRounding       = 0.0f;
         s.WindowBorderSize  = 1.0f;
         s.ChildBorderSize   = 1.0f;
-        s.FrameBorderSize   = 1.0f;
+        s.FrameBorderSize   = 0.0f;
         s.PopupBorderSize   = 1.0f;
-        s.ScrollbarRounding = 6.0f;
+        s.ScrollbarRounding = 0.0f;
         s.ScrollbarSize     = 9.0f;
         s.CellPadding       = ImVec2(6, 2);
         s.ItemSpacing       = ImVec2(8, 6);
         s.ItemInnerSpacing  = ImVec2(6, 4);
-        s.FramePadding      = ImVec2(8, 5);
+        s.FramePadding      = ImVec2(9, 4);
         s.WindowPadding     = ImVec2(0, 0);   // panels manage their own gutters
-        s.GrabMinSize       = 10.0f;
+        s.GrabMinSize       = 16.0f;
+        s.DisabledAlpha     = 0.65f;
 
         apply_implot_style();
     }
@@ -213,6 +295,34 @@ namespace Theme {
     void apply_trading_colors() {
         // retained for call-site compatibility - table styling now lives in
         // apply_dark_theme(); nothing extra to override here.
+    }
+
+    bool begin_popup(const char* id, ImGuiWindowFlags flags) {
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 10));
+        const bool open = ImGui::BeginPopup(id, flags);
+        ImGui::PopStyleVar();
+        return open;
+    }
+
+    bool choice_button(const char* label, bool selected, ImVec2 size) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_Text, selected ? Tokens::TX1 : Tokens::TX2);
+        const bool clicked = ImGui::Button(label, size);
+        if (selected) {
+            const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+            ImGui::GetWindowDrawList()->AddLine(ImVec2(a.x + 6, b.y - 1),
+                ImVec2(b.x - 6, b.y - 1), u32(Tokens::BRAND), 2);
+        }
+        ImGui::PopStyleColor(2);
+        return clicked;
+    }
+
+    void section_label(const char* label) {
+        ImGui::Spacing();
+        ImGui::PushFont(Fonts::label());
+        ImGui::TextColored(Tokens::TX3, "%s", label);
+        ImGui::PopFont();
+        ImGui::Spacing();
     }
 
     void begin_tooltip() {
@@ -249,7 +359,8 @@ namespace Theme {
         ImFontConfig cfg;
         cfg.OversampleH = 3;
         cfg.OversampleV = 2;
-        cfg.PixelSnapH  = true;
+        // Preserve fractional glyph advances in the supersampled UI atlas.
+        cfg.PixelSnapH  = false;
 
         // Default latin range + Δ (U+0394, DOM delta column) + … (U+2026)
         static const ImWchar glyph_ranges[] = {
@@ -301,21 +412,21 @@ namespace Theme {
             return f;
         };
 
-        // UI face - Hanken Grotesk (chrome, labels, headings)
-        f_ui          = add("/fonts/HankenGrotesk-Regular.ttf",  16.0f);
-        f_ui_semibold = add("/fonts/HankenGrotesk-SemiBold.ttf", 16.0f);
-        f_heading     = add("/fonts/HankenGrotesk-SemiBold.ttf", 20.0f);
-        f_label       = add("/fonts/HankenGrotesk-SemiBold.ttf", 11.5f);
+        // UI face - Inter (chrome, labels, headings)
+        f_ui          = add("/fonts/Inter-400.ttf",  16.0f);
+        f_ui_semibold = add("/fonts/Inter-600.ttf", 16.0f);
+        f_heading     = add("/fonts/Inter-600.ttf", 18.0f);
+        f_label       = add("/fonts/Inter-600.ttf", 11.5f);
 
-        // Numeric face - JetBrains Mono (every table/ladder/clock/price).
+        // Numeric face - Roboto Mono (every table/ladder/clock/price).
         // Base logical sizes; ui_scale (above) applies the global multiplier so
         // the dense DOM ladder / tape / depth widgets scale with everything else.
         // ImGui tables auto-size rows to the font, so row heights track this.
-        f_mono_xs     = add("/fonts/JetBrainsMono-SemiBold.ttf",  9.5f);
-        f_mono_sm     = add("/fonts/JetBrainsMono-Regular.ttf",  15.0f);
-        f_mono        = add("/fonts/JetBrainsMono-Regular.ttf",  16.0f);
-        f_mono_md     = add("/fonts/JetBrainsMono-Medium.ttf",   17.0f);
-        f_mono_lg     = add("/fonts/JetBrainsMono-SemiBold.ttf", 23.0f);
+        f_mono_xs     = add("/fonts/RobotoMono-500.ttf",  9.5f);
+        f_mono_sm     = add("/fonts/RobotoMono-400.ttf",  15.0f);
+        f_mono        = add("/fonts/RobotoMono-400.ttf",  16.0f);
+        f_mono_md     = add("/fonts/RobotoMono-500.ttf",   17.0f);
+        f_mono_lg     = add("/fonts/RobotoMono-500.ttf", 23.0f);
 
         if (!f_ui) f_ui = io.Fonts->AddFontDefault();
         if (!f_ui_semibold) f_ui_semibold = f_ui;

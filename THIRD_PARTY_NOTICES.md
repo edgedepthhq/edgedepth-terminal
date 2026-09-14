@@ -19,6 +19,8 @@ The EdgeDepth Terminal build fetches and links the following third-party compone
 |---|---|
 | [Hanken Grotesk](https://github.com/marcologous/hanken-grotesk) | SIL Open Font License 1.1 |
 | [JetBrains Mono](https://github.com/JetBrains/JetBrainsMono) | SIL Open Font License 1.1 |
+| [Inter](https://github.com/rsms/inter) | SIL Open Font License 1.1 (`fonts/Inter-OFL.txt`) |
+| [Roboto Mono](https://github.com/googlefonts/robotomono) | SIL Open Font License 1.1 (`fonts/RobotoMono-OFL.txt`) |
 
 ## Symbol icons
 

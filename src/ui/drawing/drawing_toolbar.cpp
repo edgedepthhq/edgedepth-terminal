@@ -41,8 +41,7 @@ constexpr ToolGroup kGroups[] = {
 };
 
 // One 28px icon button, centered in the rail column. Returns true on click.
-// `active` renders the neutral on-state (white chip + near-black glyph) -
-// James's 2026-08-06 call: no accent cyan anywhere in the drawing chrome.
+// Active tools use a neutral edge marker and a brighter glyph.
 bool icon_button(const char* id, bool active, const char* tip,
                  void (*draw)(ImDrawList*, ImVec2, float, ImU32, float)) {
     const float avail = ImGui::GetContentRegionAvail().x;
@@ -54,13 +53,13 @@ bool icon_button(const char* id, bool active, const char* tip,
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 c(p.x + kBtnSize * 0.5f, p.y + kBtnSize * 0.5f);
     if (active) {
-        dl->AddRectFilled(p, ImVec2(p.x + kBtnSize, p.y + kBtnSize),
-                          Theme::u32(Theme::Tokens::TX1), Theme::Radius::R2);
+        dl->AddLine(ImVec2(p.x + 1, p.y + 6), ImVec2(p.x + 1, p.y + kBtnSize - 6),
+                    Theme::u32(Theme::Tokens::TX1), 2);
     } else if (hovered) {
         dl->AddRectFilled(p, ImVec2(p.x + kBtnSize, p.y + kBtnSize),
                           Theme::u32(Theme::Tokens::ELEV), Theme::Radius::R2);
     }
-    const ImU32 col = active  ? Theme::u32(Theme::Tokens::BASE)
+    const ImU32 col = active  ? Theme::u32(Theme::Tokens::TX1)
                     : hovered ? Theme::u32(Theme::Tokens::TX1)
                               : Theme::u32(Theme::Tokens::TX2);
     draw(dl, c, kIconHalf, col, 1.5f);
@@ -253,10 +252,10 @@ void render_topbar_button(DrawingManager& mgr) {
     const bool armed = mgr.armed() != Tool::Cursor;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     if (armed)
-        dl->AddRectFilled(a, b, Theme::u32(Theme::Tokens::TX1), Theme::Radius::R1);
+        dl->AddLine(ImVec2(a.x + 6, b.y - 1), ImVec2(b.x - 6, b.y - 1), Theme::u32(Theme::Tokens::TX1), 2);
     draw_ui_icon(dl, UiIcon::Pencil,
                  ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), 7.0f,
-                 armed ? Theme::u32(Theme::Tokens::BASE)
+                 armed ? Theme::u32(Theme::Tokens::TX1)
                        : Theme::u32(Theme::Tokens::TX2),
                  1.4f);
     if (ImGui::IsItemHovered()) Theme::tooltip("Drawing tools");

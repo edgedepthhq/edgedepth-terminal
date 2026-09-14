@@ -25,6 +25,7 @@
 
 #include <cstdint>
 #include <vector>
+#include <string>
 
 #include "core/app_context.h"
 #include "rendering/liq_field_texture_renderer.h"
@@ -111,6 +112,7 @@ private:
     float  norm_hi_  = 0.0f;  // LOG-map upper clip = p(hi_pct) of intensities
 
     // Cache signature: rebuild when any of these move.
+    std::string sig_exchange_, sig_symbol_;
     int64_t sig_ts_   = -1;   // last CLOSED candle timestamp
     size_t  sig_n_    = 0;    // closed candle count
     uint8_t sig_mask_ = 0;    // leverage mask

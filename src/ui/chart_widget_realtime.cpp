@@ -1,4 +1,5 @@
 #include "ui/chart_widget.h"
+#include "core/candle_bubble_display.h"
 #include "ui/realtime_navigation.h"
 #include "core/candle_manager.h"
 #include "core/display_time_zone.h"
@@ -10,21 +11,33 @@
 #include "ui/upsell_modal.h"
 #include "rendering/theme.h"
 #include <cmath>
+#include <emscripten.h>
+#include "stream_handler.h"
 #include <array>
 #include "rendering/realtime_bubble.h"
+#include "rendering/observed_liquidations.h"
+#include "ui/indicators/volume_indicator.h"
 #include "types/frame_profiler.h"
 
+bool ChartWidget::rt_mode_locked() const {
+    return Entitlements::hosted() && !Entitlements::is_pro() &&
+        !ctx_.replay_mgr().is_active() && !EducationBoot::instance().is_pack();
+}
+
 void ChartWidget::set_rt_mode(bool on) {
-    if (on && Entitlements::hosted() && !Entitlements::is_pro() &&
-        !ctx_.replay_mgr().is_active() && !EducationBoot::instance().is_pack()) {
+    if (on && rt_mode_locked()) {
         ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Layer,
-            "Real-time depth and trade bubbles are a hosted Pro view.", "realtime_depth");
+            "Live real-time mode (observed depth, every trade as a bubble, the spread) is a Pro view. Large prints still show as bubbles on your candles.", "realtime_depth");
         return;
     }
-    if (!on && rt_mode_ && liq_dense_field_) heatmap_enabled_ = false;
+    if (!on && rt_mode_) {
+        heatmap_enabled_ = false;
+        liq_dense_field_ = true;
+    }
     rt_mode_ = on;
     if (on && !rt_archive_) rt_archive_ = RealtimeArchive::acquire(ctx_.candle_mgr(), ctx_.ob_mgr(), pair_);
-    if (!on) rt_archive_.reset();
+    // Keep recording across candle/RT switches. Chart closure or a context
+    // change owns archive disposal and depth unsubscription.
     if (on) {
         chart_type_ = ChartType::Line;
         rt_candles_ = false;
@@ -33,8 +46,9 @@ void ChartWidget::set_rt_mode(bool on) {
         rt_price_window_ = {};
         rt_effective_multiplier_ = rt_bucket_multiplier_;
         rt_paused_ = false;
+        rt_paused_liquidations_.clear();
         heatmap_enabled_ = true;
-        rt_span_ms_ = 60000;
+        rt_span_ms_ = realtime_default_span_ms;
         rt_unhealthy_since_ms_ = 0;
         if (!rt_flow_) {
             rt_flow_ = std::make_unique<TradeAtPriceAccumulator>();
@@ -46,11 +60,8 @@ void ChartWidget::set_rt_mode(bool on) {
             rt_stream_mgr_->subscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
             rt_subscribed_ = true;
         }
-    } else if (rt_subscribed_) {
-        rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
-        rt_stream_mgr_ = nullptr;
+    } else {
         rt_flow_.reset();
-        rt_subscribed_ = false;
     }
 }
 
@@ -58,9 +69,11 @@ void ChartWidget::render_realtime_settings() {
     if (!ctx_.replay_mgr().is_active() && ImGui::Checkbox("Pause display", &rt_paused_)) {
         if (rt_paused_) {
             rt_paused_trades_ = ctx_.candle_mgr().realtime_trades().trades();
+            rt_paused_liquidations_ = ctx_.liq_heatmap_mgr().observed_events(pair_);
             if (rt_archive_) rt_archive_->cancel_view();
+            rt_query_from_ = 0; // A cancelled request is not loaded coverage.
         }
-        else rt_paused_trades_.clear();
+        else { rt_paused_trades_.clear(); rt_paused_liquidations_.clear(); }
     }
     ImGui::Checkbox("1s observed candles", &rt_candles_);
     ImGui::Checkbox("Trade-price line", &rt_trade_line_);
@@ -74,7 +87,27 @@ void ChartWidget::render_realtime_settings() {
     if (ImGui::IsItemHovered()) Theme::tooltip(rt_dom_linked_
         ? rt_auto_fit_history_ ? "Fits observed price history with readable grouped rows. Drag or zoom the price axis to inspect manually; Follow price resumes fitting." : "Keeps the market in the central half of a readable price window. Drag vertically to stop following. Zoom out stops before numbers overlap; choose coarser fidelity for a wider price range."
         : "Turn off to zoom or drag the price axis. Turn on to fit observed prices again.");
+    if (ImGui::Button("Recent 30 seconds")) {
+        rt_span_ms_ = realtime_default_span_ms; rt_auto_price_ = true;
+        rt_price_window_ = {}; rt_auto_fit_ = {};
+        ctx_.candle_mgr().set_follow_live(true);
+    }
+    ImGui::TextWrapped("Opens on 30 seconds. Zoom out or drag left for older retained context; changing the view does not change recorded detail.");
     ImGui::Checkbox("Trade bubbles", &rt_bubbles_);
+    ImGui::Checkbox("Observed liquidation diamonds", &liq_observed_enabled_);
+    ImGui::Checkbox("Liquidation activity strip", &rt_liq_strip_);
+    if (ImGui::Button("Liquidation focus")) {
+        liq_observed_enabled_ = rt_liq_strip_ = heatmap_enabled_ = rt_bubbles_ = true;
+    }
+    ImGui::TextWrapped("Diamonds show reported liquidations. Depth, trades and the strip can each be toggled independently. Binance reports are censored; missing liquidations are not estimated.");
+    if (liq_observed_enabled_) {
+        ImGui::SetNextItemWidth(150);
+        ImGui::InputFloat("Minimum liquidation notional", &liq_obs_min_usd_, 100, 1000, "%.0f");
+        if (!std::isfinite(liq_obs_min_usd_)) liq_obs_min_usd_ = 0;
+        liq_obs_min_usd_ = std::clamp(liq_obs_min_usd_, 0.0f, 1e15f);
+        ImGui::TextWrapped("Marker filter only; the activity strip includes all retained reports in view.");
+    }
+    ImGui::TextWrapped("Depth brightness: mean quantity per native tick. Wider rows keep their totals in the DOM; thin walls may fade on zoom-out. Time bins average received samples.");
     ImGui::Checkbox("Extend current depth", &rt_extend_depth_);
     if (ImGui::IsItemHovered()) Theme::tooltip("Projects the last synchronized sampled book into the right margin. This is a held current book, not future orders or recorded history. Turn off to leave the margin clear.");
     ImGui::Checkbox("Auto market size", &rt_auto_bubbles_);
@@ -107,16 +140,17 @@ void ChartWidget::render_realtime_settings() {
             double(rt_loaded_step_)/1000, rt_archive_trades_.size(), a.view_trade_count);
         if(!a.startup_status.empty()) {
             ImGui::TextWrapped("%s",a.startup_status.c_str());
-            ImGui::TextWrapped("Startup depth: 500ms observations, up to 128 native levels per side. Trade coverage can be shorter during bursts. Current DOM uses live depth. Startup trades do not enter CVD or alerts.");
+            ImGui::Text("Startup received up to %d price levels per side", a.startup_max_levels_per_side);
+            ImGui::TextWrapped("Startup depth: 500ms observations, up to 512 native levels per side on supported feeds. Busy-market prefixes group observed trades by side over 100ms, preserving quantity and price range; zoom cannot recover individual trades there. Older servers may provide less coverage. Current DOM uses live depth. Startup trades do not enter CVD or alerts.");
         }
         ImGui::TextUnformatted(a.error.empty() ? "Recording observed depth and received trades" : a.error.c_str());
         if (rt_trade_tail_waiting_) ImGui::TextUnformatted("Refreshing older trades; current trades continue");
         if (a.dropped) ImGui::Text("Capture overload: %zu records missed; depth gaps preserved", a.dropped);
         if (ImGui::Button("Whole session")) { rt_span_ms_ = double(RealtimeArchive::target_ms) / 0.88; ctx_.candle_mgr().set_follow_live(true); }
         ImGui::SameLine();
-        if (ImGui::Button("Return live")) { rt_span_ms_ = 60000; rt_auto_price_ = true; rt_price_window_ = {}; rt_auto_fit_ = {}; ctx_.candle_mgr().set_follow_live(true); }
+        if (ImGui::Button("Return live")) { rt_span_ms_ = realtime_default_span_ms; rt_auto_price_ = true; rt_price_window_ = {}; rt_auto_fit_ = {}; ctx_.candle_mgr().set_follow_live(true); }
         if (ImGui::Button("Clear history")) { rt_archive_->reset(); }
-        ImGui::TextUnformatted("Local session only. Closing RT clears its archive. Storage may be evicted.");
+        ImGui::TextUnformatted("Local session only. Switching to candles keeps recording; closing the chart clears its archive. Storage may be evicted.");
     }
     ImGui::Text("%s: %d native ticks per row", rt_auto_fit_history_ && rt_dom_linked_ ? "Automatic grouping" : "Fixed grouping", rt_effective_multiplier_);
     ImGui::TextUnformatted("Minimum fidelity: Layers > Depth settings");
@@ -143,6 +177,13 @@ void ChartWidget::on_rewind(int64_t) {
     rt_paused_trades_.clear();
     rt_book_valid_ = false;
     rt_bubble_scale_ = {};
+    // Candle-mode large prints belong to the traversal being discarded too.
+    candle_bubble_history_.reset();
+    flow_history_.reset();
+    candle_prints_.clear();
+    candle_prints_seen_ms_ = 0; candle_prints_seen_id_ = 0;
+    candle_bubble_scale_ = {}; candle_bubble_scale_since_ms_ = 0;
+    candle_bubble_auto_floor_ = 0; candle_bubble_size_reference_ = 0;
 }
 
 void ChartWidget::update_realtime() {
@@ -178,12 +219,11 @@ void ChartWidget::update_realtime() {
         if (sample->timestamp_ms <= clock - RealtimeDepthHistory::retention_ms) continue;
         rt_prices_.clear();
         for (const auto& level : sample->levels) rt_prices_[level.price] += float(level.size);
-        if (!rt_history_view_ || realtime_live_edge()) rt_renderer_->finalize_column(sample->timestamp_ms, rt_prices_, sample->segment_start, (sample->bid + sample->ask) * 0.5);
+        if (!rt_history_view_ || realtime_live_edge()) rt_renderer_->finalize_column(sample->timestamp_ms, rt_prices_, sample->segment_start, (sample->bid + sample->ask) * 0.5, sample->source_bucket_ticks);
         rt_latest_ = sample;
         rt_samples_.push_back(sample);
         if (rt_history_view_ && realtime_live_edge() && sample->timestamp_ms > rt_loaded_to_)
-            rt_archive_samples_.push_back(sample);
-        while (rt_archive_samples_.size() > 4096) rt_archive_samples_.pop_front();
+            append_realtime_depth_sample(rt_archive_samples_, sample, rt_loaded_step_);
         while (rt_samples_.size() > RealtimeDepthHistory::max_samples || rt_samples_.front()->timestamp_ms <= clock - RealtimeDepthHistory::retention_ms)
             rt_samples_.pop_front();
     }
@@ -204,7 +244,8 @@ void ChartWidget::update_realtime() {
             ctx_.stream_mgr().refresh_orderbook({pair_, Terminal::Stream::Orderbook, 0}, clock);
     }
     rt_renderer_->set_observation_hold((!rt_history_view_ || realtime_live_edge()) && rt_book_valid_ && rt_latest_ &&
-        clock - rt_latest_->timestamp_ms <= 15000 ? clock : 0);
+        clock - rt_latest_->timestamp_ms <= 15000 ? clock : 0,
+        rt_latest_ ? rt_latest_->timestamp_ms : 0);
 
 }
 
@@ -247,9 +288,8 @@ void ChartWidget::render_realtime() {
     // Historical best bid/ask are steps at original observation timestamps.
     // Quiet intervals hold the prior quote; a new synchronization epoch breaks it.
     const RealtimeDepthHistory::Sample* previous_book = nullptr;
-    for (const auto& sample : realtime_samples()) {
-        if (sample->timestamp_ms > rt_clock_ms_ || sample->timestamp_ms > limits.X.Max) break;
-        if (sample->timestamp_ms < limits.X.Min) { previous_book = sample.get(); continue; }
+    auto draw_book = [&](const RealtimeDepthHistory::SamplePtr& sample) {
+        if (sample->timestamp_ms < limits.X.Min) { previous_book = sample.get(); return; }
         if (previous_book && !sample->segment_start) {
             for (int side = 0; side < 2; ++side) {
                 const double before = side ? previous_book->ask : previous_book->bid;
@@ -266,6 +306,21 @@ void ChartWidget::render_realtime() {
             }
         }
         previous_book = sample.get();
+    };
+    for (const auto& sample : realtime_samples()) {
+        if (sample->timestamp_ms > rt_clock_ms_ || sample->timestamp_ms > limits.X.Max) break;
+        draw_book(sample);
+    }
+    // Coarse archive bins omit the newest observations within their last bin.
+    // Draw the retained raw tail without changing the bounded archive grid.
+    if (rt_history_view_ && realtime_live_edge() && previous_book) {
+        if (!rt_samples_.empty() && rt_samples_.front()->timestamp_ms > previous_book->timestamp_ms &&
+            rt_samples_.front()->serial > 1) previous_book = nullptr;
+        for (const auto& sample : rt_samples_) {
+            if (sample->timestamp_ms > rt_clock_ms_ || sample->timestamp_ms > limits.X.Max) break;
+            if (previous_book && sample->timestamp_ms <= previous_book->timestamp_ms) continue;
+            draw_book(sample);
+        }
     }
     if (rt_candles_ && !(rt_history_view_ && rt_archive_->view_trades_grouped)) {
         // One-second OHLC from retained trade records only. Empty seconds stay
@@ -338,9 +393,15 @@ void ChartWidget::render_realtime() {
         const float edge = ImPlot::PlotToPixels(double(rt_clock_ms_), book.bid).x;
         for (int side = 0; side < 2; ++side) {
             const double price = side ? book.ask : book.bid;
+            const double current_price = side ? rt_dom_frame_.ask() : rt_dom_frame_.bid();
+            const double quote_ms = double(std::clamp(rt_quote_.timestamp_ms, book.timestamp_ms, rt_clock_ms_));
             const ImU32 color = Theme::u32(side ? Theme::Tokens::DOWN : Theme::Tokens::UP);
             dl->AddLine(ImPlot::PlotToPixels(double(book.timestamp_ms), price),
-                ImPlot::PlotToPixels(double(rt_clock_ms_), price), color, 1.25f);
+                ImPlot::PlotToPixels(quote_ms, price), color, 1.25f);
+            dl->AddLine(ImPlot::PlotToPixels(quote_ms, price),
+                ImPlot::PlotToPixels(quote_ms, current_price), color, 1.25f);
+            dl->AddLine(ImPlot::PlotToPixels(quote_ms, current_price),
+                ImPlot::PlotToPixels(double(rt_clock_ms_), current_price), color, 1.25f);
         }
         for (int side = 0; side < 2; ++side) {
             const double price = side ? rt_dom_frame_.ask() : rt_dom_frame_.bid();
@@ -391,49 +452,20 @@ void ChartWidget::configure_depth_fidelity(ShaderHeatmapRenderer& renderer) {
         renderer.set_bucket_multiplier(rt_effective_multiplier_);
         return;
     }
-    // Viewport-adaptive bucket multiplier: ensure each heatmap cell
-    // is at least min_cell_px pixels tall. This adapts to any coin at
-    // any zoom level - BTC on 1m stays at native resolution, LABUSDT
-    // on 4h (300%+ range) aggregates into visible bands automatically.
-    // The UHD/HD/SD combo controls min_cell_px (detail preference).
     const double native_bucket = renderer.get_native_bucket_size();
+    const auto limits = ImPlot::GetPlotLimits();
+    int mult = heatmap_bucket_multiplier_;
     if (native_bucket > 0 && heatmap_adapt_to_zoom_) {
-        const ImPlotRect limits = ImPlot::GetPlotLimits();
-        const double visible_range = limits.Y.Max - limits.Y.Min;
-        const ImVec2 plot_size = ImPlot::GetPlotSize();
-        const float plot_height_px = plot_size.y;
-
-        // UHD/HD/SD/LD/ULD → minimum pixels per cell
-        // bucket_multipliers[] = {1, 2, 5, 10, 20} maps to detail tiers
-        constexpr float detail_min_px[] = {1.5f, 2.5f, 4.0f, 6.0f, 10.0f};
-        int detail_idx = 0;
-        for (int i = 0; i < 5; i++) {
-            const int bm[] = {1, 2, 5, 10, 20};
-            if (heatmap_bucket_multiplier_ == bm[i]) { detail_idx = i; break; }
-        }
-        const float min_cell_px = detail_min_px[detail_idx];
-
-        const int native_rows = static_cast<int>(visible_range / native_bucket);
-        const int max_visible_rows = std::max(1, static_cast<int>(plot_height_px / min_cell_px));
-        int adaptive_mult = std::max(1, native_rows / max_visible_rows);
-
-        // Snap to clean values to avoid constant GPU rebuilds
-        const int snap[] = {1, 2, 3, 5, 8, 10, 15, 20, 30, 50, 75, 100};
-        int best = 1;
-        for (int v : snap) {
-            if (v <= adaptive_mult) best = v;
-        }
-
-        best = std::max(best, heatmap_bucket_multiplier_);
-        // Hysteresis: only update if significantly different
+        // Round UP to readable rows, with no 100x ceiling on volatile markets.
+        const double rows = std::clamp(double(ImPlot::GetPlotSize().y) / 2.5, 1.0, 900.0);
+        const double needed = std::ceil(limits.Y.Size() / (native_bucket * rows));
+        const int groups = int(std::clamp(std::ceil(needed / mult), 1.0, 1000000.0));
+        mult *= groups;
         const int current = renderer.get_bucket_multiplier();
-        if (best != current &&
-            (best > current * 1.3 || best < current * 0.7 || current <= 1)) {
-            renderer.set_bucket_multiplier(best);
-        }
-    } else {
-        renderer.set_bucket_multiplier(heatmap_bucket_multiplier_);
+        if (mult < current && mult > current * 0.7) mult = current;
     }
+    renderer.set_bucket_multiplier(mult);
+    renderer.set_candle_price_window(limits.Y.Min, limits.Y.Max);
 
 }
 
@@ -453,7 +485,7 @@ void ChartWidget::rebuild_realtime_view() {
     for (const auto& sample : realtime_samples()) {
         rt_prices_.clear();
         for (const auto& level : sample->levels) rt_prices_[level.price] += float(level.size);
-        rt_renderer_->finalize_column(sample->timestamp_ms, rt_prices_, sample->segment_start, (sample->bid + sample->ask)*0.5);
+        rt_renderer_->finalize_column(sample->timestamp_ms, rt_prices_, sample->segment_start, (sample->bid + sample->ask)*0.5, sample->source_bucket_ticks);
     }
 }
 
@@ -475,18 +507,24 @@ void ChartWidget::update_realtime_archive_view() {
     const bool trades_retired = recent_trades.size() == RealtimeTradeHistory::max_trades &&
         recent_trades.front().timestamp_ms > from && rt_archive_->first < recent_trades.front().timestamp_ms;
     const bool seeded = rt_archive_->startup_first>0 && from<rt_archive_->startup_end;
-    const bool history = to > from && (seeded || trades_retired || to-from > 290000 || from < rt_clock_ms_ - 290000);
+    const bool history = to > from && (seeded || (rt_archive_ && rt_archive_->recovered_in(from, to)) || trades_retired || to-from > 290000 || from < rt_clock_ms_ - 290000);
     if (!history) {
         rt_trade_tail_waiting_ = false;
-        int64_t discarded_step=100;
-        rt_archive_->take_view(rt_archive_samples_, rt_archive_trades_, discarded_step);
+        // Keep the loaded archive and any pending response while inspecting
+        // the recent ring. Zooming back out must not start with empty history.
         if (rt_history_view_) {
-            rt_history_view_ = false; rt_archive_samples_.clear(); rt_archive_trades_.clear();
-            rebuild_realtime_view(); rt_query_from_ = rt_query_to_ = rt_loaded_to_ = 0;
+            rt_history_view_ = false;
+            rebuild_realtime_view();
         }
         return;
     }
-    const int64_t step = std::max(int64_t(seeded ? 500 : 100), ((to-from+179999)/180000)*100);
+    if (!rt_history_view_ && rt_loaded_to_ > 0) {
+        rt_history_view_ = true;
+        if (realtime_live_edge())
+            append_realtime_depth_tail(rt_archive_samples_, rt_samples_, rt_loaded_to_, rt_clock_ms_, rt_loaded_step_);
+        rebuild_realtime_view();
+    }
+    const int64_t step = std::max(int64_t(seeded || rt_archive_->recovered_in(from, to) ? 500 : 100), ((to-from+179999)/180000)*100);
     const int64_t aligned = from / step * step;
     int64_t received_step = 100;
     std::deque<RealtimeDepthHistory::SamplePtr> received_samples;
@@ -509,10 +547,8 @@ void ChartWidget::update_realtime_archive_view() {
             rt_loaded_to_ = rt_query_to_; rt_loaded_step_ = received_step;
             // Depth delivered while the query ran has already advanced rt_serial_.
             // Preserve that tail before rebuilding the GPU view.
-            if (realtime_live_edge()) for (const auto& sample : rt_samples_)
-                if (sample->timestamp_ms > rt_loaded_to_ && sample->timestamp_ms <= rt_clock_ms_)
-                    rt_archive_samples_.push_back(sample);
-            while (rt_archive_samples_.size() > 4096) rt_archive_samples_.pop_front();
+            if (realtime_live_edge())
+                append_realtime_depth_tail(rt_archive_samples_, rt_samples_, rt_loaded_to_, rt_clock_ms_, rt_loaded_step_);
             rebuild_realtime_view();
         }
     }
@@ -529,8 +565,266 @@ void ChartWidget::update_realtime_archive_view() {
     const double now = emscripten_get_now();
     if (!rt_archive_->loading && (!tail_ready || rt_query_from_==0 || step!=rt_query_step_ || rt_query_multiplier_!=rt_bucket_multiplier_ ||
         !realtime_query_start_matches(follow, aligned, rt_query_from_, step) || (!rt_paused_ && to>rt_query_to_ && now-rt_query_at_>5000))) {
-        if (rt_archive_->query(aligned,to,rt_clock_ms_,step,tick_size_*rt_bucket_multiplier_)) {
+        if (rt_archive_->query(aligned,to,rt_clock_ms_,step,tick_size_*rt_bucket_multiplier_,tick_size_)) {
             rt_query_from_=aligned;rt_query_to_=to;rt_query_step_=step;rt_query_at_=now;rt_query_multiplier_=rt_bucket_multiplier_;
         }
+    }
+}
+
+
+const std::vector<Terminal::Liquidation>& ChartWidget::realtime_liquidations() const {
+    return rt_mode_ && rt_paused_ ? rt_paused_liquidations_ : ctx_.liq_heatmap_mgr().observed_events(pair_);
+}
+
+void ChartWidget::render_realtime_liquidation_strip() {
+    const auto& events = realtime_liquidations();
+    const auto view = observed_liquidations::aggregate(events, int64_t(last_visible_range_.X.Min),
+        int64_t(last_visible_range_.X.Max), rt_clock_ms_);
+    char shorts[32] = {}, longs[32] = {};
+    Indicators::format_volume_usdt(view.shorts, shorts, sizeof(shorts), nullptr);
+    Indicators::format_volume_usdt(view.longs, longs, sizeof(longs), nullptr);
+    ImGui::Text("Reported notional | shorts +%s / longs -%s | %.3gs bins",
+        shorts + std::strspn(shorts, " "), longs + std::strspn(longs, " "), double(view.step_ms)/1000);
+    ImGui::TextColored(Theme::Tokens::TX2, "%s", view.count == 0 ? "No reports in this retained window; completeness unknown"
+        : pair_.exchange == "binancef" ? "Binance reports are censored; received notional only"
+        : "Received notional only; feed coverage may be incomplete");
+    if (!ImPlot::BeginPlot("##RTLiqActivity", ImVec2(-1, 90),
+            ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoInputs)) return;
+    ImPlot::SetupAxis(ImAxis_X1, nullptr, indicator_mgr_.pane_expanded() ? ImPlotAxisFlags_NoTickLabels : ImPlotAxisFlags_None);
+    ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoTickLabels);
+    ImPlot::SetupAxisLimits(ImAxis_X1, last_visible_range_.X.Min, last_visible_range_.X.Max, ImGuiCond_Always);
+    const double scale = std::max(1.0, view.peak) * 1.1;
+    ImPlot::SetupAxisLimits(ImAxis_Y1, -scale, scale, ImGuiCond_Always);
+    ImPlot::SetupAxisFormat(ImAxis_X1, [](double value, char* out, int size, void*) {
+        DisplayTimeZone::instance().format(int64_t(value), TimeZoneFormat::TimeSeconds, out, size);
+        return int(std::strlen(out));
+    });
+    ImPlot::SetupFinish();
+    auto* draw = ImPlot::GetPlotDrawList();
+    const auto pos = ImPlot::GetPlotPos(), size = ImPlot::GetPlotSize();
+    const float zero = ImPlot::PlotToPixels(0, 0).y;
+    ImPlot::PushPlotClipRect();
+    draw->AddLine(ImVec2(pos.x, zero), ImVec2(pos.x+size.x, zero), Theme::u32(Theme::Tokens::BD1));
+    const observed_liquidations::Bin* hovered = nullptr;
+    const double mouse_time = ImPlot::GetPlotMousePos().x;
+    for (size_t i = 0; i < view.size; ++i) {
+        const auto& bin = view.bins[i];
+        if (!bin.count) continue;
+        const int64_t end = std::min(bin.start_ms + view.step_ms, rt_clock_ms_);
+        const float left = ImPlot::PlotToPixels(double(bin.start_ms), 0).x;
+        const float right = std::max(left+1, ImPlot::PlotToPixels(double(end), 0).x);
+        if (bin.shorts > 0) draw->AddRectFilled(ImVec2(left, ImPlot::PlotToPixels(0,bin.shorts).y), ImVec2(right,zero), Theme::u32(Theme::Tokens::UP));
+        if (bin.longs > 0) draw->AddRectFilled(ImVec2(left,zero), ImVec2(right,ImPlot::PlotToPixels(0,-bin.longs).y), Theme::u32(Theme::Tokens::DOWN));
+        if (mouse_time >= bin.start_ms && mouse_time < bin.start_ms + view.step_ms) hovered = &bin;
+    }
+    ImPlot::PopPlotClipRect();
+    if (hovered && ImPlot::IsPlotHovered()) {
+        ImGui::BeginTooltip();
+        ImGui::Text("%u reports | shorts +%.2f | longs -%.2f", hovered->count, hovered->shorts, hovered->longs);
+        ImGui::TextUnformatted("Reported notional; no estimate of unreported liquidations.");
+        ImGui::EndTooltip();
+    }
+    ImPlot::EndPlot();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Trade bubbles on candles (free)
+//
+// Real-time mode draws every received trade; this draws only the LARGE ones,
+// over any time-based candle view, for every plan. Same marker and
+// signed colours. Candle displays use their own compressed reference and
+// screen-space selection so wide history cannot become a wall of equal discs.
+// ═══════════════════════════════════════════════════════════════════════════
+
+double ChartWidget::candle_bubble_floor() const {
+    if (candle_bubble_min_ > 0) return candle_bubble_min_;
+    return candle_bubble_auto_floor_ > 0 ? candle_bubble_auto_floor_ : candle_bubble_history_.auto_floor;
+}
+
+void ChartWidget::collect_candle_prints() {
+    const auto& trades = ctx_.candle_mgr().realtime_trades().trades();
+    if (trades.empty()) return;
+    const int64_t clock = trades.back().timestamp_ms;
+    // Time went backwards (replay seek, context swap): the retained prints
+    // belong to a traversal that no longer exists.
+    if (clock < candle_prints_seen_ms_) {
+        candle_prints_.clear();
+        candle_prints_seen_ms_ = 0; candle_prints_seen_id_ = 0;
+        candle_bubble_scale_ = {}; candle_bubble_scale_since_ms_ = 0;
+        candle_bubble_auto_floor_ = 0; candle_bubble_size_reference_ = 0;
+    }
+    // Fix the reference once warm. Panning and new history never resize old
+    // prints. The user can explicitly recalibrate from the layer controls.
+    if (!candle_bubble_scale_since_ms_) candle_bubble_scale_since_ms_ = clock;
+    if (!(candle_bubble_auto_floor_ > 0)) {
+        if (candle_bubble_history_.auto_floor > 0)
+            candle_bubble_auto_floor_ = candle_bubble_history_.auto_floor;
+        else {
+            candle_bubble_scale_.update(trades, clock);
+            if (candle_bubble_scale_.settled() ||
+                (candle_bubble_scale_.minimum() > 0 && clock - candle_bubble_scale_since_ms_ >= kCandleBubbleWarmMs)) {
+                candle_bubble_auto_floor_ = candle_bubble_scale_.minimum() * kCandleBubbleMult;
+                // Recover the still-retained initial sample when auto first warms.
+                if (candle_bubble_min_ == 0) {
+                    candle_prints_.clear(); candle_prints_seen_ms_ = 0; candle_prints_seen_id_ = 0;
+                }
+            }
+        }
+    }
+    const double floor = candle_bubble_floor();
+    // Fold in every trade newer than the last one scanned. Same-millisecond
+    // ties are told apart by agg_trade_id (monotonic per market on Binance).
+    auto it = std::upper_bound(trades.begin(), trades.end(), candle_prints_seen_ms_,
+        [](int64_t ts, const Terminal::Trade& t) { return ts < t.timestamp_ms; });
+    if (candle_prints_seen_ms_ > 0) {
+        auto tie = std::lower_bound(trades.begin(), it, candle_prints_seen_ms_,
+            [](const Terminal::Trade& t, int64_t ts) { return t.timestamp_ms < ts; });
+        for (; tie != it; ++tie)
+            if (tie->agg_trade_id > candle_prints_seen_id_ && floor > 0 &&
+                tie->price * tie->qty >= floor)
+                candle_prints_.push_back(*tie);
+    }
+    for (; it != trades.end(); ++it)
+        if (floor > 0 && it->price * it->qty >= floor) candle_prints_.push_back(*it);
+    candle_prints_seen_ms_ = clock;
+    candle_prints_seen_id_ = trades.back().agg_trade_id;
+    // Same-ms ties appended after the main run can land out of order; the
+    // renderer binary-searches by time, so keep the deque sorted.
+    if (candle_prints_.size() > 1 &&
+        candle_prints_[candle_prints_.size() - 2].timestamp_ms > candle_prints_.back().timestamp_ms)
+        std::stable_sort(candle_prints_.begin(), candle_prints_.end(),
+            [](const Terminal::Trade& a, const Terminal::Trade& b) { return a.timestamp_ms < b.timestamp_ms; });
+    while (candle_prints_.size() > kCandlePrintsMax ||
+           (!candle_prints_.empty() && candle_prints_.front().timestamp_ms < clock - kCandlePrintsKeepMs))
+        candle_prints_.pop_front();
+}
+
+void ChartWidget::render_candle_bubbles() {
+    const double floor = candle_bubble_floor();
+    const auto limits = ImPlot::GetPlotLimits();
+    // A candle bar is drawn CENTRED on its period's open time (draw_single_candle
+    // spans x +/- 0.35 tf around timestamps[i]), while the period's trades run
+    // from open to open + tf. Drawn at their raw time, the second half of every
+    // bar's prints landed over the NEXT bar, at prices that bar never touched.
+    // Shifting each print back by half a period puts it inside its own bar.
+    const double shift_ms = double(ctx_.candle_mgr().timeframe_seconds()) * 500.0;
+    const bool history = candle_bubble_history_enabled_ && Entitlements::hosted() && Entitlements::is_pro() &&
+        pair_.exchange == "binancef" && !ctx_.replay_mgr().is_active() && !EducationBoot::instance().is_pack();
+    const int64_t from_ms = int64_t(limits.X.Min + shift_ms), to_ms = int64_t(limits.X.Max + shift_ms);
+    if (history) {
+        auto req = candle_bubble_history_.request(pair_,from_ms,to_ms,int64_t(emscripten_date_now()),emscripten_get_now());
+        if (!req.is_null() && !req.empty()) {
+            const char* token = emscripten_run_script_string("window.__EDGEDEPTH_REPLAY_TOKEN__ || ''");
+            req["data"]["entitlement_token"] = token ? token : "";
+            ctx_.stream_mgr().send_message(req.dump());
+        }
+        int loaded = 0, observed = 0;
+        candle_bubble_history_.coverage(from_ms,to_ms,loaded,observed);
+        char status[160];
+        if (!candle_bubble_history_.error.empty())
+            snprintf(status,sizeof(status),"Bubbles: %s",candle_bubble_history_.error.c_str());
+        else if (candle_bubble_history_.loading()) snprintf(status,sizeof(status),"Bubbles: loading recent history...");
+        else snprintf(status,sizeof(status),"Bubbles: %d/%d loaded minutes have records | recent 6h | max 16/min",observed,loaded);
+        auto* draw = ImPlot::GetPlotDrawList();
+        const ImVec2 pos = ImPlot::GetPlotPos(), size = ImPlot::GetPlotSize();
+        const ImVec2 text(pos.x+8,pos.y+size.y-ImGui::GetFontSize()-8);
+        const ImVec2 text_size = ImGui::CalcTextSize(status);
+        ImPlot::PushPlotClipRect();
+        draw->AddRectFilled(ImVec2(text.x-3,text.y-2),ImVec2(text.x+text_size.x+3,text.y+text_size.y+2),Theme::u32(Theme::Tokens::BASE,0.9f));
+        draw->AddText(text,Theme::u32(Theme::Tokens::TX2),status);
+        ImPlot::PopPlotClipRect();
+        if (ImPlot::IsPlotHovered() && ImGui::IsMouseHoveringRect(text,ImVec2(text.x+text_size.x,text.y+text_size.y)))
+            Theme::tooltip("Historical selection: up to 16 largest original records per minute, filtered by Minimum value.\n"
+                "Only the recent six hours are queried; the latest two minutes use live observations.\n"
+                "A minute with records is not certified complete. Blank minutes may be quiet, missing or not loaded.\n"
+                "Exchange records can aggregate fills. Overlapping smaller records are hidden; zoom for detail. Sizes use a fixed log-compressed reference.");
+    }
+    if (!(floor > 0)) return;
+    const auto first = std::lower_bound(candle_prints_.begin(), candle_prints_.end(), int64_t(limits.X.Min + shift_ms),
+        [](const Terminal::Trade& t, int64_t ts) { return t.timestamp_ms < ts; });
+    const auto last = std::upper_bound(first, candle_prints_.end(), int64_t(limits.X.Max + shift_ms),
+        [](int64_t ts, const Terminal::Trade& t) { return ts < t.timestamp_ms; });
+    auto* dl = ImPlot::GetPlotDrawList();
+    const ImVec2 mouse = ImGui::GetIO().MousePos;
+    const Terminal::Trade* hovered = nullptr;
+    ImPlot::PushPlotClipRect();
+    // Keep original identities; strongest-first selection below removes crowding.
+    static std::vector<const Terminal::Trade*> order;
+    order.clear();
+    for (auto it = first; it != last; ++it) {
+        const double notional = it->price * it->qty;
+        if (notional < floor || it->price < limits.Y.Min || it->price > limits.Y.Max) continue;
+        if (!history || !candle_bubble_history_.contains(it->agg_trade_id)) order.push_back(&*it);
+    }
+    if (history) candle_bubble_history_.append_visible(order,from_ms,to_ms);
+    order.erase(std::remove_if(order.begin(),order.end(),[&](const auto* t){
+        return t->price*t->qty < floor || t->price < limits.Y.Min || t->price > limits.Y.Max;
+    }),order.end());
+    const auto larger = [](const Terminal::Trade* a,const Terminal::Trade* b) {
+        if (a->price*a->qty != b->price*b->qty) return a->price*a->qty > b->price*b->qty;
+        if (a->timestamp_ms != b->timestamp_ms) return a->timestamp_ms < b->timestamp_ms;
+        return a->agg_trade_id < b->agg_trade_id;
+    };
+    const size_t qualifying_count=order.size();
+    if (order.size() > size_t(kCandleBubbleMaxDraw)) {
+        std::nth_element(order.begin(),order.begin()+kCandleBubbleMaxDraw,order.end(),larger);
+        order.resize(kCandleBubbleMaxDraw);
+    }
+    std::sort(order.begin(),order.end(),larger);
+    if (!(candle_bubble_size_reference_ > 0)) {
+        if (candle_bubble_history_.size_reference > 0) candle_bubble_size_reference_=candle_bubble_history_.size_reference;
+        else if (!history || !candle_bubble_history_.error.empty() || (!candle_bubble_history_.loading() && !candle_bubble_history_.tiles.empty())) {
+            // Local/replay observations use their warmed market reference.
+            candle_bubble_size_reference_=candle_bubble_auto_floor_;
+        }
+    }
+    const double reference = candle_bubble_size_reference_;
+    // Warm the market reference even with a manual visibility floor.
+    if (!(reference > 0)) { ImPlot::PopPlotClipRect(); return; }
+    static std::vector<CandleBubbleDisplay::Marker> selected;
+    selected.clear();
+    const auto plot_pos = ImPlot::GetPlotPos(), plot_size = ImPlot::GetPlotSize();
+    for (size_t i=0;i<order.size();++i) {
+        const auto* t=order[i];
+        const auto c=ImPlot::PlotToPixels(double(t->timestamp_ms)-shift_ms,t->price);
+        const float radius=CandleBubbleDisplay::radius(t->price*t->qty,reference);
+        // Offscreen candidates cannot suppress a visible execution.
+        if(c.x<plot_pos.x || c.x>plot_pos.x+plot_size.x || c.y<plot_pos.y || c.y>plot_pos.y+plot_size.y) continue;
+        CandleBubbleDisplay::retain(selected,{i,c.x,c.y,radius},plot_size.x);
+    }
+    for (const auto& marker : selected) {
+        const Terminal::Trade* t = order[marker.index];
+        const double notional = t->price * t->qty;
+        const ImVec2 c = ImPlot::PlotToPixels(double(t->timestamp_ms) - shift_ms, t->price);
+        const float r = CandleBubbleDisplay::radius(notional, reference);
+        RealtimeBubble::draw(*dl, c, r, t->is_buy ? Theme::Tokens::UP : Theme::Tokens::DOWN,
+                             Theme::u32(Theme::Tokens::BASE));
+        const float dx = mouse.x - c.x, dy = mouse.y - c.y;
+        // Last hit is the visible topmost disc, including its circular edge.
+        if (dx * dx + dy * dy <= r * r) hovered = t;
+    }
+    if (hovered && ImPlot::IsPlotHovered()) {
+        const auto anchor = ImPlot::PlotToPixels(double(hovered->timestamp_ms)-shift_ms,hovered->price);
+        const float right=plot_pos.x+plot_size.x;
+        for(float x=anchor.x;x<right;x+=10)
+            dl->AddLine(ImVec2(x,anchor.y),ImVec2(std::min(x+5,right),anchor.y),Theme::u32(Theme::Tokens::TX1,0.6f));
+    }
+    ImPlot::PopPlotClipRect();
+    if (hovered && ImPlot::IsPlotHovered()) {
+        char time[64] = {}, price[64] = {};
+        DisplayTimeZone::instance().format(hovered->timestamp_ms, TimeZoneFormat::DateTimeSeconds, time, sizeof(time));
+        snprintf(price, sizeof(price), fmt_.price_fmt, hovered->price);
+        Theme::begin_tooltip();
+        ImGui::TextUnformatted(hovered->is_buy ? "Large buy (taker bought)" : "Large sell (taker sold)");
+        ImGui::Text("%s | %s %s", time, pair_.exchange.c_str(), pair_.symbol.c_str());
+        ImGui::Text("Price %s | size %.6g | value %.0f", price, hovered->qty, hovered->price * hovered->qty);
+        ImGui::Text("%.1fx display reference (%.0f quote value)", hovered->price*hovered->qty/reference,reference);
+        ImGui::Text("Showing %zu of %zu qualifying records; zoom for detail",selected.size(),qualifying_count);
+        if (candle_bubble_history_.size_reference>0)
+            ImGui::TextUnformatted("Reference: initial history selection P90, held while panning.");
+        else ImGui::TextUnformatted("Reference: warmed live trade-size threshold.");
+        ImGui::TextUnformatted("Log-compressed sizes. Price guide starts at this execution.");
+        ImGui::TextUnformatted("One received trade record; the exchange may aggregate fills.");
+        Theme::end_tooltip();
     }
 }

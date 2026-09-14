@@ -174,6 +174,27 @@ inline Route parse_route(const std::string& path, const std::string& search = ""
     auto slash = rest.find('/');
     r.symbol = (slash == std::string::npos) ? rest : rest.substr(0, slash);
 
+    // Decode the segment once, after splitting the URL. Preserve malformed
+    // escapes literally and never reinterpret a decoded slash as routing.
+    std::string decoded;
+    const auto hex = [](unsigned char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    for (size_t i = 0; i < r.symbol.size(); ++i) {
+        if (r.symbol[i] == '%' && i + 2 < r.symbol.size()) {
+            const int hi = hex(r.symbol[i + 1]), lo = hex(r.symbol[i + 2]);
+            if (hi >= 0 && lo >= 0 && (hi || lo)) {
+                decoded += static_cast<char>((hi << 4) | lo);
+                i += 2;
+                continue;
+            }
+        }
+        decoded += r.symbol[i];
+    }
+    r.symbol = std::move(decoded);
     if (r.exchange == "binancef") {
         std::transform(r.symbol.begin(), r.symbol.end(), r.symbol.begin(),
                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });

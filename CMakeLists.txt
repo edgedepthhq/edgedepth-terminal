@@ -392,6 +392,7 @@ set(PROJECT_SRC
         src/ui/workspace_settings.cpp
         src/ui/chart_widget.cpp
         src/ui/chart_widget_realtime.cpp
+        src/ui/chart_widget_flow.cpp
         src/core/realtime_archive.cpp
         src/ui/chart_widget_scrub_preview.cpp
         src/ui/price_profile_renderer.h
@@ -553,6 +554,7 @@ if(EMSCRIPTEN)
     add_executable(realtime_depth_regression EXCLUDE_FROM_ALL
         tests/wasm/realtime_history_test.cpp tests/wasm/realtime_archive_test.cpp
         src/core/realtime_archive.cpp src/core/orderbook_manager.cpp
+        src/core/message_parser.cpp ${ZSTD_SRC}
         ${PROTO_SRCS} ${PROTOBUF_LITE_SRCS})
     add_dependencies(realtime_depth_regression generate_proto)
     target_include_directories(realtime_depth_regression PRIVATE

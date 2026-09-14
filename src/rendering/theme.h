@@ -37,31 +37,31 @@ namespace Theme {
 
     // ── Runtime tweak enums (wired to the Tweaks panel in a later phase) ─────
     enum class Accent : uint8_t { Teal, Indigo, Amber, Mono };
-    enum class CandleConvention : uint8_t { TealMag, Classic, Muted };
+    enum class CandleConvention : uint8_t { TealMag, Classic, Muted, BlueWhite, Custom };
 
     namespace Tokens {
         // ── Surfaces - theme-tokens.json bg ramp (2026-07-02 redesign) ───────
         // bg-0 app background / chart canvas · bg-1 bars + panel chrome ·
-        // bg-2 raised (hover rows, chips, active tab). Idle controls sit at
-        // bg-1 (flat until interacted); hover/pressed raise to bg-2.
-        inline constexpr ImVec4 BASE   = from_hex(0x0b0e13);  // bg-0
-        inline constexpr ImVec4 PANEL  = from_hex(0x10141b);  // bg-1
-        inline constexpr ImVec4 ELEV   = from_hex(0x161b24);  // bg-2
-        inline constexpr ImVec4 INPUT  = from_hex(0x10141b);  // bg-1 - idle controls
-        inline constexpr ImVec4 HOVER  = from_hex(0x161b24);  // bg-2
-        inline constexpr ImVec4 ACTIVE = from_hex(0x161b24);  // bg-2 (accent marks "on")
+        // Near-black planes; controls have no idle tile. Hover and focus
+        // reveal the hit area, while a rule and text identify selection.
+        inline constexpr ImVec4 BASE   = from_hex(0x050505);  // bg-0
+        inline constexpr ImVec4 PANEL  = from_hex(0x080808);  // bg-1
+        inline constexpr ImVec4 ELEV   = from_hex(0x0d0d0d);  // bg-2
+        inline constexpr ImVec4 INPUT  = from_hex(0x0b0b0b);  // editable fields
+        inline constexpr ImVec4 HOVER  = from_hex(0x141414);  // bg-2
+        inline constexpr ImVec4 ACTIVE = from_hex(0x1b1b1b);  // bg-2 (accent marks "on")
 
         // ── Hairlines - line-1 borders/dividers, line-2 control borders ──────
-        inline constexpr ImVec4 BD1  = from_hex(0x1e242e);          // line-1 - the only separation
-        inline constexpr ImVec4 BD2  = from_hex(0x2a3140);          // line-2 - control borders
-        inline constexpr ImVec4 BD3  = from_hex(0x566070, 0.55f);   // hover borders (text-3 hue)
-        inline constexpr ImVec4 GRID = from_hex(0x1e242e, 0.55f);   // chart gridlines (line-1)
+        inline constexpr ImVec4 BD1  = from_hex(0x1c1c1c);          // line-1 - the only separation
+        inline constexpr ImVec4 BD2  = from_hex(0x292929);          // line-2 - control borders
+        inline constexpr ImVec4 BD3  = from_hex(0x737373, 0.55f);   // hover borders (text-3 hue)
+        inline constexpr ImVec4 GRID = from_hex(0x1c1c1c, 0.55f);   // chart gridlines (line-1)
 
         // ── Text ramp - text-1/2/3 (+ dimmed text-3 for axis/disabled) ───────
-        inline constexpr ImVec4 TX1 = from_hex(0xdfe6ee);  // primary numerals, titles
-        inline constexpr ImVec4 TX2 = from_hex(0x8b95a5);  // labels, secondary data
-        inline constexpr ImVec4 TX3 = from_hex(0x566070);  // captions, units, group labels
-        inline constexpr ImVec4 TX4 = from_hex(0x566070, 0.72f);  // axis ticks, disabled
+        inline constexpr ImVec4 TX1 = from_hex(0xe8e8e8);  // primary numerals, titles
+        inline constexpr ImVec4 TX2 = from_hex(0xb0b0b0);  // labels, secondary data
+        inline constexpr ImVec4 TX3 = from_hex(0x858585);  // captions, units, group labels
+        inline constexpr ImVec4 TX4 = from_hex(0x737373, 0.72f);  // axis ticks, disabled
 
         // ── Semantic - runtime-mutable (candle convention / accent tweaks) ──
         inline ImVec4 UP         = from_hex(0x2fd6ad);         // up / bid / positive
@@ -70,14 +70,20 @@ namespace Theme {
         inline ImVec4 DOWN_SOFT  = from_hex(0xee5c78, 0.13f);
         inline ImVec4 UP_LINE    = from_hex(0x2fd6ad, 0.50f);
         inline ImVec4 DOWN_LINE  = from_hex(0xee5c78, 0.50f);
-        inline ImVec4 BRAND      = from_hex(0x35c9c4);         // accent - the only on-state hue
-        inline ImVec4 BRAND_SOFT = from_hex(0x35c9c4, 0.14f);
-        inline ImVec4 BRAND_LINE = from_hex(0x35c9c4, 0.55f);
-        inline ImVec4 BRAND_TX   = from_hex(0x3fe0d0);         // accent textTint (on-state text)
+        inline ImVec4 BRAND      = from_hex(0xe7e9ed);         // accent - the only on-state hue
+        inline ImVec4 BRAND_SOFT = from_hex(0xe7e9ed, 0.14f);
+        inline ImVec4 BRAND_LINE = from_hex(0xe7e9ed, 0.55f);
+        inline ImVec4 BRAND_TX   = from_hex(0xffffff);         // accent textTint (on-state text)
         inline constexpr ImVec4 WARN = from_hex(0xf0b350);     // funding, big prints, alerts
         inline constexpr ImVec4 WARN_SOFT = from_hex(0xf0b350, 0.12f);  // replay banner, high-regime chip fill
         // dark ink for text on solid BRAND fills (play orb, price chip, pills)
-        inline constexpr ImVec4 BRAND_INK = from_hex(0x04181d);
+        inline constexpr ImVec4 BRAND_INK = from_hex(0x111111);
+        // Brand identity, FIXED: the EdgeDepth D mark and the EARLY ACCESS lockup
+        // keep the marketing cyan (tokens.css --accent / --accent-text) whatever
+        // accent the chrome runs, so the terminal header matches the web header.
+        // Identity only - never an on-state hue (that stays BRAND*).
+        inline constexpr ImVec4 LOGO    = from_hex(0x35c9c4);
+        inline constexpr ImVec4 LOGO_TX = from_hex(0x3fe0d0);
         // resting-book blue (DOM v2): pending limit-order depth, side-agnostic. The
         // one neutral data hue - teal/rose stays reserved for EXECUTED flow. (Confirm
         // this hue or remap to a brand blue before shipping - dom.SPEC.md §8.)
@@ -99,27 +105,25 @@ namespace Theme {
 
     // ── Radii ────────────────────────────────────────────────────────────────
     // Chrome rules: docked panels are SQUARE with 1px line-1 borders only -
-    // radius + shadow are reserved for floating chrome (settings panels, menus).
+    // Floating menus, inputs and badges also use square corners.
     namespace Radius {
-        inline constexpr float R1 = 3.0f;   // small chips / table chips
-        inline constexpr float R2 = 5.0f;   // buttons, inputs, frames
-        inline constexpr float R3 = 6.0f;   // floating panels / popups / menus
+        inline constexpr float R1 = 0.0f;   // small chips / table chips
+        inline constexpr float R2 = 0.0f;   // buttons, inputs, frames
+        inline constexpr float R3 = 0.0f;   // floating panels / popups / menus
     }
 
     // ── Layout metrics (px, logical) - theme-tokens.json `density` ──────────
     namespace Layout {
         inline constexpr float TOPBAR_H        = 44.0f;
-        inline constexpr float STATSBAR_H      = 38.0f;   // compact market header; closeable
+        inline float topbar_h() { return ImGui::GetIO().DisplaySize.x < 1150 ? 82.0f : TOPBAR_H; }
+        inline constexpr float STATSBAR_H      = 36.0f;   // compact market header; closeable
         inline constexpr float PILLSROW_H      = 44.0f;   // v2 chart toolbar band (was 36)
-        inline constexpr float STATUSBAR_H     = 22.0f;   // owns telemetry (WS · FPS · CLOCK)
+        inline constexpr float STATUSBAR_H     = 30.0f;   // owns telemetry (WS · FPS · CLOCK)
         inline constexpr float TRANSPORT_H     = 66.0f;
-        // 360, not 256. The rail's non-symbol chrome (star, sparkline, LAST,
-        // 24H%, gaps) costs a fixed ~215px, so 256 left the symbol column
-        // around 30 to 41px: a fresh user saw truncated, effectively nameless
-        // rows with the numbers pushed off-panel. Moves as one set with
-        // watchlist_widget.cpp's last_w, chg_w and condense threshold.
-        inline constexpr float WATCHLIST_W     = 360.0f;  // v2 dense-grid rail
-        inline constexpr float RIGHTCOL_W      = 420.0f;  // DOM over TAPE (was 300; v2 DOM needs ~440)
+        // The watchlist stacks price below the symbol on compact rails.
+        // Reserve the order-book width from the remaining center/right space.
+        inline constexpr float WATCHLIST_W     = 288.0f;
+        inline constexpr float RIGHTCOL_W      = 440.0f;
         inline constexpr float INDI_PANE_H     = 172.0f;
         inline constexpr float PANEL_HEADER_H  = 26.0f;
         inline constexpr float WATCHLIST_ROW_H = 24.0f;   // default-density watchlist row
@@ -138,28 +142,36 @@ namespace Theme {
     // ── Runtime tweaks ───────────────────────────────────────────────────────
     Accent accent();
     CandleConvention candles();
+    void load_preferences();
+    void render_appearance_controls();
     void set_accent(Accent a);                       // mutates BRAND* tokens
     void set_candle_convention(CandleConvention c);  // mutates UP*/DOWN* tokens
 
     // ── Fonts ────────────────────────────────────────────────────────────────
-    // Hanken Grotesk = chrome/labels/headings. JetBrains Mono = ALL numerics
+    // Inter = chrome/labels/headings. Roboto Mono = ALL numerics
     // (naturally fixed-advance → tabular alignment for free).
     namespace Fonts {
-        ImFont* ui();           // Hanken Regular 13 - default chrome text
-        ImFont* ui_semibold();  // Hanken SemiBold 13 - emphasis, symbol names
-        ImFont* heading();      // Hanken SemiBold 17 - panel/modal headings
-        ImFont* label();        // Hanken SemiBold 9.5 - uppercase micro-labels
-        ImFont* mono_xs();      // JBM SemiBold ~9.5 - EARLY ACCESS pill / micro badges
-        ImFont* mono_sm();      // JBM Regular 10.5 - dense ladders/tape
-        ImFont* mono();         // JBM Regular 12 - default numerics
-        ImFont* mono_md();      // JBM Medium 14 - mark price, replay clock
-        ImFont* mono_lg();      // JBM SemiBold 20 - large displays
+        ImFont* ui();           // Inter Regular 13 - default chrome text
+        ImFont* ui_semibold();  // Inter SemiBold 13 - emphasis, symbol names
+        ImFont* heading();      // Inter SemiBold 17 - panel/modal headings
+        ImFont* label();        // Inter SemiBold 9.5 - uppercase micro-labels
+        ImFont* mono_xs();      // Roboto Mono SemiBold ~9.5 - EARLY ACCESS pill / micro badges
+        ImFont* mono_sm();      // Roboto Mono Regular 10.5 - dense ladders/tape
+        ImFont* mono();         // Roboto Mono Regular 12 - default numerics
+        ImFont* mono_md();      // Roboto Mono Medium 14 - mark price, replay clock
+        ImFont* mono_lg();      // Roboto Mono SemiBold 20 - large displays
     }
 
     // ── Style application ────────────────────────────────────────────────────
     void apply_dark_theme();      // full ImGui + ImPlot mapping from tokens
     void apply_trading_colors();  // table borders/headers (hairline style)
     bool load_fonts();            // builds the 8-face atlas (DPI-aware)
+
+    // Shared transient surfaces and selection controls. Popup padding is latched
+    // by BeginPopup, so callers keep the normal ImGui::EndPopup pairing.
+    bool begin_popup(const char* id, ImGuiWindowFlags flags = 0);
+    bool choice_button(const char* label, bool selected, ImVec2 size = ImVec2(0, 0));
+    void section_label(const char* label);
 
     // ── Tooltips ─────────────────────────────────────────────────────────────
     // The global WindowPadding is (0,0) (panels manage their own gutters) and
@@ -195,7 +207,7 @@ namespace Theme {
         inline constexpr float PADDING         = 8.0f;
         inline constexpr float ITEM_SPACING    = 6.0f;
         inline constexpr float WINDOW_ROUNDING = 0.0f;  // panels are square
-        inline constexpr float FRAME_ROUNDING  = 5.0f;  // only pills/buttons round
+        inline constexpr float FRAME_ROUNDING  = Radius::R2;
     }
 
     // legacy font accessors → new atlas

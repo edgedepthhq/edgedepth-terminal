@@ -4,6 +4,17 @@
 using workspace::Json;
 static void check(bool ok) { if (!ok) { std::fputs("workspace check failed\n",stderr); std::exit(1); } }
 int main() {
+    for (const std::string source : {"chart_binancef_btcusdt", "###chart_binancef_btcusdt",
+                                    "Chart BTC 1m###chart_binancef_btcusdt"}) {
+        std::string ini = "[Window][" + source + "]\nDockId=0x00000003,0\n\n[Window][Watchlist]\nDockId=0x00000001\n";
+        workspace::remap_window_title(ini, "Chart BTC 1m###chart_binancef_btcusdt",
+                                     "Chart 牛来 5m###chart_binancef_牛来usdt");
+        if (ini != "[Window][chart_binancef_牛来usdt]\nDockId=0x00000003,0\n\n[Window][Watchlist]\nDockId=0x00000001\n") {
+            std::fprintf(stderr, "FAIL symbol-switch docking remap\n");
+            return 1;
+        }
+    }
+
     Json doc = {{"version",1},{"layout","[Window][Chart]\nPos=0,0\n"},
                 {"widgets",Json::array({{{"type","chart"},{"title","Chart"},{"settings",Json::object()}}})}};
     check(workspace::parse_document(doc.dump()) == doc);

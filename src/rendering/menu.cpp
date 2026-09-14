@@ -191,7 +191,9 @@ void render_symbol_picker_popup(
     using namespace Theme;
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(1000, 640), ImGuiCond_Appearing);
+    const ImVec2 viewport_size = ImGui::GetMainViewport()->Size;
+    ImGui::SetNextWindowSize(ImVec2(std::min(1000.0f, viewport_size.x - 32.0f),
+                                  std::min(640.0f, viewport_size.y - 32.0f)), ImGuiCond_Appearing);
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, Radius::R3);
@@ -215,7 +217,7 @@ void render_symbol_picker_popup(
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 w0 = ImGui::GetWindowPos();
     const float  W  = ImGui::GetWindowWidth();
-    const float  PADX = 18.0f;
+    const float  PADX = 20.0f;
 
     // Open a symbol: record it as recent, then add the pending widget (or, in
     // replace-mode, reload the terminal at that symbol). Shared by the row click,
@@ -253,27 +255,29 @@ void render_symbol_picker_popup(
     // ── header: title · listed count · ESC chip · close ──────────────
     const float head_h = 44.0f;
     {
-        ImGui::PushFont(Fonts::mono_md());
+        // Title in the modal heading face (Inter SemiBold), not the mono
+        // numerals face it wore before; the listed count stays mono.
+        ImGui::PushFont(Fonts::heading());
         dl->AddText(ImVec2(w0.x + PADX, w0.y + (head_h - ImGui::GetFontSize()) * 0.5f),
                     u32(Tokens::TX1), "Find a symbol");
         const float tw = ImGui::CalcTextSize("Find a symbol").x;
         ImGui::PopFont();
         char lc[64];
-        snprintf(lc, sizeof(lc), "%d LISTED \xC2\xB7", g_symbol_picker.exchange_total);
-        ImGui::PushFont(Fonts::mono_sm());
+        snprintf(lc, sizeof(lc), "%d listed \xC2\xB7", g_symbol_picker.exchange_total);
+        ImGui::PushFont(Fonts::ui());
         const float lcw = ImGui::CalcTextSize(lc).x;
-        dl->AddText(ImVec2(w0.x + PADX + tw + 12.0f, w0.y + (head_h - ImGui::GetFontSize()) * 0.5f),
+        dl->AddText(ImVec2(w0.x + PADX + tw + 14.0f, w0.y + (head_h - ImGui::GetFontSize()) * 0.5f),
                     u32(Tokens::TX3), lc);
         ImGui::PopFont();
 
         // ── venue toggle: BINANCE | HYPERLIQUID - filters the list by exchange ──
         {
-            ImGui::PushFont(Fonts::label());
+            ImGui::PushFont(Fonts::ui());
             const float chip_h = 20.0f;
             const float chip_y = w0.y + (head_h - chip_h) * 0.5f;
-            float chip_x = w0.x + PADX + tw + 12.0f + lcw + 10.0f;
+            float chip_x = w0.x + PADX + tw + 14.0f + lcw + 12.0f;
             struct Venue { const char* id; const char* label; };
-            const Venue venues[2] = { {"binancef", "BINANCE"}, {"hl", "HYPERLIQUID"} };
+            const Venue venues[2] = { {"binancef", "Binance"}, {"hl", "Hyperliquid"} };
             const float ven_logo = 14.0f;
             for (int i = 0; i < 2; ++i) {
                 const bool active = (g_symbol_picker.selected_exchange == venues[i].id);
@@ -282,17 +286,17 @@ void render_symbol_picker_popup(
                 // ready so a missing logo never leaves a permanent gap.
                 ImTextureID ven_tex = LogoManager::instance().exchange(venues[i].id);
                 const float logo_inset = ven_tex ? (ven_logo + 5.0f) : 0.0f;
-                const float cw = ts.x + 16.0f + logo_inset;
+                const float cw = ts.x + 34.0f + logo_inset;
                 const ImVec2 cp(chip_x, chip_y);
                 ImGui::SetCursorScreenPos(cp);
                 ImGui::PushID(900 + i);
                 const bool clk = ImGui::InvisibleButton("##venue", ImVec2(cw, chip_h));
                 const bool hov = ImGui::IsItemHovered();
                 ImGui::PopID();
-                dl->AddRectFilled(cp, ImVec2(cp.x + cw, cp.y + chip_h),
-                    u32(active ? Tokens::BRAND_SOFT : (hov ? Tokens::ELEV : Tokens::PANEL)), 3.0f);
-                dl->AddRect(cp, ImVec2(cp.x + cw, cp.y + chip_h),
-                    u32(active ? Tokens::BRAND : Tokens::BD2), 3.0f, 0, 1.0f);
+                if (hov) dl->AddRectFilled(cp, ImVec2(cp.x + cw, cp.y + chip_h), u32(Tokens::HOVER));
+                const ImVec2 selection(cp.x + cw - 10.0f, cp.y + chip_h * 0.5f);
+                dl->AddCircle(selection, 4.0f, u32(active ? Tokens::TX1 : Tokens::TX3), 16, 1.0f);
+                if (active) dl->AddCircleFilled(selection, 2.0f, u32(Tokens::TX1), 16);
                 if (ven_tex)
                     dl->AddImage(ven_tex, ImVec2(cp.x + 8.0f, cp.y + (chip_h - ven_logo) * 0.5f),
                                  ImVec2(cp.x + 8.0f + ven_logo, cp.y + (chip_h + ven_logo) * 0.5f));
@@ -320,12 +324,11 @@ void render_symbol_picker_popup(
         dl->AddLine(ImVec2(cx0 - xr, cy0 + xr), ImVec2(cx0 + xr, cy0 - xr), xc, 1.4f);
         if (xclk) { g_symbol_picker.open = false; ImGui::CloseCurrentPopup(); }
 
-        ImGui::PushFont(Fonts::label());
-        const char* esc = "ESC";
+        ImGui::PushFont(Fonts::ui());
+        const char* esc = "Esc";
         const ImVec2 es = ImGui::CalcTextSize(esc);
         const ImVec2 ep0(xp.x - 10.0f - es.x - 12.0f, w0.y + (head_h - (es.y + 6.0f)) * 0.5f);
-        dl->AddRect(ep0, ImVec2(ep0.x + es.x + 12.0f, ep0.y + es.y + 6.0f), u32(Tokens::BD2), 0.0f, 0, 1.0f);
-        dl->AddText(ImVec2(ep0.x + 6.0f, ep0.y + 3.0f), u32(Tokens::TX3), esc);
+        dl->AddText(ImVec2(ep0.x + 6.0f, ep0.y + 3.0f), u32(Tokens::TX2), esc);
         ImGui::PopFont();
 
         dl->AddLine(ImVec2(w0.x, w0.y + head_h), ImVec2(w0.x + W, w0.y + head_h), u32(Tokens::BD1));
@@ -340,25 +343,26 @@ void render_symbol_picker_popup(
         dl->AddLine(ImVec2(mc.x + 1.8f, mc.y + 1.8f), ImVec2(mc.x + 5.5f, mc.y + 5.5f),
                     u32(Tokens::BRAND), 1.3f);
 
-        ImGui::PushFont(Fonts::mono());
+        ImGui::PushFont(Fonts::ui());
         ImGui::SetCursorScreenPos(ImVec2(w0.x + PADX + 22.0f,
                                          srch_y + (srch_h - ImGui::GetFrameHeight()) * 0.5f));
         ImGui::SetNextItemWidth(W - PADX * 2.0f - 22.0f - 78.0f);
         ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
         ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
         if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        ImGui::PushStyleColor(ImGuiCol_TextDisabled, Tokens::TX2);
         ImGui::InputTextWithHint("##sym_search", "Search symbol or category...",
             g_symbol_picker.search_buf, sizeof(g_symbol_picker.search_buf));
+        ImGui::PopStyleColor();
         ImGui::PopStyleVar();
         ImGui::PopStyleColor();
         ImGui::PopFont();
 
-        ImGui::PushFont(Fonts::label());
-        const char* kk = "CTRL K";
+        ImGui::PushFont(Fonts::ui());
+        const char* kk = "Ctrl K";
         const ImVec2 ks = ImGui::CalcTextSize(kk);
         const ImVec2 kp0(w0.x + W - PADX - ks.x - 12.0f, srch_y + (srch_h - (ks.y + 6.0f)) * 0.5f);
-        dl->AddRect(kp0, ImVec2(kp0.x + ks.x + 12.0f, kp0.y + ks.y + 6.0f), u32(Tokens::BD2), 0.0f, 0, 1.0f);
-        dl->AddText(ImVec2(kp0.x + 6.0f, kp0.y + 3.0f), u32(Tokens::TX3), kk);
+        dl->AddText(ImVec2(kp0.x + 6.0f, kp0.y + 3.0f), u32(Tokens::TX2), kk);
         ImGui::PopFont();
 
         // accent inset underline (1i) over the row hairline
@@ -372,13 +376,13 @@ void render_symbol_picker_popup(
     const float rec_y = srch_y + srch_h;
     float rec_h = 0.0f;
     if (!g_symbol_picker.recents.empty()) {
-        rec_h = 42.0f;
+        rec_h = 44.0f;
         ImGui::PushFont(Fonts::label());
         dl->AddText(ImVec2(w0.x + PADX, rec_y + (rec_h - ImGui::GetFontSize()) * 0.5f),
                     u32(Tokens::TX3), "RECENT");
         ImGui::PopFont();
-        const float rch = 26.0f, rcy = rec_y + (rec_h - rch) * 0.5f, rxmax = w0.x + W - PADX;
-        float rx = w0.x + PADX + 64.0f;
+        const float rch = 24.0f, rcy = rec_y + (rec_h - rch) * 0.5f, rxmax = w0.x + W - PADX;
+        float rx = w0.x + PADX + 76.0f;
         int shown = 0;
         for (const auto& sym : g_symbol_picker.recents) {
             if (shown >= 8) break;
@@ -389,13 +393,15 @@ void render_symbol_picker_popup(
             const auto* tk = TickerManager::instance().get("binancef", sym);
             char pctbuf[16] = "";
             const bool has_pct = tk != nullptr;
-            ImVec4 pctcol = Tokens::TX3;
+            ImVec4 pctcol = Tokens::TX2;
             if (has_pct) {
                 snprintf(pctbuf, sizeof(pctbuf), "%+.2f%%", tk->change_pct_24h);
                 pctcol = tk->change_pct_24h >= 0.0 ? Tokens::UP : Tokens::DOWN;
             }
-            ImGui::PushFont(Fonts::mono_sm());
+            ImGui::PushFont(Fonts::ui_semibold());
             const float symw = ImGui::CalcTextSize(up.c_str()).x;
+            ImGui::PopFont();
+            ImGui::PushFont(Fonts::mono_sm());
             const float pctw = has_pct ? ImGui::CalcTextSize(pctbuf).x + 8.0f : 0.0f;
             ImGui::PopFont();
             const float cw = symw + pctw + 20.0f;
@@ -405,15 +411,17 @@ void render_symbol_picker_popup(
             const bool clk = ImGui::InvisibleButton("##rec", ImVec2(cw, rch));
             const bool hov = ImGui::IsItemHovered();
             ImGui::PopID();
-            dl->AddRect(ImVec2(rx, rcy), ImVec2(rx + cw, rcy + rch),
-                        u32(hov ? Tokens::BRAND : Tokens::BD2), 0.0f, 0, 1.0f);
-            ImGui::PushFont(Fonts::mono_sm());
+            if (hov) dl->AddRectFilled(ImVec2(rx, rcy), ImVec2(rx + cw, rcy + rch), u32(Tokens::HOVER));
+            ImGui::PushFont(Fonts::ui_semibold());
             dl->AddText(ImVec2(rx + 10.0f, rcy + (rch - ImGui::GetFontSize()) * 0.5f),
                         u32(Tokens::TX1), up.c_str());
-            if (has_pct)
+            ImGui::PopFont();
+            if (has_pct) {
+                ImGui::PushFont(Fonts::mono_sm());
                 dl->AddText(ImVec2(rx + 10.0f + symw + 8.0f, rcy + (rch - ImGui::GetFontSize()) * 0.5f),
                             u32(pctcol), pctbuf);
-            ImGui::PopFont();
+                ImGui::PopFont();
+            }
             if (clk) {
                 const auto* m = SymbolRegistry::instance().get("binancef", sym);
                 if (m) open_symbol(*m);
@@ -425,7 +433,7 @@ void render_symbol_picker_popup(
 
     // ── BROWSE: category chips (square, accent on-state) - wraps + counts ─
     const float cat_y = rec_y + rec_h;
-    const float cat_top = 10.0f, cat_bot = 12.0f, chh = 22.0f, chip_gap = 8.0f, row_gap = 8.0f;
+    const float cat_top = 10.0f, cat_bot = 12.0f, chh = 24.0f, chip_gap = 8.0f, row_gap = 8.0f;
     float cat_h = 0.0f;
     {
         ImGui::PushFont(Fonts::label());
@@ -435,20 +443,21 @@ void render_symbol_picker_popup(
 
         const auto& cats = g_symbol_picker.cached_categories;
         const auto& counts = g_symbol_picker.cached_category_counts;
-        const float x0 = w0.x + PADX + 64.0f, xmax = w0.x + W - PADX;
+        const float x0 = w0.x + PADX + 76.0f, xmax = w0.x + W - PADX;
         float chx = x0, chy = cat_y + cat_top;
+        // Label and count share ONE face (Inter 13) and one baseline. They used
+        // to mix a 10.5px mono label with a 13px sans count nudged 1px down,
+        // which is why "All 941" and "TradFi 190" looked out of register.
         auto cat_chip = [&](const char* label, int count, bool selected, int idx) -> bool {
-            ImGui::PushFont(Fonts::mono_sm());
+            ImGui::PushFont(Fonts::ui());
             const ImVec2 ts = ImGui::CalcTextSize(label);
-            ImGui::PopFont();
             char nbuf[16] = "";
             float nw = 0.0f;
             if (count >= 0) {
                 snprintf(nbuf, sizeof(nbuf), "%d", count);
-                ImGui::PushFont(Fonts::label());
                 nw = ImGui::CalcTextSize(nbuf).x + 6.0f;
-                ImGui::PopFont();
             }
+            ImGui::PopFont();
             const float cw2 = ts.x + nw + 20.0f;
             if (chx + cw2 > xmax) { chx = x0; chy += chh + row_gap; }   // wrap to next line
             ImGui::SetCursorScreenPos(ImVec2(chx, chy));
@@ -458,19 +467,17 @@ void render_symbol_picker_popup(
             ImGui::PopID();
             if (selected)
                 dl->AddRectFilled(ImVec2(chx, chy), ImVec2(chx + cw2, chy + chh), u32(Tokens::BRAND_SOFT));
-            dl->AddRect(ImVec2(chx, chy), ImVec2(chx + cw2, chy + chh),
-                        u32(selected ? Tokens::BRAND : (hov ? Tokens::BRAND_LINE : Tokens::BD2)),
-                        0.0f, 0, 1.0f);
-            ImGui::PushFont(Fonts::mono_sm());
-            dl->AddText(ImVec2(chx + 10.0f, chy + (chh - ts.y) * 0.5f),
+            if (selected)
+                dl->AddLine(ImVec2(chx + 8, chy + chh - 1), ImVec2(chx + cw2 - 8, chy + chh - 1),
+                            u32(Tokens::BRAND), 2.0f);
+            ImGui::PushFont(Fonts::ui());
+            const float ty = chy + (chh - ts.y) * 0.5f;
+            dl->AddText(ImVec2(chx + 10.0f, ty),
                         u32(selected ? Tokens::BRAND_TX : (hov ? Tokens::TX1 : Tokens::TX2)), label);
+            if (count >= 0)
+                dl->AddText(ImVec2(chx + 10.0f + ts.x + 6.0f, ty),
+                            u32(selected ? Tokens::TX2 : Tokens::TX3), nbuf);
             ImGui::PopFont();
-            if (count >= 0) {
-                ImGui::PushFont(Fonts::label());
-                dl->AddText(ImVec2(chx + 10.0f + ts.x + 6.0f, chy + (chh - ImGui::GetFontSize()) * 0.5f + 1.0f),
-                            u32(Tokens::TX3), nbuf);
-                ImGui::PopFont();
-            }
             chx += cw2 + chip_gap;
             return clk;
         };
@@ -488,7 +495,7 @@ void render_symbol_picker_popup(
     }
 
     // ── column header strip (bg-0, sortable; active col = accent) ────
-    const float hdr_h = 30.0f;
+    const float hdr_h = 28.0f;
     const float hdr_y = cat_y + cat_h;
     const float col_star_x  = w0.x + PADX;
     const float col_logo_x  = w0.x + PADX + 22.0f;   // coin logo, after the * zone
@@ -503,7 +510,7 @@ void render_symbol_picker_popup(
         dl->AddLine(ImVec2(w0.x, hdr_y + hdr_h), ImVec2(w0.x + W, hdr_y + hdr_h), u32(Tokens::BD1));
 
         ImGui::PushFont(Fonts::mono_sm());
-        dl->AddText(ImVec2(col_star_x, hdr_y + (hdr_h - ImGui::GetFontSize()) * 0.5f), u32(Tokens::TX3), "*");
+        dl->AddText(ImVec2(col_star_x, hdr_y + (hdr_h - ImGui::GetFontSize()) * 0.5f), u32(Tokens::TX2), "*");
         ImGui::PopFont();
 
         auto& smode = g_symbol_picker.sort_mode;
@@ -525,7 +532,7 @@ void render_symbol_picker_popup(
                 else { smode = mode; asc = (mode == SymbolPickerState::SortMode::Symbol); }
             }
             dl->AddText(ImVec2(tx2, ty),
-                        u32(active ? Tokens::BRAND_TX : (hov ? Tokens::TX1 : Tokens::TX3)), label);
+                        u32(active ? Tokens::BRAND_TX : (hov ? Tokens::TX1 : Tokens::TX2)), label);
             if (active) {
                 const float ax = right_align ? tx2 - 10.0f : tx2 + ts.x + 8.0f;
                 const float ay = hdr_y + hdr_h * 0.5f;
@@ -551,7 +558,7 @@ void render_symbol_picker_popup(
         }
         ImGui::PushFont(Fonts::label());
         const ImVec2 tts = ImGui::CalcTextSize("TYPE");
-        dl->AddText(ImVec2(col_type_r - tts.x, hdr_y + (hdr_h - tts.y) * 0.5f), u32(Tokens::TX3), "TYPE");
+        dl->AddText(ImVec2(col_type_r - tts.x, hdr_y + (hdr_h - tts.y) * 0.5f), u32(Tokens::TX2), "TYPE");
         ImGui::PopFont();
     }
     ImGui::SetCursorScreenPos(ImVec2(w0.x, hdr_y + hdr_h));
@@ -684,6 +691,7 @@ void render_symbol_picker_popup(
     // ── Symbol list (clipped - only renders visible rows) - 1i rows ──
     const float row_h = 34.0f, foot_h = 36.0f;
     ImGui::BeginChild("SymbolList", ImVec2(0, -foot_h), false);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
     ImDrawList* rdl = ImGui::GetWindowDrawList();
 
     if (g_symbol_picker.scroll_to_sel && g_symbol_picker.keyboard_sel >= 0) {
@@ -726,13 +734,11 @@ void render_symbol_picker_popup(
                 ImGui::PopFont();
             }
 
-            // OPEN affordance on the keyboard-highlighted row.
+            // Keyboard action hint uses the same quiet treatment as Esc and Ctrl K.
             if (ksel) {
-                ImGui::PushFont(Fonts::label());
-                const char* op = "OPEN";
-                const float ow = ImGui::CalcTextSize(op).x;
+                ImGui::PushFont(Fonts::ui());
+                const char* op = "Enter";
                 const float ox = col_score_r + 22.0f;
-                rdl->AddRect(ImVec2(ox - 6.0f, cy - 9.0f), ImVec2(ox + ow + 6.0f, cy + 9.0f), u32(Tokens::BRAND), 0.0f, 0, 1.0f);
                 rdl->AddText(ImVec2(ox, cy - ImGui::GetFontSize() * 0.5f), u32(Tokens::BRAND_TX), op);
                 ImGui::PopFont();
             }
@@ -773,7 +779,7 @@ void render_symbol_picker_popup(
                 snprintf(base_buf, sizeof(base_buf), "%.*s", static_cast<int>(slash), display.c_str());
                 rdl->AddText(ImVec2(col_sym_x, ty), u32(Tokens::TX1), base_buf);
                 const float bw = ImGui::CalcTextSize(base_buf).x;
-                rdl->AddText(ImVec2(col_sym_x + bw, ty), u32(Tokens::TX3), display.c_str() + slash);
+                rdl->AddText(ImVec2(col_sym_x + bw, ty), u32(Tokens::TX2), display.c_str() + slash);
             } else {
                 rdl->AddText(ImVec2(col_sym_x, ty), u32(Tokens::TX1), display.c_str());
             }
@@ -814,7 +820,7 @@ void render_symbol_picker_popup(
                 snprintf(sbuf, sizeof(sbuf), "%.0f", scan->edgedepth_score);
                 const ImVec4& col = scan->edgedepth_score >= 70.0 ? Tokens::BRAND_TX
                                   : scan->edgedepth_score >= 40.0 ? Tokens::TX1
-                                                                  : Tokens::TX3;
+                                                                  : Tokens::TX2;
                 num_cell(col_score_r, sbuf, col);
             } else num_cell(col_score_r, "-", Tokens::TX4);
         }
@@ -834,6 +840,7 @@ void render_symbol_picker_popup(
         }
     }
     clipper.End();
+    ImGui::PopStyleVar();
     ImGui::EndChild();
 
     // ── footer strip (bg-0): count + key hints ───────────────────────
@@ -842,16 +849,15 @@ void render_symbol_picker_popup(
         dl->AddRectFilled(ImVec2(w0.x + 1.0f, fy), ImVec2(w0.x + W - 1.0f, fy + foot_h - 1.0f),
                           u32(Tokens::BASE));
         dl->AddLine(ImVec2(w0.x, fy), ImVec2(w0.x + W, fy), u32(Tokens::BD1));
-        char cbuf[24];
-        snprintf(cbuf, sizeof(cbuf), "%zu", visible.size());
-        ImGui::PushFont(Fonts::mono_sm());
-        dl->AddText(ImVec2(w0.x + PADX, fy + 11.0f), u32(Tokens::TX1), cbuf);
-        const float cw2 = ImGui::CalcTextSize(cbuf).x;
-        dl->AddText(ImVec2(w0.x + PADX + cw2 + 6.0f, fy + 11.0f), u32(Tokens::TX3),
-                    "SYMBOLS \xC2\xB7 STATS ARE 24H");
-        const char* hint = "ARROWS NAVIGATE \xC2\xB7 ENTER OPENS \xC2\xB7 * FAVORITES \xC2\xB7 ESC CLOSES";
+        ImGui::PushFont(Fonts::ui());
+        const float text_y = fy + (foot_h - ImGui::GetFontSize()) * 0.5f;
+        char summary[80];
+        snprintf(summary, sizeof(summary), "%zu symbols · 24h statistics", visible.size());
+        dl->AddText(ImVec2(w0.x + PADX, text_y), u32(Tokens::TX2), summary);
+        const char* hint = "Arrows navigate · Enter opens · * favorites · Esc closes";
         const float hw = ImGui::CalcTextSize(hint).x;
-        dl->AddText(ImVec2(w0.x + W - PADX - hw, fy + 11.0f), u32(Tokens::TX3), hint);
+        if (W - PADX - hw > PADX + ImGui::CalcTextSize(summary).x + 24.0f)
+            dl->AddText(ImVec2(w0.x + W - PADX - hw, text_y), u32(Tokens::TX3), hint);
         ImGui::PopFont();
         ImGui::Dummy(ImVec2(W, foot_h - 1.0f));
     }
@@ -871,13 +877,32 @@ void resolve_widget_add_request(
     if (!req.pending) return;
     req.pending = false;
     using PW = SymbolPickerState::PendingWidget;
+    // Market widgets have stable window IDs. Reopen/focus that window instead
+    // of constructing a second widget with the same ImGui identity.
+    for (auto& widget : widgets) {
+        const Terminal::Pair* pair=nullptr;
+        if(req.type==PW::Charts && widget->type()==WidgetType::Chart) pair=&static_cast<ChartWidget*>(widget.get())->pair();
+        if(req.type==PW::DOM && widget->type()==WidgetType::DOM) pair=&static_cast<DOMWidget*>(widget.get())->pair();
+        if(req.type==PW::Orderbook && widget->type()==WidgetType::Orderbook) pair=&static_cast<OrderbookWidget*>(widget.get())->pair();
+        if(req.type==PW::Trades && widget->type()==WidgetType::Trades) pair=&static_cast<TradesWidget*>(widget.get())->pair();
+        if(req.type==PW::Stats && widget->type()==WidgetType::Stats) pair=&static_cast<StatsWidget*>(widget.get())->pair();
+        if(req.type==PW::Debug && widget->type()==WidgetType::DebugLog) pair=&static_cast<DebugWidget*>(widget.get())->pair();
+        if(!pair || pair->exchange!=req.pair.exchange || pair->symbol!=req.pair.symbol)continue;
+        widget->is_open=true;
+        if(req.type==PW::Trades)static_cast<TradesWidget*>(widget.get())->explicitly_opened=true;
+        ImGui::SetWindowFocus(widget->title());
+        return;
+    }
     switch (req.type) {
         case PW::Orderbook:
             widgets.push_back(std::make_unique<OrderbookWidget>(req.pair, ctx, req.fmt, 25)); break;
         case PW::DOM:
             widgets.push_back(std::make_unique<DOMWidget>(req.pair, ctx, req.tick_size, 25)); break;
-        case PW::Trades:
-            widgets.push_back(std::make_unique<TradesWidget>(req.pair, ctx, req.fmt)); break;
+        case PW::Trades: {
+            auto tape=std::make_unique<TradesWidget>(req.pair, ctx, req.fmt);
+            tape->explicitly_opened=true;
+            widgets.push_back(std::move(tape)); break;
+        }
         case PW::Charts:
             widgets.push_back(std::make_unique<ChartWidget>(req.pair, ctx, req.tick_size)); break;
         case PW::Stats:

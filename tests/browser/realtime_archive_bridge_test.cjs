@@ -12,12 +12,12 @@ class FakeWorker {
 const context={Module:{},Worker:FakeWorker,Blob,URL,Map,Float64Array};
 vm.runInNewContext(source,context);const bridge=context.Module.rtArchive;
 bridge.create('one');
-assert.equal(bridge.append('one',new ArrayBuffer(1024*1024)),1);
-assert.equal(bridge.append('one',new ArrayBuffer(1024*1024)),1);
+assert.equal(bridge.append('one',new ArrayBuffer(2*1024*1024)),1);
+assert.equal(bridge.append('one',new ArrayBuffer(2*1024*1024)),1);
 assert.equal(bridge.append('one',new ArrayBuffer(8)),0);
 assert.equal(worker.messages.length,2,'full queue must not enqueue');
 assert.equal(bridge.capacity('one',8),0,'reject before copying WASM bytes');
-worker.emit({type:'ack',id:'one',bytes:1024*1024});
+worker.emit({type:'ack',id:'one',bytes:2*1024*1024});
 assert.equal(bridge.append('one',new ArrayBuffer(8)),1);
 assert.equal(bridge.query('one',0,1000,1000,100,1),1);
 assert.equal(bridge.query('one',0,2000,2000,100,1),0,'one pending request per market');
@@ -27,7 +27,11 @@ assert.equal(bridge.state('one').view,null,'pause cancels an in-flight display r
 bridge.clear('one');bridge.create('two');
 worker.emit({type:'view',id:'one',request:1,buffer:new ArrayBuffer(8)});
 assert.equal(bridge.state('two').view,null,'reset rejects old-session responses');
-bridge.query('two',1000,2000,1500,100,1);
+bridge.query('two',1000,2000,1500,100,5,1);
+assert.equal(worker.messages.at(-1).native_tick,1);
+assert.equal(worker.messages.at(-1).tick,5,'request carries actual source price width and native unit');
+worker.emit({type:'view',id:'two',request:1,source_bucket_ticks:5,buffer:new ArrayBuffer(0)});
+assert.equal(bridge.state('two').view.source_bucket_ticks,5,'accepted response retains its own price width');
 assert.equal(worker.messages.at(-1).cutoff,1500);
 worker.emit({type:'error',id:'two',message:'QuotaExceededError'});
 assert.equal(bridge.append('two',new ArrayBuffer(8)),-1,'storage failure stops archiving explicitly');

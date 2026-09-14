@@ -48,11 +48,13 @@ Json TradesWidget::save_settings() const {
     Json j = Json::object();
     j["auto_scroll"] = auto_scroll_;
     j["show_stats"] = show_stats_;
+    j["explicitly_opened"] = explicitly_opened;
     return j;
 }
 void TradesWidget::load_settings(const Json& j) {
     workspace::read(j, "auto_scroll", auto_scroll_);
     workspace::read(j, "show_stats", show_stats_);
+    workspace::read(j, "explicitly_opened", explicitly_opened);
 }
 
 Json OrderbookWidget::save_settings() const {
@@ -104,6 +106,9 @@ Json ChartWidget::save_settings() const {
     j["rt_mode"] = rt_mode_;
     j["rt_candles"] = rt_candles_;
     j["rt_bubbles"] = rt_bubbles_;
+    j["candle_bubbles"] = candle_bubbles_;
+    j["candle_bubble_history"] = candle_bubble_history_enabled_;
+    j["candle_bubble_min"] = candle_bubble_min_;
     j["rt_trade_line"] = rt_trade_line_;
     j["rt_extend_depth"] = rt_extend_depth_;
     j["rt_auto_fit_history"] = rt_auto_fit_history_;
@@ -131,6 +136,7 @@ Json ChartWidget::save_settings() const {
     j["liq_dense_field"] = liq_dense_field_;
     j["liq_profile_enabled"] = liq_profile_enabled_;
     j["liq_observed_enabled"] = liq_observed_enabled_;
+    j["rt_liq_strip"] = rt_liq_strip_;
     j["liq_census_enabled"] = liq_census_enabled_;
     j["liq_obs_min_usd"] = liq_obs_min_usd_;
     j["liq_obs_ref_usd"] = liq_obs_ref_usd_;
@@ -207,7 +213,7 @@ void ChartWidget::load_settings(const Json& j) {
     workspace::read(j, "timeframe", tf, 1, 604800);
     if (tf != timeframe_seconds()) change_timeframe(tf);
     auto ct = chart_type_;
-    workspace::read(j, "chart_type", ct, 0, 6);
+    workspace::read(j, "chart_type", ct, 0, 7);
     set_chart_type(ct);
     bool realtime = false;
     workspace::read(j, "rt_mode", realtime);
@@ -215,6 +221,9 @@ void ChartWidget::load_settings(const Json& j) {
     workspace::read(j, "rt_candles", rt_candles_);
     if (rt_mode_) chart_type_ = rt_candles_ ? ChartType::Candles : ChartType::Line;
     workspace::read(j, "rt_bubbles", rt_bubbles_);
+    workspace::read(j, "candle_bubbles", candle_bubbles_);
+    workspace::read(j, "candle_bubble_history", candle_bubble_history_enabled_);
+    workspace::read(j, "candle_bubble_min", candle_bubble_min_, 0, 1000000000000.0);
     workspace::read(j, "rt_trade_line", rt_trade_line_);
     workspace::read(j, "rt_extend_depth", rt_extend_depth_);
     // A manual inspection is transient. Restored sessions start following price.
@@ -244,6 +253,7 @@ void ChartWidget::load_settings(const Json& j) {
     workspace::read(j, "liq_dense_field", liq_dense_field_);
     workspace::read(j, "liq_profile_enabled", liq_profile_enabled_);
     workspace::read(j, "liq_observed_enabled", liq_observed_enabled_);
+    workspace::read(j, "rt_liq_strip", rt_liq_strip_);
     workspace::read(j, "liq_census_enabled", liq_census_enabled_);
     workspace::read(j, "liq_obs_min_usd", liq_obs_min_usd_, 0, 1000000000000000.0);
     workspace::read(j, "liq_obs_ref_usd", liq_obs_ref_usd_, 1, 1000000000000000.0);

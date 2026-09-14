@@ -37,10 +37,32 @@ document.querySelector('#run').onclick=async()=>{
         messages=await query('roundtrip',1000,1500);a=new Float64Array(messages.find(m=>m.type==='view').buffer);
         check(a[12]===1401 && a[14]===1,'interruption removes final unknown bin; next seed starts a new segment');
         messages=await query('roundtrip',1000,1500,500);a=new Float64Array(messages.find(m=>m.type==='view').buffer);
-        check(a[0]===2,'coarse bin crossing a gap stays absent');
+        check(a[0]===1 && a[1]===1401 && a[3]===1 && a[8]===6,
+            'coarse boundary keeps only the new segment with its own quantities');
         await send({type:'clear',id:'roundtrip'});
         messages=await query('roundtrip',1000,1500);
         check(messages.find(m=>m.type==='view').buffer.byteLength===0,'clear prevents stale session reads');
+        await append('recovery',[...depth(1000,2,1),3,1000,3,...trade(1500),...depth(3000,8,1),...depth(3500,10)]);
+        await send({type:'append',id:'recovery',seed:2,buffer:new Float64Array([
+            ...depth(1500,4,1),...depth(2500,6,1),3,3000,3]).buffer});
+        messages=await query('recovery',1000,3600,500);view=messages.find(m=>m.type==='view');a=new Float64Array(view.buffer);
+        const recoveredTimes=[];let recoveredQty=0;
+        for(let p=0;p<a.length;p+=a[p+2])if(a[p]===1) {recoveredTimes.push(a[p+1]);recoveredQty+=a[p+8];}
+        check(recoveredTimes.join(',')==='1500,2500,3000,3500' && recoveredQty===28 && view.tradeCount===1,
+            'late recovered depth merges chronologically without duplicating continuing trades or inventing upstream gap');
+        messages=await query('recovery',1000,3600,500,2000);a=new Float64Array(messages.find(m=>m.type==='view').buffer);
+        check(a[1]===1500 && !Array.from(a).includes(2500),'recovered depth obeys replay cutoff');
+        messages=await send({type:'query',id:'recovery',from:1000,to:3600,step:500,cutoff:3600,tick:5,native_tick:1,request:77});
+        check(messages.find(m=>m.type==='view').source_bucket_ticks===5,
+            'worker echoes the source price width belonging to the actual query');
+        await append('groups',[4,1000,9,100,7,1,98,103,5,4,1000,9,101,3,0,99,104,2,2,1150,6,100,2,1]);
+        messages=await query('groups',1000,1200,500);view=messages.find(m=>m.type==='view');a=new Float64Array(view.buffer);
+        let groupQty=0,groupLow=Infinity,groupHigh=0,groupCount=0;
+        for(let p=0;p<a.length;p+=a[p+2])if(a[p]===4) {groupQty+=a[p+4];groupLow=Math.min(groupLow,a[p+6]);groupHigh=Math.max(groupHigh,a[p+7]);groupCount+=a[p+8];}
+        check(view.grouped && groupQty===12 && groupLow===98 && groupHigh===104 && groupCount===8,
+            '100ms summaries preserve quantity, count and extremes with a raw tail');
+        messages=await query('groups',1000,1050,500);
+        check(messages.find(m=>m.type==='view').tradeCount===0,'a partial 100ms summary cannot leak trades beyond a query cutoff');
         await append('seeded',[...depth(5001,7,1),...trade(5002),...depth(5501,8)]);
         await send({type:'append',id:'seeded',seed:true,buffer:new Float64Array([
             ...depth(3001,2,1),...depth(3501,4),...trade(3002),3,4001,3]).buffer});
@@ -49,6 +71,39 @@ document.querySelector('#run').onclick=async()=>{
         check(times.join(',')==='3001,3501,5001,5501','late seed is queried before live depth with a preserved seam');
         check(messages.find(m=>m.type==='view').tradeCount===2,'seed and live trades both survive IndexedDB ordering');
         await send({type:'clear',id:'seeded'});
+        for (const step of [500,1000,2000]) {
+            const id='join-'+step;
+            await append(id,[...depth(4000,7,1),...depth(4100,9)]);
+            await send({type:'append',id,seed:true,buffer:new Float64Array([
+                ...depth(3000,2,1),...depth(3500,4),3,4000,3]).buffer});
+            messages=await query(id,3000,4500,step);
+            a=new Float64Array(messages.find(m=>m.type==='view').buffer);
+            const books=[];for(let p=0;p<a.length;p+=a[p+2])if(a[p]===1)books.push(Array.from(a.slice(p,p+a[p+2])));
+            check(books.length>=2 && books.at(-2)[1]===(step===500?3500:3000) && books.at(-1)[1]===4000 && books.at(-1)[3]===1 && books.at(-1)[8]===8,
+                'startup join preserves its first timestamp and quantities at step '+step+' '+JSON.stringify(books.map(b=>[b[1],b[3],b[8]])));
+            await send({type:'clear',id});
+        }
+        await append('late-boundary',[...depth(4050,7,1),...depth(4450,9)]);
+        messages=await query('late-boundary',4000,4500,500);
+        a=new Float64Array(messages.find(m=>m.type==='view').buffer);
+        check(a[1]===4050 && a[3]===1 && a[8]===8,
+            'boundary retains the actual 50ms missing prefix, not a false 450ms gap');
+        await send({type:'clear',id:'late-boundary'});
+        const maximal=[];
+        for(let i=0;i<181;i++) {
+            maximal.push(1,i===0?10001:10000+i*500,2055,i===0?1:0,1000,1001,1024);
+            for(let j=0;j<1024;j++)maximal.push(489+j,2);
+        }
+        maximal.push(3,100001,3);
+        for(let i=0;i<16384;i++)maximal.push(2,10001+i,6,100,2,1);
+        check(maximal.length*8>1024*1024 && maximal.length*8<4*1024*1024,'maximal preload crosses a storage chunk but fits transport');
+        messages=await send({type:'append',id:'maximal',seed:true,buffer:new Float64Array(maximal).buffer});
+        check(!messages.some(m=>m.type==='error'),'maximal preload commits across storage chunks');
+        messages=await query('maximal',10001,100001,500);
+        view=messages.find(m=>m.type==='view');a=new Float64Array(view.buffer);
+        let retainedQty=0;for(let p=0;p<a.length;p+=a[p+2])if(a[p]===2 || a[p]===4)retainedQty+=a[p+4];
+        check(view.tradeCount===16384 && retainedQty===32768,'all 16384 preload trades and exact quantity survive archive round-trip');
+        await send({type:'clear',id:'maximal'});
         // A slow historical read must not block live durability or change its
         // as-of cutoff. Delay only fixture decompression, not production code.
         worker.terminate();

@@ -153,7 +153,9 @@ void main() {
         // later orders above the calibration reference without a hard ceiling.
         // 0.1x -> 0.038, 0.5x -> 0.5, 1x -> 0.8, 2x -> 0.941.
         float shoulder = relative / sqrt(0.25 + relative * relative);
-        t = u_mode == 2 ? shoulder * shoulder : clamp(relative, 0.0, 1.0);
+        // Candle contrast lifts routine depth and retains a soft highlight shoulder.
+        // The RT transfer function and both palettes remain unchanged.
+        t = u_mode == 2 ? shoulder * shoulder : sqrt(relative / (9.0 + relative));
     } else {
         // Liquidation: low/peak normalization (value already abs from interp above)
         if (value < u_color_low) discard;

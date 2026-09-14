@@ -18,6 +18,7 @@ public:
     void update() override;
 
     WidgetType  type()  const override { return WidgetType::DebugLog; }
+    const Terminal::Pair& pair() const { return pair_; }
     const char* title() const override { return title_.c_str(); }
     UpdateFrequency update_frequency() const override { return UpdateFrequency::Standard; }
 

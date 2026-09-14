@@ -29,6 +29,7 @@ public:
     void update_price_color();
 
     WidgetType type() const override { return WidgetType::Orderbook; }
+    [[nodiscard]] const Terminal::Pair& pair() const { return pair_; }
     const char* title() const override { return title_.c_str(); }
 
 private:

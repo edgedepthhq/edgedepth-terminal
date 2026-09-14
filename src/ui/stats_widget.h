@@ -41,6 +41,7 @@ public:
     void render() override;
     void update() override;
     WidgetType type() const override { return WidgetType::Stats; }
+    [[nodiscard]] const Terminal::Pair& pair() const { return pair_; }
     const char* title() const override { return title_.c_str(); }
     void handle_stat(const Terminal::Stat& stat);
 

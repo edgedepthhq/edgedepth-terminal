@@ -34,7 +34,7 @@ struct PositioningState {
     double  global_long_account     = 0.0;  // retail crowd long fraction (0..1)
     double  top_trader_long_account = 0.0;  // smart-money long fraction (0..1)
     double  funding_rate            = 0.0;
-    double  open_interest           = 0.0;  // contracts (notional = x mark_price)
+    double  open_interest           = 0.0;  // USD notional; state refresh time is not raw OI source time
     double  oi_change_24h           = 0.0;  // signed fraction
     double  long_liq_usd            = 0.0;
     double  short_liq_usd           = 0.0;

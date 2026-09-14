@@ -1,3 +1,4 @@
+#include "core/liq_field_tiers.h"
 #include "rendering/liq_field_renderer.h"
 
 #include <algorithm>
@@ -95,7 +96,9 @@ void LiqFieldRenderer::rebuild(uint8_t lmask, int64_t tf_ms) {
         for (int d = 0; d <= K; ++d) kw[d] /= ksum;
     }
 
-    static constexpr double  kLev[6] = {5.0, 10.0, 25.0, 50.0, 75.0, 100.0};
+    const auto& kLev = liq_field::kLeverages;
+    const auto tiers = liq_field::select_tiers(lmask,
+        liq_field::max_leverage(cm.pair().exchange, cm.pair().symbol));
     static constexpr uint8_t kBit[6] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20};
 
     struct State { double f; int64_t run_start; int64_t last_ms; };  // decayed fuel sum + run start +
@@ -130,8 +133,7 @@ void LiqFieldRenderer::rebuild(uint8_t lmask, int64_t tf_ms) {
         if (p <= 0.0 || c.volume <= 0.0) return;
         // ANOMALY weight (MMT's flow-deviation crux) with a NEAR-TIER floor - the round-3e statistic,
         // RESTORED. Brightness comes from the EXCESS over baseline volume (log-compressed + capped);
-        // the dim per-candle floor trace applies ONLY to the near tiers (50/75/100×, ≤2% offsets),
-        // drawing MMT's short in-channel fragments; far tiers (5/10/25×) are excess-only.
+        // The floor follows the top three selected, venue-available tiers (lf.v2).
         // Rounds 4/5 post-mortem (belts → soup → all-yellow): gating far deposits harder, then
         // replacing the run SUM with a per-plot MAX, only RESHAPED the intensity distribution - and
         // the dual-percentile map ADAPTS to whatever distribution it gets, so both times it re-
@@ -156,9 +158,9 @@ void LiqFieldRenderer::rebuild(uint8_t lmask, int64_t tf_ms) {
             }
         };
         for (int t = 0; t < 6; ++t) {
-            if (!(lmask & kBit[t])) continue;
+            if (!(tiers.enabled & kBit[t])) continue;
             const double invL = 1.0 / kLev[t];
-            const double w = std::min(wcap, wex + ((invL <= 0.021) ? wfl : 0.0));
+            const double w = std::min(wcap, wex + ((tiers.floor & kBit[t]) ? wfl : 0.0));
             if (w <= 0.0) continue;
             add(p * (1.0 - invL), w);   // long liq (below entry)
             add(p * (1.0 + invL), w);   // short liq (above entry)
@@ -265,7 +267,10 @@ void LiqFieldRenderer::ensure_cache() {
     const int64_t tf_ms = cm.timeframe_seconds() * 1000;
     const int64_t sig_ts = candles.empty() ? 0 : candles.back().timestamp_ms;
     if (sig_ts != sig_ts_ || candles.size() != sig_n_ ||
-        lmask != sig_mask_ || tf_ms != sig_tf_) {
+        lmask != sig_mask_ || tf_ms != sig_tf_ ||
+        cm.pair().exchange != sig_exchange_ || cm.pair().symbol != sig_symbol_) {
+        sig_exchange_ = cm.pair().exchange;
+        sig_symbol_ = cm.pair().symbol;
         sig_ts_   = sig_ts;
         sig_n_    = candles.size();
         sig_mask_ = lmask;

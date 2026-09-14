@@ -1,3 +1,4 @@
+#include <emscripten.h>
 #include "stream_handler.h"
 #include "core/data_thread.h"
 #include "core/stream_presence.h"
@@ -589,3 +590,16 @@ template void StreamManager::unsubscribe_impl(
 template void StreamManager::unsubscribe_impl(
     std::map<StreamKey, std::vector<StreamHandler<Terminal::PatternOverlay>>>&,
     StreamKey, void*);
+
+bool StreamManager::request_historical_liq_levels(const Terminal::Pair& pair, int64_t start_ms, int64_t end_ms) const {
+    unsigned short ready = 0;
+    if (ws_ <= 0 || emscripten_websocket_get_ready_state(ws_, &ready) != EMSCRIPTEN_RESULT_SUCCESS || ready != 1) return false;
+    const char* token = emscripten_run_script_string("window.__EDGEDEPTH_REPLAY_TOKEN__ || ''");
+    if (!token || !*token) return false;
+    json request = {{"method", "get_historical_liq_levels"}, {"data", {
+        {"pair", {{"exchange", pair.exchange}, {"symbol", pair.symbol}}},
+        {"start_ms", start_ms}, {"end_ms", end_ms}, {"entitlement_token", token}
+    }}};
+    send_message(request.dump());
+    return true;
+}

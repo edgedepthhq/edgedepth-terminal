@@ -2,6 +2,9 @@
 #include <algorithm>
 #include "core/realtime_history.h"
 
+// Thirty seconds of observed history plus the existing 12 percent live margin.
+inline constexpr double realtime_default_span_ms = 30000.0 / 0.88;
+
 // ImPlot has already zoomed a detached axis. Following axes are input-locked
 // by SetupAxisLimits(Always), so apply the same wheel factor to their span.
 // Navigation never changes the live display pause or replay transport clock.

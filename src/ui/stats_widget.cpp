@@ -52,7 +52,7 @@ float draw_tag(ImDrawList* dl, ImVec2 pos, const char* txt,
 
 StatsWidget::StatsWidget(const Terminal::Pair& pair, const AppContext& ctx, const PriceFormatter& fmt)
     : pair_(pair)
-    , title_("Stats " + pair.exchange + " " + pair.symbol)
+    , title_("     Stats · " + pair.symbol + "###Stats " + pair.exchange + " " + pair.symbol)
     , stream_key_{pair, Terminal::Stream::Stats, 1}
     , ctx_(ctx)
     , fmt_(fmt)

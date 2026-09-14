@@ -14,6 +14,7 @@ public:
     // The pair this widget was built for. The replay swap tears the live
     // order-flow widgets down and rebuilds them on exit, and it has to
     // rebuild the pair that was actually on screen, not the boot route.
+    bool explicitly_opened = false; // An Add widget request overrides automatic RT tape hiding.
     [[nodiscard]] const Terminal::Pair& pair() const { return pair_; }
 
     TradesWidget(const Terminal::Pair &pair, const AppContext& ctx, const PriceFormatter& fmt);

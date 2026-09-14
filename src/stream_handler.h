@@ -125,6 +125,7 @@ public:
     // swallowed by the pack hook (pack ghost support is a follow-up).
     void request_replay_preview_candles(const Terminal::Pair& pair, int64_t timeframe) const;
 
+    bool request_historical_liq_levels(const Terminal::Pair& pair, int64_t start_ms, int64_t end_ms) const;
     void request_historical_oi(const Terminal::Pair& pair, int64_t timeframe, int count) const;
     void request_historical_funding(const Terminal::Pair& pair, int64_t timeframe, int count) const;
     // Indicators V1 (F3 absolute range): vpin_buckets history. start_ms/end_ms

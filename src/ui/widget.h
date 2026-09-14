@@ -2,6 +2,8 @@
 #include <deque>
 #include <chrono>
 #include <string>
+#include <algorithm>
+#include <cctype>
 
 #include "../stream_handler.h"
 #include "../types/types.h"
@@ -17,6 +19,23 @@ inline const char* widget_venue_label(const std::string& exchange) {
     if (exchange == "binance") return "Binance";
     if (exchange == "bybit") return "Bybit";
     return exchange.c_str();
+}
+
+// Display formatting only: IDs and subscription symbols retain their original keys.
+inline std::string widget_symbol_label(std::string symbol) {
+    std::transform(symbol.begin(), symbol.end(), symbol.begin(),
+        [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    if (symbol.find('/') == std::string::npos) {
+        for (const char* quote : {"USDT", "USDC"}) {
+            const std::string suffix(quote);
+            if (symbol.size() > suffix.size() &&
+                symbol.compare(symbol.size() - suffix.size(), suffix.size(), suffix) == 0) {
+                symbol.insert(symbol.size() - suffix.size(), "/");
+                break;
+            }
+        }
+    }
+    return symbol;
 }
 
 enum class WidgetType {

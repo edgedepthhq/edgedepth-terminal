@@ -1,4 +1,5 @@
 #pragma once
+#include "core/census_history.h"
 
 #include "types/types.h"
 #include "rendering/shader_heatmap_renderer.h"
@@ -37,6 +38,9 @@ public:
     // flow_intensity carries coverage_frac verbatim (0 must stay 0).
     void apply_census_update(const Terminal::Pair& pair, const pb::LiquidationHeatmapUpdate& update_pb);
     const Terminal::LiquidationHeatmapSnapshot* get_census_snapshot(const Terminal::Pair& pair) const;
+    using CensusHistory = census_history::History<Terminal::LiquidationHeatmapSnapshot>;
+    const CensusHistory* get_census_history(const Terminal::Pair& pair) const;
+
 
     // ─── Timeline mode (historical GPU heatmap) ──────────────────
     // Called from message_handler for each historical snapshot in the batch
@@ -81,6 +85,7 @@ public:
     bool get_ml_weight_timeline() const { return ml_weight_timeline_; }
 
 private:
+    std::map<LiqHeatmapKey, CensusHistory> census_history_; // at most four markets
     // Profile mode: latest snapshot per symbol
     std::map<LiqHeatmapKey, Terminal::LiquidationHeatmapSnapshot> snapshots_;
 

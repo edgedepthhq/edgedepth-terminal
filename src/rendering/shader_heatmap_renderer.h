@@ -55,7 +55,7 @@ public:
 
     /// Finalize a column (server-authoritative, prevents live overwrite).
     void finalize_column(int64_t timestamp_ms,
-                         const std::unordered_map<double, float>& price_qty_map, bool segment_start = false, double price_center = 0);
+                         const std::unordered_map<double, float>& price_qty_map, bool segment_start = false, double price_center = 0, int source_bucket_ticks = 1);
 
     // A separate instance for observed subsecond depth; historical candle
     // columns never enter this renderer. Original observation clocks are keys.
@@ -67,9 +67,14 @@ public:
     }
     void invalidate_observation(int64_t timestamp_ms) {
         observation_centers_.erase(timestamp_ms);
+        observation_source_ticks_.erase(timestamp_ms);
         if (realtime_ && timeline_.erase(timestamp_ms)) { gpu_dirty_ = true; last_sync_ms_ = 0; }
     }
-    void set_observation_hold(int64_t until_ms) { observation_hold_until_ms_ = until_ms; }
+    void set_observation_hold(int64_t until_ms, int64_t source_ms = 0) {
+        observation_hold_until_ms_ = until_ms;
+        observation_hold_source_ms_ = source_ms > 0 ? source_ms :
+            (timeline_.empty() ? 0 : timeline_.rbegin()->first);
+    }
     void set_observation_clock_ms(int64_t ms) { if (realtime_) replay_cutoff_ms_ = ms; }
     void clear();
     void clear_realtime_view(int64_t interval) {
@@ -166,6 +171,25 @@ public:
     double get_native_bucket_size() const { return native_bucket_size_; }
     double get_display_bucket_size() const { return native_bucket_size_ * bucket_multiplier_; }
     float get_max_qty() const { return global_max_qty_; }
+    // Candle-only display policy. RT retains its own grid and calibration.
+    void set_candle_price_window(double low, double high);
+    void recalibrate_candle_colors() { candle_reference_ = 0; }
+    float candle_intensity(float qty, float sensitivity) const;
+    struct CandleCoverage {
+        int64_t timestamp_ms = 0;
+        double low = 0, high = 0;
+        bool clipped = false;
+    };
+    CandleCoverage candle_coverage(int64_t time_ms) const;
+    static int64_t candle_depth_seconds(int64_t candle_seconds, double visible_ms = 0) {
+        // Minute detail when it fits; bounded, explicit sampling for broad views.
+        // Never request depth coarser than the candles themselves.
+        for (int64_t step : {60LL, 300LL, 900LL, 3600LL, 14400LL, 86400LL}) {
+            if (step >= candle_seconds) return candle_seconds;
+            if (visible_ms <= double(step) * 1000 * 1800) return step;
+        }
+        return candle_seconds;
+    }
 
     float get_data_mean() const { return zscore_mean_; }
     float get_data_stddev() const { return zscore_stddev_; }
@@ -283,12 +307,14 @@ private:
     double gpu_price_origin_ = 0.0;
     int64_t time_step_ms_ = 60000; // Interval of the uploaded GPU grid
     std::map<int64_t, double> observation_centers_;
+    std::map<int64_t, int> observation_source_ticks_; // Archive bins may already combine native ticks.
     bool realtime_ = false;
     bool realtime_warm_ = true;
     float realtime_normalization(double price_min, double price_max);
-    float realtime_peak_ = 0;
+    float realtime_peak_ = 0; // Locked native-tick density reference, independent of grouping.
     int64_t realtime_peak_clock_ms_ = 0;
-    int64_t observation_hold_until_ms_ = 0;
+    int64_t observation_hold_until_ms_ = 0, observation_hold_source_ms_ = 0;
+    int64_t realtime_hold_until() const;
     void fill_observation_hold(int previous, int next);
     double realtime_draw_until(double viewport_end, bool extend) const;
     std::set<int64_t> observation_boundaries_;
@@ -341,7 +367,13 @@ private:
     ColormapType colormap_type_ = ColormapType::Orderbook;
     double native_bucket_size_ = 0.0;
     int bucket_multiplier_ = 1;
-    int texture_grouping() const { return realtime_ ? 1 : bucket_multiplier_; }
+    bool candle_orderbook() const { return !realtime_ && colormap_type_ == ColormapType::Orderbook; }
+    int texture_grouping() const { return colormap_type_ == ColormapType::Orderbook ? 1 : bucket_multiplier_; }
+    double candle_window_low_ = 0, candle_window_high_ = 0;
+    float candle_reference_ = 0;
+    int64_t candle_reference_clock_ = 0;
+    float candle_normalization(double low, double high, double start_ms, double end_ms);
+    double column_price_min(double mid, double bucket) const;
     int64_t time_offset_ms_ = 0;
     float opacity_ = 1.0f;
     bool smooth_mode_ = false;

@@ -1,4 +1,5 @@
 #include "core/orderbook_manager.h"
+#include "core/message_parser.h"
 #include <string>
 #include <memory>
 #define private public
@@ -10,6 +11,14 @@
 int test_archive_capture() {
     int failures=0;
     auto expect=[&](bool ok,const char* message){if(!ok){std::fprintf(stderr,"FAIL: %s\n",message);++failures;}};
+    const char compressed[]={0x28,char(0xb5),0x2f,char(0xfd),0x20,5,0x29,0,0,'h','e','l','l','o'};
+    const auto plain=MessageParser::decompress_zstd(std::string(compressed,sizeof compressed));
+    expect(plain.success && plain.data=="hello","shared decoder accepts a known-size Zstd frame");
+    const char huge[]={0x28,char(0xb5),0x2f,char(0xfd),char(0xa0),1,0,0,0x20,1,0,0};
+    expect(!MessageParser::decompress_zstd(std::string(huge,sizeof huge)).success,
+        "oversized known-size frame is rejected before allocation");
+    expect(!MessageParser::decompress_zstd(std::string(compressed,10)).success,"truncated compressed frame is rejected");
+    expect(MessageParser::decompress_zstd("raw").data=="raw","raw protobuf fallback remains available");
     OrderbookManager books;
     Terminal::Pair pair{"binancef","fixture"};
     auto owner=std::unique_ptr<RealtimeArchive>(new RealtimeArchive(books,pair));
@@ -122,6 +131,82 @@ int test_archive_capture() {
     archive.append_trade({100,1,99000,true,12});
     expect(archive.batch_.size()==buffered+6,"distinct identical late trade remains visible");
     archive.reset();archive.startup_end=100000;archive.startup_pending_=true;
+    auto adjacent=response;
+    adjacent["records"][1]=99500;
+    adjacent["trades"]=nlohmann::json::array();
+    archive.receive_seed(adjacent);
+    expect(archive.seed_.size()==14 && archive.seed_[12]==100000,
+        "adjacent startup history ends at live start, not inside the preceding bin");
+
+    archive.reset();archive.startup_end=100000;archive.startup_pending_=true;
+    auto minute=response;
+    minute["records"]=nlohmann::json::array();
+    minute["trades"]=nlohmann::json::array({
+        {{"id","99"},{"time",10000},{"price",100},{"qty",1},{"buy",true}}
+    });
+    archive.append_trade({100,1,99999,true,10});
+    for(int64_t ts=10000;ts<100000;ts+=500)
+        for(double value : {1.0,double(ts),11.0,ts==10000?1.0:0.0,100.0,101.0,2.0,100.0,2.0,101.0,3.0})
+            minute["records"].push_back(value);
+    archive.receive_seed(minute);
+    expect(archive.startup_first==10000 && archive.seed_.size()==180*11+3+6 && archive.seeded_ids_.contains(99),
+        "full 90 seconds of depth and identified trades is accepted");
+    archive.reset();archive.startup_end=100000;archive.startup_pending_=true;
+    minute["records"][1]=9999;
+    archive.receive_seed(minute);
+    expect(archive.seed_.empty() && archive.startup_first==0,
+        "observations before the requested 90 seconds are rejected");
+    archive.reset();archive.startup_end=100000;archive.startup_pending_=true;
+    auto burst=response;
+    burst["end_ms"]=100001;
+    burst["records"]=nlohmann::json::array();
+    burst["trades"]=nlohmann::json::array();
+    archive.startup_end=100001;
+    archive.append_trade({100,1,100000,true,99999});
+    for(int i=0;i<181;++i) {
+        const int64_t ts=i==0?10001:10000+i*500;
+        for(double v : {1.0,double(ts),519.0,i==0?1.0:0.0,100.0,101.0,256.0}) burst["records"].push_back(v);
+        for(int j=0;j<256;++j) {burst["records"].push_back(50.0+j);burst["records"].push_back(2.0);}
+    }
+    for(int i=0;i<16384;++i) burst["trades"].push_back({
+        {"id",std::to_string(i+1)},{"time",10001+i},{"price",100},{"qty",2},{"buy",true}});
+    pb::RealtimeHistory binary;
+    binary.set_end_ms(100001);
+    for(const auto& value:burst["records"])binary.add_records(value.get<double>());
+    for(const auto& value:burst["trades"]) {
+        auto* t=binary.add_trades();t->set_agg_trade_id(std::stoll(value["id"].get<std::string>()));
+        t->set_timestamp_ms(value["time"].get<int64_t>());t->set_price(100);t->set_qty(2);t->set_is_buy(true);
+    }
+    binary.mutable_trades(16383)->set_agg_trade_id(9007199254740993LL);
+    pb::RealtimeHistory decoded;
+    expect(decoded.ParseFromString(binary.SerializeAsString()),"binary history parses through generated protobuf");
+    archive.receive_seed(decoded);
+    expect(archive.seeded_ids_.contains(9007199254740993LL),"protobuf preserves IDs above double precision");
+    expect(archive.seeded_ids_.size()==16384 && archive.seed_.size()==181*519+3+16384*6,
+        "maximum depth plus 16384 distinct trade records are retained exactly");
+    expect(archive.seed_.size()*sizeof(double)<2*1024*1024,
+        "maximum startup payload fits the existing worker transport budget");
+    pb::RealtimeHistory wide=decoded;
+    wide.clear_records();
+    for(int i=0;i<181;++i) {
+        const int64_t ts=i==0?10001:10000+i*500;
+        for(double v:{1.0,double(ts),2055.0,i==0?1.0:0.0,1000.0,1001.0,1024.0})wide.add_records(v);
+        for(int j=0;j<1024;++j) {wide.add_records(489+j);wide.add_records(2);}
+    }
+    archive.reset();archive.startup_end=100001;archive.startup_pending_=true;
+    archive.append_trade({100,2,100000,true,99999});archive.receive_seed(wide);
+    expect(archive.seed_.size()==181*2055+3+16384*6 && archive.seed_.size()*8<4*1024*1024,
+        "512-level startup plus exact trade tail fits the four MiB transport budget");
+    expect(archive.startup_max_levels_per_side==512,
+        "startup reports actual received price coverage from both book sides");
+    const auto burst_size=archive.batch_.size();
+    archive.append_trade({100,2,10001,true,1});
+    expect(archive.batch_.size()==burst_size,"large startup still suppresses late duplicate IDs");
+    archive.reset();archive.startup_end=100001;archive.startup_pending_=true;
+    burst["trades"].push_back(burst["trades"].back());
+    archive.receive_seed(burst);
+    expect(archive.seed_.empty(),"oversized startup trade response is rejected");
+    archive.reset();archive.startup_end=100000;archive.startup_pending_=true;
     response["records"][2]=100000000;
     archive.receive_seed(response);
     expect(archive.seed_.empty() && archive.seeded_ids_.empty() && archive.startup_first==0,
@@ -129,7 +214,65 @@ int test_archive_capture() {
     archive.startup_pending_=true;archive.startup_at_=-100000;
     archive.update(100000);
     expect(!archive.startup_pending_ && archive.error.empty(),"history timeout leaves live recorder usable");
+    archive.reset();archive.startup_end=100001;archive.startup_pending_=true;archive.startup_requested_=true;
+    archive.receive_seed(decoded);
+    expect(archive.deferred_seed_ && archive.seed_.empty(),"early binary response waits for overlap identities");
+    archive.append_trade({100,2,100000,true,1});
+    archive.update(100001);
+    expect(!archive.deferred_seed_ && !archive.startup_pending_ && archive.seeded_ids_.contains(9007199254740993LL),
+        "live identity releases fetched history without a second network request");
+    archive.reset();archive.startup_end=100001;archive.startup_pending_=true;
+    archive.append_trade({100,2,100000,true,99999});
+    pb::RealtimeHistory grouped;grouped.set_end_ms(100001);
+    auto* bin=grouped.add_trade_bins();bin->set_start_ms(10100);bin->set_end_ms(10200);
+    bin->set_price(100);bin->set_qty(20);bin->set_low(98);bin->set_high(103);bin->set_count(10);
+    bin->set_first_id(9007199254740993LL);bin->set_last_id(9007199254741002LL);
+    archive.receive_seed(grouped);
+    expect(archive.seed_.size()==9 && archive.seed_[0]==4 && archive.seed_[6]==98 && archive.seed_[8]==10,
+        "summary preserves quantity, extremes and count");
+    const size_t before_summary_duplicate=archive.batch_.size();
+    archive.append_trade({100,2,10105,true,9007199254740997LL});
+    expect(archive.batch_.size()==before_summary_duplicate,"late ID inside exact summary range is suppressed without double rounding");
+    archive.append_trade({100,2,10106,true,9007199254741003LL});
+    expect(archive.batch_.size()==before_summary_duplicate+6,"unseen ID outside summary range is retained");
+    archive.reset();archive.startup_end=100001;archive.startup_pending_=true;
+    archive.append_trade({100,2,10150,true,9007199254740997LL});
+    archive.receive_seed(grouped);
+    expect(archive.seed_.empty(),"summary overlapping previously received live records is not counted twice");
+    archive.reset();archive.startup_end=100001;archive.startup_pending_=true;
+    archive.append_trade({100,2,100000,true,99999});
+    *grouped.add_trade_bins()=grouped.trade_bins(0);archive.receive_seed(grouped);
+    expect(archive.seed_.empty(),"duplicate summary side is rejected atomically");
     archive.reset();
-    expect(archive.startup_first==0 && archive.seeded_ids_.empty(),"reconnect clears startup identity and generation state");
+    expect(archive.startup_first==0 && archive.startup_max_levels_per_side==0 && archive.seeded_ids_.empty(),"reconnect clears startup identity, coverage and generation state");
+    archive.reset();archive.recovery_.push_back({1000,3000});
+    pb::RealtimeHistory repaired;repaired.set_end_ms(3000);
+    for(double value:std::vector<double>{1,500,11,1,100,101,2,100,2,101,3,
+        1,1500,11,0,100,101,2,100,4,101,3,1,2500,11,1,100,101,2,100,6,101,3}) repaired.add_records(value);
+    auto* duplicate=repaired.add_trades();duplicate->set_timestamp_ms(1500);duplicate->set_qty(9);
+    archive.receive_recovery(repaired);
+    expect(archive.recovered_.size()==25 && archive.recovered_[1]==1500 && archive.recovered_[3]==1 &&
+        archive.recovered_[14]==1 && archive.recovered_[23]==3000,
+        "recovery clips to missing interval, preserves upstream boundary and records explicit end");
+    expect(archive.recovered_in(1000,2000) && !archive.recovered_in(3000,4000),
+        "only intersecting repaired history requests archive projection");
+    expect(archive.recovered_[0]==1 && archive.recovered_[11]==1 && archive.recovered_[22]==3,
+        "depth-only recovery never duplicates separately continuing trades");
+    archive.recovered_.clear();archive.recovery_.push_back({1000,3000});repaired.set_records(13,20000);
+    archive.receive_recovery(repaired);
+    expect(archive.recovered_.empty(),"malformed recovery is rejected atomically");
+    archive.reset();
+    expect(archive.recovery_.empty() && !archive.recovered_in(0,10000),"source reset clears repair coverage and pending work");
+    EM_ASM({const s=Module['rtArchive'].state(UTF8ToString($0));
+        s.pending=true;
+        s.view=({step:500,source_bucket_ticks:20,tradeCount:0,grouped:false,
+            buffer:new Float64Array([1,1000,11,1,100,101,2,100,40,101,60]).buffer});
+    },archive.id_.c_str());
+    std::deque<RealtimeDepthHistory::SamplePtr> width_samples;std::deque<Terminal::Trade> width_trades;int64_t width_step=0;
+    expect(archive.take_view(width_samples,width_trades,width_step) && width_samples.front()->source_bucket_ticks==20 &&
+        width_samples.front()->levels.front().size==40,
+        "archive uses returned source width while another query is pending without altering quantities");
+    RealtimeDepthHistory::Sample native_sample;
+    expect(native_sample.source_bucket_ticks==1,"native observations retain one native tick source width");
     return failures;
 }

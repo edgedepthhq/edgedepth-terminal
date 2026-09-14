@@ -10,6 +10,8 @@ namespace MessageParser {
     static thread_local ZSTD_DCtx* dctx = ZSTD_createDCtx();
     DecompressionResult decompress_zstd(const std::string& data) {
         DecompressionResult result;
+        constexpr size_t max_size=512u*1024*1024;
+        if(data.size()>max_size)return result;
         if (data.size() < 4) {
             result.success = true;
             result.data = data;
@@ -28,9 +30,10 @@ namespace MessageParser {
             return result;
         }
         unsigned long long frame_size = ZSTD_getFrameContentSize(data.data(), data.size());
-        // Handle unknown/error with safe estimate
-        if (frame_size == ZSTD_CONTENTSIZE_UNKNOWN ||
-            frame_size == ZSTD_CONTENTSIZE_ERROR) {
+        if(frame_size==ZSTD_CONTENTSIZE_ERROR)return result;
+        if(frame_size!=ZSTD_CONTENTSIZE_UNKNOWN && frame_size>max_size)return result;
+        // Handle unknown size with the existing bounded fallback.
+        if (frame_size == ZSTD_CONTENTSIZE_UNKNOWN) {
             // Protobuf + WSPayload wrapper typically compresses 2-5x
             // For safety, use 10x the compressed size as upper bound
             frame_size = data.size() * 10;

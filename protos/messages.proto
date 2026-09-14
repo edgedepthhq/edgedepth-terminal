@@ -68,6 +68,7 @@ enum Stream {
     // PatternDetected; the distinct id prevents ordinary pattern subscribers
     // from receiving rollout-only geometry.
     STREAM_PATTERN_ADMIN = 35;
+    STREAM_RT_HISTORY = 36;
 }
 
 message WSPayload {
@@ -453,6 +454,9 @@ message LiquidationHeatmapUpdate {
     // level stops lighting as a long band, so a per-band array can't carry its consume time. Tag 32
     // matches backend liquidation.proto. (28/29 are cascade_sev on the backend, unused here.)
     repeated LiqRail rails = 32;
+    string census_status = 33;
+    CensusQuality census_quality = 35;
+  int64 census_observed_at_ms = 34;
 }
 
 // One liquidation rail's lifecycle (from backend RailTracker.Snapshot()). above = level sits above
@@ -807,4 +811,48 @@ message PackHeader {
 message PackSeedRef {
     int64 offset = 1;  // data-section relative (absolute = 9 + header_len + offset)
     int64 length = 2;  // 0 = seed absent
+}
+
+// Aggregate receipt provenance only. No wallet identifiers or positions are stored.
+// Absence means legacy unknown. USD values use venue positionValue at wallet receipt.
+message CensusQuality {
+  uint32 version = 1; // 1: existing hot/warm census, mark-relative 0.25% grid
+  int64 venue_received_at_ms = 2; // mark and OI response backend receipt, not exchange time
+  double weighted_wallet_age_ms = 3; // usable-notional weighted age at snapshot
+  int64 p95_wallet_age_ms = 4; // position-count percentile among usable positions
+  uint32 sampled_positions = 5; // fresh cached positions with finite positive notional
+  uint32 usable_positions = 6;
+  uint32 unlocated_positions = 7; // fresh but excluded by existing price/mark policy
+  uint32 stale_positions = 8; // only entries still resident at snapshot, not all stale wallets
+  double sampled_notional_usd = 9;
+  double usable_notional_usd = 10; // unclipped coverage numerator, both sides
+  double unlocated_notional_usd = 11;
+  double stale_notional_usd = 12;
+  double coverage_denominator_usd = 13; // twice venue one-side OI * mark; zero means unknown
+  uint32 far_filtered_positions = 14; // subset of unlocated: finite positive liqPx rejected by policy
+  double far_filtered_notional_usd = 15;
+}
+
+// Negotiated startup history, isolated from live trade/book streams.
+message RealtimeHistory {
+  string request_id = 1;
+  int64 end_ms = 2;
+  repeated double records = 3 [packed = true];
+  repeated Trade trades = 4;
+  repeated RealtimeTradeBin trade_bins = 5;
+}
+
+// One side's observed volume in a complete 100ms bin. The identity range spans
+// both sides and is emitted only after contiguous source IDs are verified.
+message RealtimeTradeBin {
+  int64 start_ms = 1;
+  int64 end_ms = 2;
+  double price = 3;
+  double qty = 4;
+  bool is_buy = 5;
+  double low = 6;
+  double high = 7;
+  uint32 count = 8;
+  int64 first_id = 9;
+  int64 last_id = 10;
 }

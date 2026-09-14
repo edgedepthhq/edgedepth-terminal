@@ -57,5 +57,19 @@ target_link_libraries(workspace_document_test PRIVATE nlohmann_json::nlohmann_js
 
 add_terminal_native_test(reference_context_test reference_context_test.cpp)
 
+add_terminal_native_test(liq_field_tiers_test liq_field_tiers_test.cpp)
+
+add_terminal_native_test(census_history_test census_history_test.cpp)
+
 add_terminal_native_test(realtime_navigation_test realtime_navigation_test.cpp)
 target_link_libraries(realtime_navigation_test PRIVATE nlohmann_json::nlohmann_json)
+
+add_terminal_native_test(observed_liquidations_test observed_liquidations_test.cpp)
+
+add_terminal_native_test(candle_bubble_history_test candle_bubble_history_test.cpp)
+target_link_libraries(candle_bubble_history_test PRIVATE nlohmann_json::nlohmann_json)
+
+add_terminal_native_test(candle_bubble_display_test candle_bubble_display_test.cpp)
+
+add_terminal_native_test(flow_positioning_test flow_positioning_test.cpp)
+target_link_libraries(flow_positioning_test PRIVATE nlohmann_json::nlohmann_json)

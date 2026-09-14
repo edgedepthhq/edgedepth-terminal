@@ -1,4 +1,6 @@
 #pragma once
+#include "core/candle_bubble_history.h"
+#include "core/flow_positioning.h"
 #include "core/reference_context.h"
 #include "ui/realtime_dom_frame.h"
 #include "ui/realtime_navigation.h"
@@ -71,6 +73,7 @@ enum class ChartType : int {
     Line             = 4,
     TPO              = 5,
     Renko            = 6,
+    FlowPositioning  = 7,
 };
 
 // True when the chart's X-axis is time in ms (everything except Renko).
@@ -78,7 +81,7 @@ constexpr bool ct_is_time_axis(ChartType t) { return t != ChartType::Renko; }
 // True when the type draws from the real OHLC candle geometry (Candles, FP, TPO).
 constexpr bool ct_uses_real_candles(ChartType t) {
     return t == ChartType::Candles || t == ChartType::FootprintCluster
-        || t == ChartType::FootprintProfile || t == ChartType::TPO;
+        || t == ChartType::FootprintProfile || t == ChartType::TPO || t == ChartType::FlowPositioning;
 }
 // True when time-keyed overlays (heatmap, liq, VPVR, footprint, patterns) may draw.
 constexpr bool ct_allows_time_overlays(ChartType t) {
@@ -120,12 +123,18 @@ public:
 
     // Real-time view (RT). Applies regardless of chart type: the chart follows
     // the live edge (follow-live streaming) and, for the Line, draws the live-
-    // edge dot. Toggled from the TIMEFRAME dropdown (see app_shell render_tf_menu).
+    // edge dot. Toggled from the Real-time pill beside the timeframe bar (see
+    // app_shell render_tf_control).
     bool rt_mode() const { return rt_mode_; }
     void set_rt_dom_linked(bool linked) { rt_dom_linked_ = linked; }
     const RealtimeDOMFrame& realtime_dom_frame() const { return rt_dom_frame_; }
     void set_rt_mode(bool v);
     void toggle_rt_mode() { set_rt_mode(!rt_mode_); }
+    // True when turning real-time on would open the upsell instead: a Free
+    // viewer on the hosted LIVE feed. Replay sessions and local packs are open
+    // to everyone. The toolbar pill reads this to draw its padlock; set_rt_mode
+    // is still the one place that enforces it.
+    bool rt_mode_locked() const;
     void render_realtime_settings();
     void on_rewind(int64_t cutoff_ms) override;
 
@@ -178,6 +187,7 @@ public:
     };
 
     CrosshairState crosshair_state_;
+    double cursor_reference_price_ = 0; // Same as the displayed current-price tag, including paused RT/replay.
     float chart_allocated_height_ = 0.0f;
     float indicator_allocated_height_ = 0.0f;
     // Replay time-range selection (Shift+drag on chart)
@@ -306,8 +316,8 @@ private:
     // keeps the live edge current, while normal ImPlot zoom/pan stay fully
     // interactive (the follow-live latch clears on the first user pan/scroll -
     // handle_plot_interaction). No per-frame axis pin. For the Line, plot_line
-    // also draws the live-edge dot. Toggled from the TIMEFRAME dropdown
-    // (app_shell render_tf_menu). rt_was_on_ edge-detects the toggle so RT
+    // also draws the live-edge dot. Toggled from the Real-time pill beside the
+    // timeframe bar (app_shell render_tf_control). rt_was_on_ edge-detects the toggle so RT
     // re-arms follow-live exactly ONCE on the rising edge (not every frame).
     RealtimeDOMFrame rt_dom_frame_;
     std::unique_ptr<TradeAtPriceAccumulator> rt_flow_;
@@ -350,7 +360,7 @@ private:
     bool rt_auto_bubbles_ = true;
     RealtimeBubbleScale rt_bubble_scale_;
     float rt_min_notional_ = 10000.0f;
-    double rt_span_ms_ = 60000.0;
+    double rt_span_ms_ = realtime_default_span_ms;
     int64_t rt_clock_ms_ = 0;
     uint64_t rt_serial_ = 0, rt_generation_ = 0;
     std::unique_ptr<ShaderHeatmapRenderer> rt_renderer_;
@@ -498,9 +508,39 @@ private:
     // → Tokens::UP; forced SELL = long liquidated → Tokens::DOWN). The fact layer next to
     // the estimated Field - deliberately a different visual grammar (glyphs, not bands).
     bool  liq_observed_enabled_ = false;
+    bool rt_liq_strip_ = false;
+    std::vector<Terminal::Liquidation> rt_paused_liquidations_;
     float liq_obs_min_usd_ = 0.0f;       // dust filter (USD); 0 = show all
     float liq_obs_ref_usd_ = 25000.0f;   // USD at which a marker reads clearly (~2.5px radius)
     static constexpr int kLiqObsMaxDraw = 4000;  // per-frame draw cap → nth_element USD cutoff
+
+    // ─── Trade bubbles on candles (free) ─────────────────────────────────
+    // Large prints drawn as bubbles over time-based candle views: the free
+    // taste of real-time mode, which draws EVERY trade. The chart retains the
+    // prints itself because the candle manager's trade ring keeps only five
+    // minutes, which would erase bubbles on anything coarser than 1m.
+    // "Large" = quote value >= kCandleBubbleMult x the same 60s 75th-percentile
+    // market scale RT uses. Hold the reference until explicit recalibration
+    // so panning recorded history cannot change the size of an existing print.
+    bool    candle_bubbles_ = true;
+    bool    candle_bubble_history_enabled_ = true;
+    CandleBubbleHistory candle_bubble_history_;
+    float   candle_bubble_min_ = 0.0f;           // manual quote-value floor; 0 = auto
+    RealtimeBubbleScale candle_bubble_scale_;
+    int64_t candle_bubble_scale_since_ms_ = 0;   // trade clock when the scale last (re)opened
+    double  candle_bubble_size_reference_ = 0;  // independent of visibility floor
+    double  candle_bubble_auto_floor_ = 0;       // last warm auto floor; holds through a re-warm
+    std::deque<Terminal::Trade> candle_prints_;  // retained large prints, time-ordered
+    int64_t candle_prints_seen_ms_ = 0;          // newest trade already scanned
+    int64_t candle_prints_seen_id_ = 0;          // ... and its agg_trade_id (same-ms ties)
+    static constexpr double  kCandleBubbleMult    = 8.0;
+    static constexpr int64_t kCandleBubbleWarmMs  = 2LL * 60 * 1000;
+    static constexpr int64_t kCandlePrintsKeepMs  = 24LL * 3600 * 1000;
+    static constexpr size_t  kCandlePrintsMax     = 4000;
+    static constexpr int     kCandleBubbleMaxDraw = 1500;
+    double candle_bubble_floor() const;   // current quote-value floor (0 = not yet known)
+    void   collect_candle_prints();       // per frame: fold new large prints out of the trade ring
+    void   render_candle_bubbles();       // drawn over the candles, inside the plot clip
 
     // ─── "Liq Levels HL" (P2e) - REAL predictive liq levels (HL census) ──────────────────
     // Ground-truth clusters from the HL clearinghouseState census (stream 34,
@@ -512,6 +552,7 @@ private:
     // leveraged tail, ~1-10% of OI notional) and must never read as a complete liq map.
     // The LIQ LEV chips filter this layer by REAL leverage tier (est_Nx = actual
     // position leverage) - same control as the modelled layer, venue-aware meaning.
+    int liq_history_requested_ = 0;
     bool liq_census_enabled_ = false;      // ctor: defaults ON for HL-native pairs
     bool liq_census_subscribed_ = false;
     Terminal::Pair liq_census_pair_;       // {"hl", UNDERLYING} - resolved at construction
@@ -540,7 +581,7 @@ private:
     // Intensity (gamma, Low/Peak, noise floor, tick-per-row, half-life), wired
     // to the liq_field_* members above.
     SettingsPanel liq_settings_panel_{"liq_heatmap_settings",
-        {"Style", "Intensity"}};
+        {"Appearance", "Style", "Intensity"}};
     SettingsPanel vpvr_settings_panel_{"vpvr_settings",
         {"Display", "Sizing"}};
     SettingsPanel footprint_settings_panel_{"footprint_settings",
@@ -552,6 +593,11 @@ private:
     void render_controls();
     void render_chart();
     void render_indicators();
+    void update_flow_positioning();
+    void render_flow_positioning();
+    flow_positioning::History flow_history_;
+    int64_t flow_from_ = 0, flow_to_ = 0;
+    bool flow_export_failed_ = false;
     void render_crosshair(const ImPlotPoint& mouse_pos) const;
 
     // Candle drawing via ImDrawList (replaces custom_implot dependency).
@@ -614,6 +660,7 @@ private:
     void render_scrub_preview(double visible_x_min, double visible_x_max);
 
     // Heatmap
+    int64_t depth_timeframe_seconds() const;
     void request_heatmap_data();
     void update_heatmap();
     void update_live_heatmap_from_orderbook();
@@ -632,6 +679,8 @@ private:
     void render_liq_timeline();
     // The Field itself lives in liq_field_ (rendering/liq_field_renderer.h).
     void render_liq_profile();   // right-edge sidebar histogram (Profile:: renderer, mirrors VPVR)
+    const std::vector<Terminal::Liquidation>& realtime_liquidations() const;
+    void render_realtime_liquidation_strip();
     void render_liq_observed();  // WS4 Observed markers - real @forceOrder dots (drawn over candles)
     void toggle_liq_census();    // "Liq Levels HL" - subscribe/unsubscribe stream 34 (census)
     void render_liq_census();    // HL census shelves (REAL liq levels) + coverage badge

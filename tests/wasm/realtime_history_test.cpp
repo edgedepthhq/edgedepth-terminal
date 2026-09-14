@@ -31,6 +31,12 @@ int main() {
         "grouped snapshot and raw tail stay aggregated below the marker limit");
     view.build(observed.trades(),0,2000,1);
     expect(!view.grouped && view.count==100 && view.records[0].timestamp_ms==1000,"detail view restores individual records and original timestamps");
+    std::deque<Terminal::Trade> summaries{{100,20,1000,true,0,98,103,10},{101,2,1100,true}};
+    view.build(summaries,0,2000,1,true);
+    expect(view.grouped && view.low[0]==98 && view.high[0]==103 && view.records[0].summary_count==10,
+        "grouped startup bubble retains original price extremes and trade count");
+    view.build(summaries,0,200000,1,true);
+    expect(view.count==1 && view.records[0].qty==22 && view.low[0]==98 && view.high[0]==103,"coarser regrouping conserves summary plus raw-tail volume and extremes");
 
     // Ten minutes at 100 executions/sec: count retirement precedes age
     // retirement, while a deliberately stalled archive cutoff never moves.

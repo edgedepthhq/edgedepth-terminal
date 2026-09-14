@@ -20,6 +20,7 @@ public:
     struct Sample {
         uint64_t serial = 0;
         bool segment_start = false;
+        int source_bucket_ticks = 1; // Quantity represented by each archived price row.
         int64_t timestamp_ms = 0;
         double bid = 0, ask = 0;
         std::vector<Terminal::BookEntry> levels;
@@ -83,6 +84,42 @@ private:
     uint64_t serial_ = 0;
     std::deque<SamplePtr> samples_;
 };
+
+// Keep the displayed live tail on the loaded archive's time grid. Otherwise
+// raw 100ms appends evict a 30-minute overview from its bounded display deque.
+inline void append_realtime_depth_sample(
+    std::deque<RealtimeDepthHistory::SamplePtr>& displayed,
+    const RealtimeDepthHistory::SamplePtr& sample, int64_t step) {
+    if (!displayed.empty() && displayed.back()->timestamp_ms / step == sample->timestamp_ms / step) {
+        if (!sample->segment_start) return;
+        displayed.pop_back();
+    }
+    displayed.push_back(sample);
+    while (displayed.size() > 4096) displayed.pop_front();
+}
+
+// Restore an archive's live tail on navigation without erasing its older
+// bins. A retired interval is a segment boundary, never a held historical book.
+inline void append_realtime_depth_tail(
+    std::deque<RealtimeDepthHistory::SamplePtr>& displayed,
+    const std::deque<RealtimeDepthHistory::SamplePtr>& recent,
+    int64_t cutoff, int64_t clock, int64_t step) {
+    int64_t through = displayed.empty() ? cutoff : std::max(cutoff, displayed.back()->timestamp_ms);
+    bool missing = !recent.empty() && recent.front()->timestamp_ms > through &&
+        recent.front()->serial > 1;
+    for (const auto& sample : recent) {
+        if (sample->timestamp_ms <= through) continue;
+        if (sample->timestamp_ms > clock) break;
+        auto next = sample;
+        if (missing && !sample->segment_start) {
+            auto boundary = std::make_shared<RealtimeDepthHistory::Sample>(*sample);
+            boundary->segment_start = true;
+            next = std::move(boundary);
+        }
+        missing = false;
+        append_realtime_depth_sample(displayed, next, step);
+    }
+}
 
 // Preserve wire multiplicity: feeds can omit exchange identity, so equal
 // timestamp/price/quantity records must not be guessed to be duplicates.

@@ -8,6 +8,7 @@
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include "imgui.h"
 #include "imgui_internal.h"
+#include "ui/stats_widget.h"
 #include "implot.h"
 #include "implot_internal.h"
 
@@ -220,6 +221,18 @@ static void on_ws_message(const uint8_t* data, size_t len, WsLane lane) {
                 reinterpret_cast<const char*>(data) + len);
             std::string type = parsed.value("type", "");
 
+            if (type == "flow_positioning") {
+                const bool replay = g_app.replay_mgr && g_app.replay_mgr->is_active();
+                if ((lane == WsLane::Replay && replay && g_app.replay_mgr->active_socket() == g_app.replay_ws_client.get()) ||
+                    (lane == WsLane::Live && (!replay || g_app.replay_mgr->active_socket() == g_app.ws_client.get())))
+                    flow_positioning::History::receive(parsed);
+                return;
+            }
+            if (type == "candle_bubble_history") {
+                if (lane == WsLane::Live && !(g_app.replay_mgr && g_app.replay_mgr->is_active()))
+                    CandleBubbleHistory::receive(parsed);
+                return;
+            }
             if(type=="rt_history") {
                 if(lane==WsLane::Live && !(g_app.replay_mgr && g_app.replay_mgr->is_active()))
                     RealtimeArchive::receive_startup(parsed);
@@ -1071,15 +1084,20 @@ void render_historical_replay_error_overlay() {
         ImGuiWindowFlags_NoSavedSettings;
     if (ImGui::Begin("##historical_replay_error", nullptr, flags)) {
         const char* title = "Historical replay unavailable";
-        const char* detail = "Live market data is not shown on this page. Reload to retry or use Back to leave.";
+        const auto& error = g_app.replay_mgr->info().error_message;
+        const char* detail = error.empty()
+            ? "The recorded replay could not be loaded. Return to the event page for its price chart and evidence."
+            : error.c_str();
         const ImVec2 title_size = ImGui::CalcTextSize(title);
-        const ImVec2 detail_size = ImGui::CalcTextSize(detail);
+        const float detail_width = std::min(560.0f, std::max(120.0f, vp->Size.x - 48.0f));
         const float center_x = vp->Size.x * 0.5f;
         const float center_y = vp->Size.y * 0.5f;
         ImGui::SetCursorPos(ImVec2(center_x - title_size.x * 0.5f, center_y - 24.0f));
         ImGui::TextColored(ImVec4(0.95f, 0.76f, 0.32f, 1.0f), "%s", title);
-        ImGui::SetCursorPos(ImVec2(center_x - detail_size.x * 0.5f, center_y + 12.0f));
+        ImGui::SetCursorPos(ImVec2(center_x - detail_width * 0.5f, center_y + 12.0f));
+        ImGui::PushTextWrapPos(center_x + detail_width * 0.5f);
         ImGui::TextColored(ImVec4(0.71f, 0.78f, 0.84f, 1.0f), "%s", detail);
+        ImGui::PopTextWrapPos();
     }
     ImGui::End();
     ImGui::PopStyleVar(2);
@@ -1161,7 +1179,7 @@ void update_and_render_widgets() {
             }
             // Like clip-focus layout, skip submission only. Subscriptions and
             // remembered docking survive; independent mode restores the tape.
-            if (covered) continue;
+            if (covered && !tape->explicitly_opened) continue;
         }
         if (rec_focus_widgets && widget->type() == WidgetType::Watchlist) continue;
         // Per-widget render timing - labels by widget type so the once/sec
@@ -1181,6 +1199,41 @@ void update_and_render_widgets() {
         g_profiler.begin(sec);
         widget->render();
         g_profiler.end(sec);
+    }
+    // Draw venue images in the reserved leading space of native dock tabs
+    // and floating title bars. Keep stable ### IDs and native tab interactions.
+    for (const auto& widget : g_app.widgets) {
+        const Terminal::Pair* pair = nullptr;
+        if (widget->type() == WidgetType::Chart) pair = &static_cast<ChartWidget*>(widget.get())->pair();
+        if (widget->type() == WidgetType::DOM) pair = &static_cast<DOMWidget*>(widget.get())->pair();
+        if (widget->type() == WidgetType::Trades) pair = &static_cast<TradesWidget*>(widget.get())->pair();
+        if (widget->type() == WidgetType::Orderbook) pair = &static_cast<OrderbookWidget*>(widget.get())->pair();
+        if (widget->type() == WidgetType::Stats) pair = &static_cast<StatsWidget*>(widget.get())->pair();
+        if (!pair) continue;
+        char name[512];
+        std::snprintf(name, sizeof(name), "%s%s", widget->title(), widget->title_suffix().c_str());
+        auto* window = ImGui::FindWindowByName(name);
+        if (!window || window->LastFrameActive != ImGui::GetFrameCount()) continue;
+        ImDrawList* draw = window->DrawList;
+        ImRect rect = window->TitleBarRect();
+        if (window->DockNode) {
+            auto* bar = window->DockNode->TabBar;
+            auto* tab = bar ? ImGui::TabBarFindTabByID(bar, window->TabId) : nullptr;
+            if (!tab || !window->DockNode->HostWindow || window->DockNode->IsHiddenTabBar()) continue;
+            rect.Min = ImVec2(bar->BarRect.Min.x + tab->Offset - bar->ScrollingAnim, bar->BarRect.Min.y);
+            rect.Max = ImVec2(rect.Min.x + tab->Width, bar->BarRect.Max.y);
+            draw = window->DockNode->HostWindow->DrawList;
+        }
+        const float size = std::min(16.0f, rect.GetHeight() - 4.0f);
+        if (size <= 0) continue;
+        const ImVec2 pos(rect.Min.x + ImGui::GetStyle().FramePadding.x, rect.GetCenter().y - size * 0.5f);
+        draw->PushClipRect(rect.Min, rect.Max, true);
+        const auto texture = LogoManager::instance().exchange(pair->exchange);
+        if (texture) draw->AddImage(texture, pos, ImVec2(pos.x + size, pos.y + size));
+        else draw_logo_monogram(draw, pair->exchange == "hl" ? "HL" : "B", pos, size);
+        draw->PopClipRect();
+        if (ImGui::IsMouseHoveringRect(pos, ImVec2(pos.x + size, pos.y + size)))
+            Theme::tooltip("%s", widget_venue_label(pair->exchange));
     }
     std::erase_if(g_app.widgets,
                   [](const auto& w) { return !w->is_open; });
@@ -1368,6 +1421,10 @@ void main_loop() {
     }
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
+    // Navigation closes popups during NewFrame. Retain their keyboard ownership
+    // through this frame so Escape/Space/arrows cannot also control replay.
+    const bool popup_owned_keyboard = ImGui::IsPopupOpen(nullptr,
+        ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
     ImGui::NewFrame();
     // Drain freshly-decoded coin/exchange logos into GL textures (safe here:
     // between NewFrame and Render, no draw in flight) + run the LRU eviction.
@@ -1414,13 +1471,13 @@ void main_loop() {
     // telemetry strip (symbol · WS · FPS · present interval · UTC). Draw the status bar only.
     const bool status_bar_only = !rec_focus && !full_shell &&
                                  (edu.is_event() || edu.is_pack());
+    if (!rec_focus) drawing::render_style_editor(g_app.app_ctx);
     if (full_shell) {
         LayoutManager::top_reserve    = AppShell::total_height();
         LayoutManager::status_reserve = Theme::Layout::STATUSBAR_H;  // bottom telemetry bar
         // Drawing rail moved INTO ChartWidget (2026-08-06) - no left reserve.
         LayoutManager::left_reserve   = 0.0f;
         AppShell::render(g_app.widgets, g_app.app_ctx, g_app.ws_client.get());
-        drawing::render_style_editor(g_app.app_ctx);
     } else {
         LayoutManager::top_reserve    = 0.0f;
         LayoutManager::left_reserve   = 0.0f;
@@ -1468,7 +1525,9 @@ void main_loop() {
         // A drawing-tool Esc (cancel placement/deselect, consumed by the chart's
         // DrawingLayer during the widget pass above) must not ALSO stop a
         // running replay - the replay Esc handler reads the raw key.
-        if ((!g_app.drawing_mgr ||
+        if (!popup_owned_keyboard &&
+            !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) &&
+            (!g_app.drawing_mgr ||
              !g_app.drawing_mgr->escape_consumed(ImGui::GetFrameCount())) &&
             !ChartWidget::selection_escape_consumed(ImGui::GetFrameCount()))
             g_app.replay_mgr->process_keyboard_shortcuts();
@@ -1584,7 +1643,7 @@ void main_loop() {
         return;
     }
     glViewport(0, 0, display_w, display_h);
-    glClearColor(0.1f, 0.1f, 0.12f, 1.0f);
+    glClearColor(Theme::Tokens::BASE.x, Theme::Tokens::BASE.y, Theme::Tokens::BASE.z, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
     g_profiler.begin("GL Draw");
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -2033,7 +2092,7 @@ SDL_GL_MakeCurrent(g_app.window, g_app.gl_context);
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
 #ifdef __EMSCRIPTEN__
-    io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+    // Keep native menu navigation, Escape and keyboard focus in the browser.
     io.IniFilename = nullptr; // Disable ini file in browser
     // EM_ASM({
     //     // Remove any keyboard event blocking
@@ -2058,6 +2117,7 @@ SDL_GL_MakeCurrent(g_app.window, g_app.gl_context);
 #endif
     Theme::apply_dark_theme();
     Theme::apply_trading_colors();
+    Theme::load_preferences();
     if (!Theme::load_fonts()) {
     }
     ImGui_ImplSDL3_InitForOpenGL(g_app.window, g_app.gl_context);

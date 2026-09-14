@@ -76,6 +76,66 @@ int main() {
             assert(restored == original);
         }
     }
+    {
+        auto candle = std::make_unique<ShaderHeatmapRenderer>();
+        auto& c = *candle;
+        c.native_bucket_size_ = 0.00001;
+        c.set_column_interval_ms(ShaderHeatmapRenderer::candle_depth_seconds(3600) * 1000);
+        assert(c.get_column_interval_ms() == 60000);
+        assert(ShaderHeatmapRenderer::candle_depth_seconds(300) == 60);
+        assert(ShaderHeatmapRenderer::candle_depth_seconds(5) == 5);
+        assert(ShaderHeatmapRenderer::candle_depth_seconds(3600, 20.0 * 3600000) == 60);
+        assert(ShaderHeatmapRenderer::candle_depth_seconds(3600, 100.0 * 3600000) == 300);
+        assert(ShaderHeatmapRenderer::candle_depth_seconds(86400, 500.0 * 3600000) == 3600);
+        assert(ShaderHeatmapRenderer::candle_depth_seconds(300, 500.0 * 3600000) == 300);
+        c.set_bucket_multiplier(200); // UHD auto-grouped on a wide volatile chart.
+        c.set_candle_price_window(0.65, 1.4);
+        const std::unordered_map<double, float> wide{{0.75, 10}, {0.75001, 20}, {0.95, 30}, {1.30, 40}};
+        c.finalize_column(60000, wide);
+        c.finalize_column(180000, wide); // Missing minute remains missing.
+        c.sync_gpu_from_timeline();
+        assert(c.texture_grouping() == 1);
+        assert(c.get_value_at_price_and_time(0.751, 60000) == 30);
+        assert(c.get_value_at_price_and_time(1.301, 60000) == 40); // Used to be clipped.
+        assert(c.get_value_at_price_and_time(0.951, 120000) == 0);
+        assert(c.has_missing_columns(60000, 180000));
+        assert(!c.candle_coverage(120000).timestamp_ms);
+        const auto coverage = c.candle_coverage(60000);
+        assert(coverage.timestamp_ms == 60000 && coverage.low == 0.75);
+        assert(coverage.high > 1.30 && !coverage.clipped);
+        c.update_live_column(185000, {{0.75, 51}, {1.30, 71}}, 0.95);
+        assert(c.get_value_at_price_and_time(1.301, 180000) == 71);
+        c.gpu_dirty_ = true; c.sync_gpu_from_timeline();
+        assert(c.get_value_at_price_and_time(1.301, 180000) == 71);
+        c.set_bucket_multiplier(1); c.set_candle_price_window(1.29, 1.31);
+        c.sync_gpu_from_timeline();
+        assert(c.get_value_at_price_and_time(1.300001, 60000) == 40);
+        assert(c.candle_coverage(60000).clipped); // Manual detail honestly reports clipping.
+        c.set_replay_cutoff_ms(130000); c.sync_gpu_from_timeline();
+        assert(!c.candle_coverage(180000).timestamp_ms); // No future coverage leak.
+        c.clear(); c.set_replay_cutoff_ms(0); c.native_bucket_size_ = 1;
+        c.set_bucket_multiplier(1); c.set_candle_price_window(50, 200);
+        std::unordered_map<double, float> contrast;
+        for (int i = 100; i < 200; ++i) contrast[i] = 10;
+        contrast[150] = 1000000;
+        c.finalize_column(60000, contrast); c.sync_gpu_from_timeline();
+        const float reference = c.candle_normalization(50, 200, 0, 120000);
+        assert(reference == 10); // Isolated wall must not crush routine depth.
+        assert(c.candle_intensity(10, 1) > 0.3f && c.candle_intensity(10, 1) < 0.4f);
+        assert(c.candle_intensity(100, 1) > c.candle_intensity(10, 1));
+        contrast[151] = 2000000;
+        c.finalize_column(120000, contrast); c.sync_gpu_from_timeline();
+        assert(c.candle_normalization(100, 160, 60000, 180000) == reference);
+        c.set_candle_price_window(500, 650); c.sync_gpu_from_timeline();
+        assert(c.candle_normalization(500, 650, 0, 180000) == reference);
+        c.recalibrate_candle_colors(); assert(c.candle_reference_ == 0);
+        // All candle-only controls are inert on RT, including the price window.
+        c.configure_realtime(0.1); c.realtime_peak_ = 123;
+        c.set_candle_price_window(1000, 2000); c.recalibrate_candle_colors();
+        assert(c.realtime_peak_ == 123);
+        assert(c.column_price_min(100, 0.1) == std::floor((100 - 512 * 0.1) / 0.1) * 0.1);
+        assert(!c.candle_coverage(60000).timestamp_ms);
+    }
     r.native_bucket_size_ = 1;
     const std::unordered_map<double,float> history{{100,2},{101,3}};
     const std::unordered_map<double,float> live{{100,17},{101,29}};
@@ -206,8 +266,11 @@ int main() {
     assert(r.ring_count_ == r.RING_SIZE);
     assert(r.get_value_at_price_and_time(100.25, epoch + (r.RING_SIZE + 5LL) * 60000) == 17);
     r.set_bucket_multiplier(2);
+    assert(r.get_value_at_price_and_time(100.25, epoch + (r.RING_SIZE + 5LL) * 60000) == 17); // Still the uploaded grid.
+    r.sync_gpu_from_timeline();
     assert(r.get_value_at_price_and_time(100.25, epoch + (r.RING_SIZE + 5LL) * 60000) == 46);
     r.set_bucket_multiplier(1);
+    r.sync_gpu_from_timeline();
     assert(r.get_value_at_price_and_time(100.25, epoch + (r.RING_SIZE + 5LL) * 60000) == 17);
     r.clear();
     r.configure_realtime(1);
@@ -242,6 +305,13 @@ int main() {
     assert(metadata[r.meta_texture_][18 * 4 + 3] == 0); // Broken sequence stays absent.
     r.set_observation_hold(epoch + 2500);
     assert(r.observation_hold_until_ms_ == epoch + 2500);
+    // A current live clock must not project a stale historical column through
+    // the unloaded minutes between that column and the current book.
+    r.set_observation_hold(epoch + 2500, epoch + 2417);
+    assert(r.realtime_hold_until() == 0);
+    assert(r.realtime_draw_until(epoch + 3500, true) == epoch + 2500);
+    r.set_observation_hold(epoch + 2500, epoch + 2017);
+    assert(r.realtime_hold_until() == epoch + 2500);
     const auto recorded_size = r.timeline_.size();
     assert(r.realtime_draw_until(epoch + 3500, true) == epoch + 3500);
     assert(r.realtime_draw_until(epoch + 3500, false) == epoch + 2500);
@@ -300,8 +370,12 @@ int main() {
     assert(r.realtime_normalization(98, 102) == 40); // Remote wall cannot dim active rows.
     const auto unchanged = r.timeline_.at(epoch + 17);
     r.set_bucket_multiplier(2);
-    r.sync_gpu_from_timeline();
-    assert(r.realtime_normalization(98, 102) == 70); // Percentile of grouped values 20,70.
+    // Re-entry/auto-fit can regroup again within the render debounce period.
+    // Calibration must rebuild before looking at the previous grid's values.
+    assert(r.gpu_dirty_);
+    assert(r.realtime_normalization(98, 102) == 80);
+    assert(!r.gpu_dirty_);
+    assert(r.realtime_normalization(98, 102) == 80); // Native reference 40 times two ticks per row.
     assert(r.timeline_.at(epoch + 17) == unchanged); // Brightness never mutates source volume.
     // New liquidity and a changing price viewport cannot recolor past cells.
     const float peak = r.realtime_normalization(98, 102);
@@ -310,7 +384,48 @@ int main() {
     r.sync_gpu_from_timeline();
     assert(r.realtime_normalization(0, 1000) == peak);
     r.recalibrate_realtime_colors();
-    assert(r.realtime_normalization(100, 102) == 70); // Brief wall does not dominate recalibration.
+    assert(r.realtime_normalization(100, 102) == 80); // Brief wall does not dominate recalibration.
+    // Uniform native liquidity must retain the same shader ratio at every price
+    // grouping, including when the FIRST calibration happens while zoomed out.
+    for (int initial_group : {1, 5, 20, 100}) {
+        r.clear(); r.configure_realtime(1); r.set_bucket_multiplier(initial_group);
+        std::unordered_map<double, float> uniform;
+        for (int price = 100; price < 300; ++price) uniform[price] = 20;
+        r.finalize_column(epoch, uniform, true, 200);
+        r.set_observation_clock_ms(epoch + 100);
+        assert(r.realtime_normalization(100, 300) == 20 * initial_group);
+        for (int group : {1, 2, 5, 20, 100}) {
+            r.set_bucket_multiplier(group);
+            const float reference = r.realtime_normalization(100, 300);
+            const float total = r.get_value_at_price_and_time(200.5, epoch + 50);
+            assert(total == 20 * group); // DOM/tooltip still receives the row sum.
+            assert(total / reference == 1); // Same density, same color.
+            assert(r.timeline_.at(epoch) == uniform);
+        }
+        // An averaged archive column on a coarser time grid keeps the reference.
+        r.clear_realtime_view(1000);
+        r.finalize_column(epoch, uniform, true, 200);
+        r.set_observation_clock_ms(epoch + 1000);
+        assert(r.realtime_normalization(100, 300) == 2000);
+        assert(r.get_value_at_price_and_time(200.5, epoch + 50) == 2000);
+    }
+    // First calibration and explicit recalibration in an archive view must
+    // account for the width of already grouped source rows, even with a native tail.
+    r.clear(); r.configure_realtime(1); r.set_bucket_multiplier(5);
+    r.finalize_column(epoch, {{100,100},{105,100}}, true, 105, 5);
+    r.set_observation_clock_ms(epoch + 100);
+    assert(r.realtime_normalization(100,110) == 100);
+    r.finalize_column(epoch + 100, {{100,20},{101,20},{102,20},{103,20},{104,20}}, false, 102);
+    r.set_observation_clock_ms(epoch + 200);
+    r.recalibrate_realtime_colors();
+    assert(r.realtime_normalization(100,110) == 100);
+    assert(r.get_value_at_price_and_time(100.5,epoch+50) == 100);
+    assert(r.get_value_at_price_and_time(100.5,epoch+150) == 100);
+    r.invalidate_observation(epoch);
+    assert(r.observation_source_ticks_.empty());
+    r.finalize_column(epoch + 200, {{100,100}}, true, 100, 5);
+    assert(!r.observation_source_ticks_.empty());
+    r.clear(); assert(r.observation_source_ticks_.empty());
     // A persistent wall occupies more than 2% of a narrow grouped view.
     // It must stay large without turning ordinary 5-25M rows nearly black.
     r.clear(); r.configure_realtime(1); r.set_bucket_multiplier(1);
@@ -369,6 +484,11 @@ int main() {
     assert(r.timeline_.size()==1800 && r.ring_count_==1800);
     assert(r.realtime_normalization(95,105)==history_peak && r.realtime_warm());
     assert(r.get_value_at_price_and_time(100.5,epoch+950)==10);
+    r.finalize_column(epoch+1799950,{{100,25}},true,100);
+    r.sync_gpu_from_timeline();
+    assert(r.timeline_.size()==1800 && r.timeline_.rbegin()->first==epoch+1799950);
+    assert(r.get_value_at_price_and_time(100.5,epoch+1799950)==25);
+    assert(r.column_flags(epoch+1799950)>=5); // Reseed cannot bridge the earlier part of its bin.
     r.clear_realtime_view(100);r.finalize_column(epoch+17,{{100,10}},true,100);
     r.sync_gpu_from_timeline();
     assert(r.realtime_normalization(95,105)==history_peak && r.realtime_warm());

@@ -60,5 +60,42 @@ int main() {
         fit.update(NAN, base, tick, minimum, 800, 16, 600);
         check(fit.range.low == valid.low && fit.range.high == valid.high, "invalid observations leave range intact");
     }
+    // A 20-minute overview survives returning from a five-minute working ring.
+    std::deque<RealtimeDepthHistory::SamplePtr> cached, recent;
+    for (int64_t t = 1000; t < 1201000; t += 1000) {
+        auto s = std::make_shared<RealtimeDepthHistory::Sample>();
+        s->timestamp_ms = t; cached.push_back(s);
+    }
+    for (int64_t t = 1201000; t < 1501000; t += 100) {
+        auto s = std::make_shared<RealtimeDepthHistory::Sample>();
+        s->timestamp_ms = t; s->serial = uint64_t(t / 100);
+        recent.push_back(s);
+    }
+    append_realtime_depth_tail(cached, recent, 1201000, 1501000, 1000);
+    check(cached.front()->timestamp_ms == 1000 && cached.size() == 1500,
+          "resuming a cached overview keeps its prefix and bins the raw tail");
+    check(!cached[1200]->segment_start, "overlapping source proves a continuous tail");
+    const auto count = cached.size();
+    append_realtime_depth_tail(cached, recent, 1201000, 1501000, 1000);
+    check(cached.size() == count, "repeated resume does not duplicate depth bins");
+    for (int64_t t = 1501000; t < 2101000; t += 100) {
+        auto s = std::make_shared<RealtimeDepthHistory::Sample>();
+        s->timestamp_ms = t;
+        append_realtime_depth_sample(cached, s, 1000);
+    }
+    check(cached.front()->timestamp_ms == 1000 && cached.size() == 2100,
+          "ten minutes of ongoing raw arrivals cannot evict the cached overview");
+    auto reseed = std::make_shared<RealtimeDepthHistory::Sample>();
+    reseed->timestamp_ms = 2100999; reseed->segment_start = true;
+    append_realtime_depth_sample(cached, reseed, 1000);
+    check(cached.size() == 2100 && cached.back()->segment_start,
+          "a same-bin reseed preserves the boundary within the bounded tail");
+    cached.resize(1200);
+    append_realtime_depth_tail(cached, recent, 1100000, 1501000, 1000);
+    check(cached[1200]->segment_start && !recent.front()->segment_start,
+          "retired source interval becomes a gap without mutating shared samples");
+    cached.resize(1200);
+    append_realtime_depth_tail(cached, recent, 1201000, 1300000, 1000);
+    check(cached.back()->timestamp_ms <= 1300000, "paused tail excludes future depth");
     return failures ? 1 : 0;
 }

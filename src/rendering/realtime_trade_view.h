@@ -18,7 +18,7 @@ struct RealtimeTradeView {
             if (t.timestamp_ms < from) continue;
             if (t.timestamp_ms > to) break;
             if (!source_grouped && t.price*t.qty < minimum) continue;
-            if (count<capacity) { records[count]=t;low[count]=high[count]=t.price;++count; }
+            if (count<capacity) { records[count]=t;low[count]=t.summary_count?t.summary_low:t.price;high[count]=t.summary_count?t.summary_high:t.price;++count; }
             ++source_count;
         }
         // A grouped archive plus its raw live tail must stay grouped even just
@@ -35,11 +35,13 @@ struct RealtimeTradeView {
             if (i>=capacity) continue;
             auto& b=records[i];
             b.price+=t.price*t.qty;b.qty+=t.qty;b.timestamp_ms=t.timestamp_ms;b.is_buy=t.is_buy;
-            low[i]=low[i]>0?std::min(low[i],t.price):t.price;high[i]=std::max(high[i],t.price);
+            b.summary_count+=t.summary_count?t.summary_count:1;
+            const double lo=t.summary_count?t.summary_low:t.price, hi=t.summary_count?t.summary_high:t.price;
+            low[i]=low[i]>0?std::min(low[i],lo):lo;high[i]=std::max(high[i],hi);
         }
         count=0;
         for(size_t i=0;i<capacity;++i)if(records[i].qty>0) {
-            records[i].price/=records[i].qty;
+            records[i].price/=records[i].qty;records[i].summary_low=low[i];records[i].summary_high=high[i];
             records[count]=records[i];low[count]=low[i];high[count]=high[i];++count;
         }
     }
