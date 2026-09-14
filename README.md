@@ -39,8 +39,8 @@ with the community gateway.*
 SOPH/USDT capture from 8 September 2026 with the linked six-column DOM, delta
 and CVD. Actual observed depth and received trades, with no pre-join depth backfill.*
 
-Choose **RT** in the timeframe menu to watch observed orderbook history, sampled
-best bid/ask steps and trade bubbles on one price axis. Individual bubbles retain
+Choose **Real-time** beside the timeframe bar to watch observed orderbook history,
+sampled best bid/ask steps and trade bubbles on one price axis. Individual bubbles retain
 received execution prices and timestamps; dense views group volume by time and
 side at average prices, with a label. Zoom in to recover individual records.
 Quotes and trades are separate streams, so a print can lie outside the sampled
@@ -157,9 +157,9 @@ Three kinds of tag are published for both images:
 - `:MAJOR.MINOR.PATCH` and `:MAJOR.MINOR` are published when a release is tagged
 
 One gotcha worth stating plainly, because the failure looks like the tag is
-missing: the leading `v` is not part of the image tag. The git tag `v0.3.0`
-publishes the images `0.3.0` and `0.3`, so `:v0.3.0` fails with
-`manifest unknown` while `:0.3.0` is there.
+missing: the leading `v` is not part of the image tag. The git tag `v0.4.0`
+publishes the images `0.4.0` and `0.4`, so `:v0.4.0` fails with
+`manifest unknown` while `:0.4.0` is there.
 
 The two images version independently, so their numbers do not match. Check
 [the releases](https://github.com/edgedepthhq/edgedepth-terminal/releases) and
@@ -183,7 +183,7 @@ services:
   gateway:
     image: ghcr.io/edgedepthhq/edgedepth-gateway:0.1.0
   terminal:
-    image: ghcr.io/edgedepthhq/edgedepth-terminal:0.3.0
+    image: ghcr.io/edgedepthhq/edgedepth-terminal:0.4.0
 ```
 
 A digest is the strongest pin, because a version tag can in principle be
@@ -207,6 +207,8 @@ Open-source trade aggregators and charting components exist, but complete browse
 ## Features
 
 - **Chart engine**: custom ImPlot candlesticks, multi-timeframe (1m to 1D), buy/sell volume + CVD, indicators (RSI, MACD, Volume, OI, funding), drawing tools, layered overlays
+- **Trade bubbles on candles**: large prints from the live tape are drawn inside their own bar at their received price and time, sized by value and thinned to a screen budget so zooming reveals more. Any feed supplies live prints; recorded bubbles for earlier bars need a backend that answers `get_candle_bubbles`
+- **Flow & Positioning**: a chart view aligning selected-minute aggression with raw open-interest contracts and reported liquidations, with missing and stale states kept explicit and a JSON export. Needs a backend that answers `get_flow_positioning`; the community gateway serves live streams only, so it reports the evidence as unavailable rather than inventing it
 - **DOM ladder**: independent depth with grouping, USD/coin modes and trade columns, or a default RT link sharing the chart's price positions, sampled book and pause state. See [the RT guide](docs/REALTIME_DEPTH.md).
 - **Trade tape**: live time & sales with size highlighting
 - **Orderbook heatmap**: GPU-rendered depth history via a shader-based renderer
@@ -519,7 +521,7 @@ Please keep PRs focused. The render loop has strict conventions: no allocation i
 
 ## License
 
-[AGPL-3.0](LICENSE). You can use, modify, and self-host freely. If you host a modified version for others, you must publish your changes. Fonts are OFL-licensed (Hanken Grotesk, JetBrains Mono), and third-party library licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[AGPL-3.0](LICENSE). You can use, modify, and self-host freely. If you host a modified version for others, you must publish your changes. Fonts are OFL-licensed (Inter, Roboto Mono, Hanken Grotesk, JetBrains Mono), and third-party library licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ---
 
