@@ -199,6 +199,10 @@ void tick(std::vector<std::unique_ptr<Widget>>& widgets, const AppContext& ctx,
                 }
             } else if (!stored.is_null()) notice = "Saved workspace could not be read. Defaults are available.";
         } else std::free(raw);
+        // A first session, or one whose saved layout could not be used, starts
+        // from the same preset Reset Layout produces, so the Candles default
+        // (volume and CVD subplots) applies without a saved workspace.
+        if (pending.is_null()) reset_default();
         EM_ASM({
             window.addEventListener('pagehide', () => _workspace_flush());
             document.addEventListener('visibilitychange', () => { if (document.hidden) _workspace_flush(); });

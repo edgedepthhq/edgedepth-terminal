@@ -590,7 +590,8 @@ void ChartWidget::render_realtime_liquidation_strip() {
         : "Received notional only; feed coverage may be incomplete");
     if (!ImPlot::BeginPlot("##RTLiqActivity", ImVec2(-1, 90),
             ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText | ImPlotFlags_NoInputs)) return;
-    ImPlot::SetupAxis(ImAxis_X1, nullptr, indicator_mgr_.pane_expanded() ? ImPlotAxisFlags_NoTickLabels : ImPlotAxisFlags_None);
+    // Real-time has no indicator pane below, so this strip owns the time axis.
+    ImPlot::SetupAxis(ImAxis_X1, nullptr, ImPlotAxisFlags_None);
     ImPlot::SetupAxis(ImAxis_Y1, nullptr, ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoTickLabels);
     ImPlot::SetupAxisLimits(ImAxis_X1, last_visible_range_.X.Min, last_visible_range_.X.Max, ImGuiCond_Always);
     const double scale = std::max(1.0, view.peak) * 1.1;

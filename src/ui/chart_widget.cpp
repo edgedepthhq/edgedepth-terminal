@@ -858,11 +858,11 @@ void ChartWidget::render() {
     }
     const float total_height = ImGui::GetContentRegionAvail().y;
     // Indicator pane (tabbed, design .indi-pane): 0 / header-only / INDI_PANE_H.
-    // Renko skips the time-aligned indicator pane (render_indicators early-returns),
-    // so reserve no height for it - the brick chart takes the full area.
+    // Real-time and Renko skip the pane (render_indicators early-returns), so
+    // reserve no height for it - the chart takes the full area.
     const float indicator_total_height =
         (chart_type_ == ChartType::FlowPositioning) ? std::min(flow_history_.ready && flow_history_.assessment.raw_count > 0 ? 520.0f : 430.0f, total_height * 0.65f) :
-        (chart_type_ == ChartType::Renko) ? 0.0f : indicator_mgr_.pane_height();
+        subplots_suppressed() ? 0.0f : indicator_mgr_.pane_height();
     const float chart_height = std::max(100.0f, total_height - indicator_total_height - (rt_mode_ && rt_liq_strip_ ? 130.0f : 0.0f));
 
     chart_allocated_height_ = chart_height;
@@ -1053,7 +1053,8 @@ void ChartWidget::render_chart() {
                            ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | ImPlotFlags_NoMouseText)) {
         // Hide x-axis labels on main chart when the indicator pane shows a
         // plot below (the pane owns the time axis then)
-        const bool has_subplots = chart_type_ == ChartType::FlowPositioning || indicator_mgr_.pane_expanded() || (rt_mode_ && rt_liq_strip_);
+        const bool has_subplots = chart_type_ == ChartType::FlowPositioning ||
+            (!subplots_suppressed() && indicator_mgr_.pane_expanded()) || (rt_mode_ && rt_liq_strip_);
         // TPO mode always shows date labels on main chart x-axis
         const bool hide_x_labels = has_subplots && chart_type_ != ChartType::TPO;
         // No tick marks either: the pane below is flush against this plot now
@@ -3415,14 +3416,20 @@ void ChartWidget::render_controls() {
     // Right group: Indicators + Settings, right-aligned to the bar's right edge.
     // The button carries an active-count chip and the menu stays open for
     // multi-selection.
+    // The chip and the menu describe what is on screen. In a view without
+    // subplots the count is zero and the menu says why instead of offering
+    // toggles that would change nothing visible.
+    const bool indi_suppressed = subplots_suppressed();
     int indi_active_n = 0;
-    if (indicator_mgr_.has_indicator_of_type<Indicators::VolumeIndicator>())      ++indi_active_n;
-    if (indicator_mgr_.has_indicator_of_type<Indicators::CVDIndicator>())         ++indi_active_n;
-    if (indicator_mgr_.has_indicator_of_type<Indicators::RSIIndicator>())         ++indi_active_n;
-    if (indicator_mgr_.has_indicator_of_type<Indicators::MACDIndicator>())        ++indi_active_n;
-    if (indicator_mgr_.has_indicator_of_type<Indicators::FundingRateIndicator>()) ++indi_active_n;
-    if (indicator_mgr_.has_indicator_of_type<Indicators::OIIndicator>())          ++indi_active_n;
-    if (indicator_mgr_.has_indicator_of_type<Indicators::VPINIndicator>())        ++indi_active_n;
+    if (!indi_suppressed) {
+        if (indicator_mgr_.has_indicator_of_type<Indicators::VolumeIndicator>())      ++indi_active_n;
+        if (indicator_mgr_.has_indicator_of_type<Indicators::CVDIndicator>())         ++indi_active_n;
+        if (indicator_mgr_.has_indicator_of_type<Indicators::RSIIndicator>())         ++indi_active_n;
+        if (indicator_mgr_.has_indicator_of_type<Indicators::MACDIndicator>())        ++indi_active_n;
+        if (indicator_mgr_.has_indicator_of_type<Indicators::FundingRateIndicator>()) ++indi_active_n;
+        if (indicator_mgr_.has_indicator_of_type<Indicators::OIIndicator>())          ++indi_active_n;
+        if (indicator_mgr_.has_indicator_of_type<Indicators::VPINIndicator>())        ++indi_active_n;
+    }
     char indi_nbuf[8];
     snprintf(indi_nbuf, sizeof(indi_nbuf), "%d", indi_active_n);
 
@@ -3568,8 +3575,21 @@ void ChartWidget::render_controls() {
 
             indi_section("SUBPLOTS \xC2\xB7 RENDER IN ORDER", false);
 
+            if (indi_suppressed) {
+                const ImVec2 p = ImGui::GetCursorScreenPos();
+                ImGui::PushFont(Theme::Fonts::ui());
+                pdl->AddText(ImVec2(p.x + 14.0f, p.y + 4.0f), Theme::u32(Theme::Tokens::TX2),
+                             rt_mode_ ? "Not shown in real-time mode." : "Not shown on Renko charts.");
+                pdl->AddText(ImVec2(p.x + 14.0f, p.y + 4.0f + ImGui::GetFontSize() + 4.0f),
+                             Theme::u32(Theme::Tokens::TX3),
+                             rt_mode_ ? "Your subplots return with a candle timeframe."
+                                      : "Your subplots return with a time-based chart.");
+                ImGui::PopFont();
+                ImGui::Dummy(ImVec2(pww, ImGui::GetFontSize() * 2.0f + 16.0f));
+            }
+
             // Volume
-            {
+            if (!indi_suppressed) {
                 const bool active = indicator_mgr_.has_indicator_of_type<Indicators::VolumeIndicator>();
                 if (indi_row("Volume", active, nullptr) == 1) {
                     if (active) indicator_mgr_.remove_indicator_of_type<Indicators::VolumeIndicator>();
@@ -3578,7 +3598,7 @@ void ChartWidget::render_controls() {
             }
 
             // CVD
-            {
+            if (!indi_suppressed) {
                 const bool active = indicator_mgr_.has_indicator_of_type<Indicators::CVDIndicator>();
                 if (indi_row("CVD", active, "Cumulative Volume Delta") == 1) {
                     if (active) indicator_mgr_.remove_indicator_of_type<Indicators::CVDIndicator>();
@@ -3587,7 +3607,7 @@ void ChartWidget::render_controls() {
             }
 
             // RSI
-            {
+            if (!indi_suppressed) {
                 const bool active = indicator_mgr_.has_indicator_of_type<Indicators::RSIIndicator>();
                 if (indi_row("RSI", active, nullptr) == 1) {
                     if (active) indicator_mgr_.remove_indicator_of_type<Indicators::RSIIndicator>();
@@ -3596,7 +3616,7 @@ void ChartWidget::render_controls() {
             }
 
             // MACD
-            {
+            if (!indi_suppressed) {
                 const bool active = indicator_mgr_.has_indicator_of_type<Indicators::MACDIndicator>();
                 if (indi_row("MACD", active, nullptr) == 1) {
                     if (active) indicator_mgr_.remove_indicator_of_type<Indicators::MACDIndicator>();
@@ -3605,7 +3625,7 @@ void ChartWidget::render_controls() {
             }
 
             // Funding Rate
-            {
+            if (!indi_suppressed) {
                 const bool active = indicator_mgr_.has_indicator_of_type<Indicators::FundingRateIndicator>();
                 if (indi_row("Funding Rate", active,
                              "Funding rate histogram (blue=longs pay, red=shorts pay)") == 1) {
@@ -3615,7 +3635,7 @@ void ChartWidget::render_controls() {
             }
 
             // Open Interest
-            {
+            if (!indi_suppressed) {
                 const bool active = indicator_mgr_.has_indicator_of_type<Indicators::OIIndicator>();
                 if (indi_row("Open Interest", active,
                              "Open interest candlesticks (green=OI up, red=OI down)") == 1) {
@@ -3625,7 +3645,7 @@ void ChartWidget::render_controls() {
             }
 
             // VPIN / Toxicity (Indicators V1 Wave B - TRADER+)
-            {
+            if (!indi_suppressed) {
                 const bool active = indicator_mgr_.has_indicator_of_type<Indicators::VPINIndicator>();
                 if (indi_row("VPIN \xC2\xB7 Toxicity", active,
                              "Flow toxicity (VPIN, volume clock) with HMM regime coloring\nStep-hold shelves are honest: quiet symbols hold") == 1) {
@@ -4396,9 +4416,7 @@ void ChartWidget::render_crosshair(const ImPlotPoint& mouse_pos) const {
 // Indicators
 
 void ChartWidget::render_indicators() {
-    // Renko uses a brick-index X-axis; the time-aligned indicator sub-pane would
-    // not align to it (v1). Skip the pane entirely in Renko.
-    if (chart_type_ == ChartType::Renko) return;
+    if (subplots_suppressed()) return;
     if (indicator_mgr_.count() == 0) return;
     indicator_mgr_.render_tabbed(stored_x_min_, stored_x_max_, this,
                                  &crosshair_state_);

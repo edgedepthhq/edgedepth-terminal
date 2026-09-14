@@ -126,6 +126,11 @@ public:
     // edge dot. Toggled from the Real-time pill beside the timeframe bar (see
     // app_shell render_tf_control).
     bool rt_mode() const { return rt_mode_; }
+    // Views with no indicator subplots. Real-time draws observed depth on a
+    // two-minute axis where timeframe series have nothing to say; Renko uses
+    // a brick-index axis the time-aligned pane cannot follow. The pane's
+    // indicators are kept, so returning to candles restores them.
+    bool subplots_suppressed() const { return rt_mode_ || chart_type_ == ChartType::Renko; }
     void set_rt_dom_linked(bool linked) { rt_dom_linked_ = linked; }
     const RealtimeDOMFrame& realtime_dom_frame() const { return rt_dom_frame_; }
     void set_rt_mode(bool v);

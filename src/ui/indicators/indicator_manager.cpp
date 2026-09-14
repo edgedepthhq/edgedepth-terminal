@@ -15,7 +15,6 @@ namespace Indicators {
         // is the S4/F1 follow-up - needs a multi-tab-group pane model.
         pinned_.push_back(true);
         active_tab_ = static_cast<int>(indicators.size()) - 1;  // focus the new tab
-        pane_hidden_ = false;                                   // re-show on add
     }
 
     void IndicatorManager::remove_indicator(size_t index) {
@@ -43,7 +42,7 @@ namespace Indicators {
     static constexpr float kIndiSplitterH = 5.0f;
 
     float IndicatorManager::pane_height() const {
-        if (indicators.empty() || pane_hidden_) return 0.0f;
+        if (indicators.empty()) return 0.0f;
         // Collapsed: only the slim strip that holds the tabs and the expand
         // chevron. Expanded: the plots alone. The tabs, live value, collapse
         // and close controls are drawn INSIDE the top plot, so the pane no
@@ -59,7 +58,7 @@ namespace Indicators {
     }
 
     bool IndicatorManager::pane_expanded() const {
-        return !indicators.empty() && !pane_hidden_ && !collapsed_;
+        return !indicators.empty() && !collapsed_;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -73,7 +72,7 @@ namespace Indicators {
                                          void* chart_widget,
                                          void* crosshair_state_ptr)
     {
-        if (indicators.empty() || pane_hidden_) return;
+        if (indicators.empty()) return;
 
         auto* chart = static_cast<ChartWidget*>(chart_widget);
         auto* crosshair_state = static_cast<ChartWidget::CrosshairState*>(crosshair_state_ptr);
@@ -88,6 +87,11 @@ namespace Indicators {
         ImDrawList* dl = ImGui::GetWindowDrawList();
 
         int pending_delete = -1;
+        // The pane's close control removes every subplot rather than hiding
+        // the pane: a hidden pane left the Indicators menu reporting them as
+        // active with nothing on screen. Applied after the plots end, like
+        // a single removal.
+        bool pending_close = false;
 
         // ── Pane controls: tab pills (left) · live value · collapse · close
         //    (right). Drawn INSIDE the top plot (over its top padding) so the
@@ -162,8 +166,8 @@ namespace Indicators {
                 const float cx = rx + btn * 0.5f, cy = by + btn * 0.5f, r = 3.5f;
                 dl->AddLine(ImVec2(cx - r, cy - r), ImVec2(cx + r, cy + r), c, 1.3f);
                 dl->AddLine(ImVec2(cx - r, cy + r), ImVec2(cx + r, cy - r), c, 1.3f);
-                if (hov) Theme::tooltip("Close pane");
-                if (clk) pane_hidden_ = true;
+                if (hov) Theme::tooltip("Remove subplots");
+                if (clk) pending_close = true;
             }
             rx -= btn + 2.0f;
             {
@@ -233,6 +237,11 @@ namespace Indicators {
         };
 
         auto apply_pending_delete = [&]() -> bool {
+            if (pending_close) {
+                indicators.clear(); pinned_.clear(); active_tab_ = 0;
+                pending_close = false; pending_delete = -1;
+                return true;
+            }
             if (pending_delete < 0) return false;
             indicators.erase(indicators.begin() + pending_delete);
             if (pending_delete < static_cast<int>(pinned_.size()))

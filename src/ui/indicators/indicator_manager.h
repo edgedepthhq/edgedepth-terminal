@@ -14,13 +14,15 @@ namespace Indicators {
         // Get indicator by index
         IndicatorBase* get_indicator(size_t index);
         const IndicatorBase* get_indicator(size_t index) const { return indicators[index].get(); }
+        // No hidden flag: the pane shows exactly when it has indicators, so the
+        // Indicators menu, its count chip and the pane can never disagree. A
+        // saved layout that still carries "hidden" is ignored.
         workspace::Json save_layout() const {
             return {{"pinned", pinned_}, {"active", active_tab_},
-                    {"collapsed", collapsed_}, {"hidden", pane_hidden_}};
+                    {"collapsed", collapsed_}};
         }
         void load_layout(const workspace::Json& j) {
             workspace::read(j, "collapsed", collapsed_);
-            workspace::read(j, "hidden", pane_hidden_);
             workspace::read(j, "active", active_tab_, 0, indicators.empty() ? 0 : indicators.size() - 1);
             auto it = j.find("pinned");
             if (it != j.end() && it->is_array() && it->size() == pinned_.size())
@@ -68,11 +70,10 @@ namespace Indicators {
         void render_tabbed(double x_min, double x_max, void* chart_widget,
                            void* crosshair_state_ptr);
 
-        // Height the pane wants this frame: 0 (no indicators / closed),
-        // PANEL_HEADER_H (collapsed), or header + N stacked plots.
+        // Height the pane wants this frame: 0 (no indicators),
+        // PANEL_HEADER_H (collapsed), or N stacked plots.
         float pane_height() const;
         bool pane_expanded() const;   // true when the pane shows a plot (time axis lives there)
-        void show_pane() { pane_hidden_ = false; }
 
         // Get number of indicators
         size_t count() const { return indicators.size(); }
@@ -96,7 +97,6 @@ namespace Indicators {
         std::vector<bool> pinned_;     // parallel to indicators; survives reorder via resize
         int  active_tab_ = 0;
         bool collapsed_ = false;
-        bool pane_hidden_ = false;
         // F2 pilot: index of the indicator whose settings popover is open
         // (right-click tab → Settings…). -1 = none. pending_ arms the
         // one-shot ImGui::OpenPopup on the frame the menu item fired.
