@@ -133,7 +133,7 @@ private:
             for (const auto& p : *prints) {
                 if (!p.is_object()) {fail();return;}
                 Terminal::Trade t{};
-                workspace::read(p,"timestamp_ms",t.timestamp_ms,start,start+59999);
+                workspace::read(p,"timestamp_ms",t.timestamp_ms,double(start),double(start+59999));
                 workspace::read(p,"price",t.price,0,1e18); workspace::read(p,"qty",t.qty,0,1e18);
                 if (!p.contains("is_buy") || !p["is_buy"].is_boolean() || !p.contains("id") || !p["id"].is_string()) {fail();return;}
                 t.is_buy = p["is_buy"].get<bool>();
