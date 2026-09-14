@@ -14,10 +14,18 @@ function(add_terminal_native_test target source)
     # written relative to src/ (e.g. renko_builder.cpp's "core/renko_builder.h").
     target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../src)
 
+    # Third-party headers are included with angle brackets and held to warning
+    # level 0 on MSVC; our own headers use quotes and stay at /W4. Without this,
+    # a file-scope name in a test (start, end, value) trips C4459 inside an
+    # uninstantiated nlohmann template that GCC and Clang never diagnose, so
+    # the failure only ever appears on the Windows runner. -Wshadow gives
+    # GCC/Clang the first-party half of MSVC's C4456-C4459 family so a local
+    # that hides a member or parameter fails here before it fails there.
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W4 /WX /utf-8)
+        target_compile_options(${target} PRIVATE /W4 /WX /utf-8
+            /external:anglebrackets /external:W0)
     else()
-        target_compile_options(${target} PRIVATE -Wall -Wextra -Werror)
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wshadow -Werror)
     endif()
 
     target_link_libraries(${target} PRIVATE Threads::Threads)
