@@ -22,26 +22,37 @@ int main(){
     auto e=complete();auto a=assess(e);
     assert(a.complete_bars&&a.usable_oi&&a.buy==24004102&&a.sell==17141775);
     assert(std::abs(a.price_pct-12.556364897676042)<1e-9);
-    assert(std::string(a.hypothesis).find("Consistent with short covering")!=std::string::npos);
+    assert(std::string(a.hypothesis).find("does not identify")!=std::string::npos);
     // OI retires contracts without converting price-driven USD changes.
     for(auto& o:e.oi)o.contracts=1000;
-    assert(assess(e).oi_pct==0&&std::string(assess(e).hypothesis).find("Mixed")!=std::string::npos);
+    assert(assess(e).oi_pct==0&&std::string(assess(e).hypothesis).find("does not identify")!=std::string::npos);
     e=complete();e.oi[5].contracts=0;assert(!assess(e).usable_oi);
     e=complete();e.oi.erase(e.oi.begin()+1,e.oi.begin()+6);assert(!assess(e).usable_oi);
     e=complete();e.oi.erase(e.oi.begin(),e.oi.begin()+4);assert(!assess(e).usable_oi);
     e=complete();e.oi.resize(8);assert(!assess(e).usable_oi);
     e=complete();e.bars.erase(e.bars.begin());assert(!assess(e).complete_bars);
-    e=complete();for(auto& b:e.bars)b.buy=b.sell;assert(std::string(assess(e).hypothesis).find("Mixed")!=std::string::npos);
-    e=complete();for(auto& b:e.bars){b.close=b.open*.9;std::swap(b.buy,b.sell);}assert(std::string(assess(e).hypothesis).find("long unwinding")!=std::string::npos);
+    e=complete();for(auto& b:e.bars)b.buy=b.sell;assert(std::string(assess(e).hypothesis).find("does not identify")!=std::string::npos);
+    e=complete();for(auto& b:e.bars){b.close=b.open*.9;std::swap(b.buy,b.sell);}assert(std::string(assess(e).hypothesis).find("does not identify")!=std::string::npos);
     History h;Terminal::Pair pair{"binancef","lskusdt"};
     auto request=h.request(pair,t0,t0+120000,true,0);assert(!request.empty());
     auto good=reply(request);History::receive(good);assert(h.ready&&!h.assessment.usable_oi&&h.assessment.raw_count==0);
     assert(h.evidence.oi.size()==2); // NULL observations preserved, never zero-filled into measured data.
-    request=h.request(pair,t0,t0+120000,true,6000);auto wrong=reply(request);wrong["mode"]="live";History::receive(wrong);assert(!h.ready);
+    request=h.request(pair,t0,t0+120000,true,31000);auto wrong=reply(request);wrong["mode"]="live";History::receive(wrong);assert(!h.ready);
     h.reset();request=h.request(pair,t0,t0+120000,true,40000);auto old=reply(request);
     h.request(pair,t0+60000,t0+120000,true,41000);History::receive(old);assert(!h.ready); // rewind/selection generation
     h.reset();request=h.request(pair,t0,t0+120000,true,80000);auto future=reply(request);future["oi"][1]["time"]=t0+120001;History::receive(future);assert(!h.ready);
     h.reset();request=h.request(pair,t0,t0+120000,true,120000);auto malformed=reply(request);malformed["bars"][0]["buy"]="large";History::receive(malformed);assert(!h.ready);
-    h.reset();assert(h.request(pair,t0,t0+31*60000,true,160000).empty());
+    h.reset();assert(h.request(pair,t0,t0+241*60000,true,160000).empty());
+    h.reset();request=h.request(pair,t0,t0+240*60000,true,200000);assert(!request.empty());
+    History::receive({{"request_id",request["data"]["request_id"]},{"error","outside_recent_window"}});assert(h.status.find("six hours")!=std::string::npos);
+    h.reset();request=h.request(pair,t0,t0+120000,true,250000);auto partial=reply(request);
+    partial["bars"].erase(partial["bars"].begin());partial["components"]={{"bars","available"},{"oi","missing_records"},{"liquidations","timeout"}};
+    History::receive(partial);assert(h.ready&&!h.assessment.complete_bars&&h.assessment.buy==11041955&&!h.evidence.liquidations_available);
+    assert(h.request(pair,t0,t0+120000,true,255000).empty()); // bounded 30s same-scope cache
+    e=complete();for(auto& o:e.oi)o.contracts=1000.0; e.oi.back().contracts=1000.06;
+    assert(assess(e).usable_oi&&std::abs(assess(e).oi_pct-.006)<1e-8);
+    assert(std::string(assess(e).hypothesis).find("covering")==std::string::npos);
+    e=complete();e.bars.erase(e.bars.begin());a=assess(e);assert(a.raw_count==13&&a.forced_buy==281303.14&&a.buy==11041955);
+    for(const auto code:{"pro_required","outside_history_window","outside_replay_window","busy","timeout","missing_records","unsupported_source"})assert(std::string(error_message(code)).size()>15);
     std::cout<<"Flow evidence: alignment, raw OI, stale/missing, hypotheses, scope and stale callbacks pass\n";
 }

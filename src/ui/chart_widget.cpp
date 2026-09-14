@@ -861,7 +861,7 @@ void ChartWidget::render() {
     // Renko skips the time-aligned indicator pane (render_indicators early-returns),
     // so reserve no height for it - the brick chart takes the full area.
     const float indicator_total_height =
-        (chart_type_ == ChartType::FlowPositioning) ? std::min(flow_history_.ready && flow_history_.assessment.raw_count > 0 ? 440.0f : 350.0f, total_height * 0.62f) :
+        (chart_type_ == ChartType::FlowPositioning) ? std::min(flow_history_.ready && flow_history_.assessment.raw_count > 0 ? 520.0f : 430.0f, total_height * 0.65f) :
         (chart_type_ == ChartType::Renko) ? 0.0f : indicator_mgr_.pane_height();
     const float chart_height = std::max(100.0f, total_height - indicator_total_height - (rt_mode_ && rt_liq_strip_ ? 130.0f : 0.0f));
 
@@ -1087,7 +1087,7 @@ void ChartWidget::render_chart() {
         // while the explicit clamp below also repairs an already-oversized view.
         constexpr double kMinVisibleCandles = 8.0;
         constexpr double kMaxVisibleCandles = 1440.0;
-        const double timeframe_ms = static_cast<double>(tf_sec) * 1000.0;
+        const double timeframe_ms = chart_type_ == ChartType::FlowPositioning ? 60000.0 : static_cast<double>(tf_sec) * 1000.0;
         if (chart_type_ != ChartType::TPO) {
             ImPlot::SetupAxisZoomConstraints(
                 ImAxis_X1,
@@ -2255,7 +2255,7 @@ void ChartWidget::plot_candles(double visible_x_min, double visible_x_max,
                                const BuildingOHLC& bld) {
     ImDrawList* draw_list = ImPlot::GetPlotDrawList();
     const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
-    const double timeframe_ms = static_cast<double>(tf_sec) * 1000.0;
+    const double timeframe_ms = chart_type_ == ChartType::FlowPositioning ? 60000.0 : static_cast<double>(tf_sec) * 1000.0;
     const double half_width = timeframe_ms * 0.35;  // ~70% body, ~30% gap (was 0.49 = no gap)
     const bool fp_thin = ctx_.footprint_mgr().enabled;  // Thin candle body when FP active
     const ImVec2 plot_min = ImPlot::GetPlotPos();
@@ -4263,7 +4263,7 @@ void ChartWidget::render_crosshair(const ImPlotPoint& mouse_pos) const {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
     // Snap to nearest candle timestamp
-    const double timeframe_ms = static_cast<double>(tf_sec) * 1000.0;
+    const double timeframe_ms = chart_type_ == ChartType::FlowPositioning ? 60000.0 : static_cast<double>(tf_sec) * 1000.0;
     const double snapped_time = rt_mode_ ? mouse_pos.x : std::round(mouse_pos.x / timeframe_ms) * timeframe_ms;
     const float line_top = crosshair_state_.first_plot_min.y;
     const float line_bottom = crosshair_state_.last_plot_max.y;

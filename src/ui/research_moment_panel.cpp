@@ -13,6 +13,8 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
+#include "../core/display_time_zone.h"
 
 #include <nlohmann/json.hpp>
 
@@ -85,13 +87,15 @@ bool bridge_present() {
 #endif
 }
 
-// "2026-08-01T13:57:00Z" → "2026-08-01 13:57 UTC" (display only; the ISO
-// stays the wire form).
-std::string iso_to_header(const std::string& iso) {
-    if (iso.size() < 16) return iso;
-    std::string out = iso.substr(0, 16);
-    out[10] = ' ';
-    return out + " UTC";
+// Parse the UTC wire identity once; format through the shared display zone.
+int64_t iso_epoch(const std::string& iso) {
+    std::tm value{};int year=0,month=0;
+    if(std::sscanf(iso.c_str(),"%d-%d-%dT%d:%d:%d",&year,&month,&value.tm_mday,&value.tm_hour,&value.tm_min,&value.tm_sec)!=6)return 0;
+    value.tm_year=year-1900;value.tm_mon=month-1;
+    return static_cast<int64_t>(timegm(&value))*1000;
+}
+std::string minute_header(int64_t epoch) {
+    char text[128]{};DisplayTimeZone::instance().format(epoch,TimeZoneFormat::FullInspection,text,sizeof(text));return text;
 }
 
 bool primary_button(const char* label, float w, float h = 34.0f) {
@@ -251,7 +255,7 @@ void ResearchMomentPanel::apply_result_json(const char* json) {
     }
 
     live_read_ = (state == "ok_live");
-    bucket_label_ = iso_to_header(j.value("bucketTime", ""));
+    bucket_label_ = j.value("bucketTime", "");
     total_readings_ = j.value("totalReadings", 0);
     fired_rules_ = j.value("firedRules", 0);
     standouts_.clear();
@@ -412,9 +416,7 @@ void ResearchMomentPanel::render_body() {
     ImGui::SameLine();
     ImGui::PushFont(Fonts::mono_sm());
     ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
-    ImGui::TextUnformatted(bucket_label_.empty()
-                               ? research_url::minute_header_utc(minute_ms_).c_str()
-                               : bucket_label_.c_str());
+    ImGui::TextWrapped("%s",minute_header(bucket_label_.empty()?minute_ms_:iso_epoch(bucket_label_)).c_str());
     ImGui::PopStyleColor();
     ImGui::PopFont();
 
@@ -533,7 +535,7 @@ void ResearchMomentPanel::render_body() {
     if (!tags_note_.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX3);
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextUnformatted(tags_note_.c_str());
+        ImGui::TextWrapped("NEW: not yet standing out one hour earlier (%s). STANDING: already was.",minute_header(iso_epoch(bucket_label_)-3600000).c_str());
         ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
