@@ -43,7 +43,7 @@ void SymbolRegistry::parse_json(const char* json_data, size_t len) {
             // break subscription + historical-query matching.
             std::transform(meta.exchange.begin(), meta.exchange.end(), meta.exchange.begin(),
                            [](unsigned char c) { return std::tolower(c); });
-            if (meta.exchange == "binancef") {
+            if (meta.exchange == "binancef" || meta.exchange == "bybit") {
                 std::transform(meta.symbol.begin(), meta.symbol.end(), meta.symbol.begin(),
                                [](unsigned char c) { return std::tolower(c); });
             }
@@ -52,6 +52,13 @@ void SymbolRegistry::parse_json(const char* json_data, size_t len) {
             meta.step_size    = s.value("step_size", 1.0);
             meta.min_notional = s.value("min_notional", 5.0);
             meta.is_active    = s.value("is_active", true);
+            // The hub writes "PERPETUAL" for perps on every venue; anything
+            // else stated (DATED_FUTURES, CURRENT_QUARTER, ...) is a dated
+            // contract. Absent means legacy rows, which were all perps.
+            {
+                const std::string ct = s.value("contractType", "");
+                meta.perpetual = ct.empty() || ct == "PERPETUAL";
+            }
 
             // Base/quote asset for display name
             meta.base_asset   = s.value("base_asset", "");
@@ -124,10 +131,23 @@ void SymbolRegistry::fetch_metadata(std::function<void()> on_ready) {
         if (on_ready) on_ready();
     }
 
-    // 2. Fire background XHR to refresh (works regardless of CORS config)
+    // 2. Fire background XHR to refresh (works regardless of CORS config).
+    // Base resolution mirrors resolve_ws_url() in main.cpp: ?api=<origin> or
+    // window.__EDGEDEPTH_API_URL__ points a dev / self-hosted terminal at a
+    // local hub; production stays the default.
     EM_ASM({
+        var base = 'https://api.edgedepth.com';
+        try {
+            var override = new URLSearchParams(window.location.search).get('api') ||
+                           window.__EDGEDEPTH_API_URL__ || "";
+            override = String(override);
+            if (override.indexOf('http://') === 0 || override.indexOf('https://') === 0) {
+                base = override;
+                while (base.endsWith('/')) base = base.slice(0, -1);
+            }
+        } catch (e) {}
         var xhr = new XMLHttpRequest();
-        xhr.open('GET', 'https://api.edgedepth.com/symbols/metadata', true);
+        xhr.open('GET', base + '/symbols/metadata', true);
         xhr.onload = function() {
             if (xhr.status === 200) {
                 var text = xhr.responseText;

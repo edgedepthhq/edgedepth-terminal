@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <deque>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 class DrawingManager {
@@ -78,10 +79,45 @@ public:
     // Called once per frame from main.cpp; flushes ~1s after the last mutation.
     void tick();
     void flush();                      // immediate write (pagehide export)
+    // Another window wrote this symbol's blob (storage event): merge it in on
+    // the next tick rather than overwriting it on the next flush.
+    void note_external_change() { pull_pending_ = true; }
 
 private:
     void load_json(const char* raw);       // parse + validate the stored blob
     std::string serialize() const;         // JSON v1 (see plan schema)
+    // Shared parser/serializer for the stored blob's item list, so a flush can
+    // merge with what another window wrote instead of replacing it.
+    struct StoredBlob {
+        bool ok = false;
+        bool magnet = true, hidden_all = false, rail_collapsed = false;
+        std::vector<drawing::Drawing> items;
+    };
+    static StoredBlob parse_blob(const char* raw);
+    void pull();                            // merge the stored blob into items_
+    void remember_flushed(const std::vector<drawing::Drawing>& items);
+
+public:
+    // One item's JSON, with or without its "m" stamp; the unstamped form is
+    // what the merge compares to detect a change in this window.
+    static std::string serialize_item(const drawing::Drawing& d, bool with_stamp);
+    // The two merge rules, pure so a native test can pin them. `synced` is
+    // id -> serialized item as of this window's last load, pull or flush.
+    using SyncedItems = std::unordered_map<uint64_t, std::string>;
+    // Flush: stored is the base; ids this window synced but no longer holds
+    // are its deletions; this window's items are stamped `now` where they
+    // differ from the synced form and win unless the stored copy is newer
+    // and not mid-edit; items only the other window has are kept. Order is
+    // this window's order first, arrivals after.
+    static std::vector<drawing::Drawing> merge_for_flush(
+        std::vector<drawing::Drawing> stored, std::vector<drawing::Drawing> mine,
+        const SyncedItems& synced, uint64_t editing_id, int64_t now);
+    // Pull (nothing unflushed here): newer stored copies replace ours except
+    // the one being edited, unsynced local items stay, synced items missing
+    // from storage were deleted elsewhere, and new stored items append.
+    static std::vector<drawing::Drawing> merge_for_pull(
+        std::vector<drawing::Drawing> stored, std::vector<drawing::Drawing> mine,
+        const SyncedItems& synced, uint64_t editing_id);
 
     struct UndoOp {
         enum class Kind : uint8_t { Create, Delete, Modify };
@@ -112,4 +148,10 @@ private:
     bool        dirty_ = false;
     std::chrono::steady_clock::time_point dirty_at_{};
     bool        loaded_ = false;
+    bool        pull_pending_ = false;
+    // id -> serialized item (without stamp) as of the last load, pull or
+    // flush: what changed here since is derived by comparison, so no
+    // mutation site has to stamp anything, and an id present here but gone
+    // from items_ is a deletion this window made.
+    std::unordered_map<uint64_t, std::string> last_flushed_;
 };

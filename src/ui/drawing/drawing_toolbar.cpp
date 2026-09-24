@@ -195,46 +195,25 @@ void render_chart_rail(DrawingManager& mgr, float height) {
     ImGui::PopStyleColor();
 }
 
+// The Draw dropdowns (chart toolbar and topbar pencil) use the shared menu
+// rows: the tool glyph in the icon slot and a neutral check on the armed tool
+// (drawing chrome carries no accent, see CLAUDE.md "Deliberate exception").
 void render_tool_menu_rows(DrawingManager& mgr) {
-    ImGui::PushFont(Theme::Fonts::ui());
+    constexpr float kCheckW = 14.0f;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
     for (size_t gi = 0; gi < sizeof(kGroups) / sizeof(kGroups[0]); ++gi) {
-        if (gi > 0) {
-            ImDrawList* pdl = ImGui::GetWindowDrawList();
-            const ImVec2 sp = ImGui::GetCursorScreenPos();
-            ImGui::Dummy(ImVec2(1.0f, 5.0f));
-            pdl->AddLine(ImVec2(sp.x + 8.0f, sp.y + 2.5f),
-                         ImVec2(sp.x + 192.0f, sp.y + 2.5f),
-                         Theme::u32(Theme::Tokens::BD1), 1.0f);
-        }
+        if (gi > 0) Theme::menu_separator();
         for (int ti = 0; ti < kGroups[gi].count; ++ti) {
             const Tool t = kGroups[gi].tools[ti];
             const bool active = mgr.armed() == t;
-            const ImVec2 rp = ImGui::GetCursorScreenPos();
-            char id[24];
-            snprintf(id, sizeof(id), "##dd_%d", static_cast<int>(t));
-            const bool row = ImGui::InvisibleButton(id, ImVec2(200.0f, 26.0f));
-            const bool hov = ImGui::IsItemHovered();
-            ImDrawList* pdl = ImGui::GetWindowDrawList();
-            if (hov)
-                pdl->AddRectFilled(rp, ImVec2(rp.x + 200.0f, rp.y + 26.0f),
-                                   Theme::u32(Theme::Tokens::ELEV));
-            const ImU32 icol = (active || hov)
-                                   ? Theme::u32(Theme::Tokens::TX1)
-                                   : Theme::u32(Theme::Tokens::TX2);
-            draw_tool_icon(pdl, t, ImVec2(rp.x + 18.0f, rp.y + 13.0f), 6.5f,
-                           icol, 1.4f);
-            pdl->AddText(ImVec2(rp.x + 36.0f, rp.y + 5.0f),
-                         Theme::u32(Theme::Tokens::TX1), tool_name(t));
+            const Theme::MenuRow row = Theme::menu_row(tool_name(t), nullptr, true, false, kCheckW);
+            draw_tool_icon(dl, t, row.icon, 6.5f, active ? Theme::u32(Theme::Tokens::TX1) : row.icon_col, 1.4f);
             if (active)
-                pdl->AddCircleFilled(ImVec2(rp.x + 189.0f, rp.y + 13.0f), 2.5f,
-                                     Theme::u32(Theme::Tokens::TX1));
-            if (row) {
-                mgr.arm(active ? Tool::Cursor : t);
-                ImGui::CloseCurrentPopup();
-            }
+                draw_ui_icon(dl, UiIcon::Check, ImVec2(row.max.x - 10.0f - kCheckW * 0.5f, row.icon.y), 5.0f,
+                             Theme::u32(Theme::Tokens::TX1), 1.6f);
+            if (row.clicked) mgr.arm(active ? Tool::Cursor : t);
         }
     }
-    ImGui::PopFont();
 }
 
 void render_topbar_button(DrawingManager& mgr) {
@@ -261,17 +240,10 @@ void render_topbar_button(DrawingManager& mgr) {
     if (ImGui::IsItemHovered()) Theme::tooltip("Drawing tools");
     if (clicked) ImGui::OpenPopup("##tb_draw_tools");
 
-    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, Theme::Radius::R3);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 6.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
-    ImGui::PushStyleColor(ImGuiCol_PopupBg, Theme::Tokens::PANEL);
-    ImGui::PushStyleColor(ImGuiCol_Border, Theme::Tokens::BD2);
-    if (ImGui::BeginPopup("##tb_draw_tools")) {
+    if (Theme::begin_menu("##tb_draw_tools", 220.0f)) {
         render_tool_menu_rows(mgr);
         ImGui::EndPopup();
     }
-    ImGui::PopStyleColor(2);
-    ImGui::PopStyleVar(3);
 }
 
 }  // namespace drawing

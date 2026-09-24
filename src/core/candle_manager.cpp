@@ -1,6 +1,7 @@
 #include "core/candle_manager.h"
 #include "types/frame_profiler.h"
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <limits>
 #include <ranges>
@@ -72,6 +73,62 @@ void CandleManager::request_historical(size_t count, int64_t end_time_ms) {
     }
 }
 
+void CandleManager::request_recent(size_t count) {
+    // Not is_loading_: live trades keep building the newest candles while this
+    // is in flight; the batch merges in behind them.
+    recent_pending_ = true;
+    stream_mgr_.request_historical_candles(pair_, timeframe_seconds_, count);
+}
+
+void CandleManager::open_seam(int64_t history_end_ms, int64_t live_from_ms) {
+    seam_from_ms_ = history_end_ms;
+    live_from_ms_ = live_from_ms;
+    seam_attempts_ = 0;
+    seam_retry_at_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(kSeamFirstRetryMs);
+}
+
+// A merged batch closes the seam once the server's captured history reaches
+// the first candle built from live trades. Its live candle (final = false) is
+// appended to every batch and always reaches the present, so it cannot.
+void CandleManager::note_seam_batch(std::span<const Terminal::Candle> batch) {
+    if (seam_from_ms_ == 0 || live_from_ms_ == 0) return;
+    int64_t captured = 0;
+    for (const auto& c : batch) if (c.final) captured = std::max(captured, c.timestamp_ms);
+    if (captured >= live_from_ms_) seam_from_ms_ = 0;
+}
+
+// merge_recent upserts a batch by timestamp. handle_candle_batch is the
+// scroll-back loader and only prepends older-than-front candles; a batch that
+// overlaps the tail would be dropped by it. The building period stays with
+// the live feed: the server's copy of it is at best as fresh as ours.
+void CandleManager::merge_recent(std::span<const Terminal::Candle> batch) {
+    const int64_t period_ms = timeframe_seconds_ * 1000;
+    const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    const int64_t open_period = has_current_candle_ ? current_candle_.timestamp_ms
+                                                    : now_ms - (now_ms % period_ms);
+    size_t changed = 0;
+    for (const auto& c : batch) {
+        if (c.timestamp_ms >= open_period) continue;
+        auto it = std::lower_bound(candles_.begin(), candles_.end(), c.timestamp_ms,
+            [](const Terminal::Candle& have, int64_t ts) { return have.timestamp_ms < ts; });
+        if (it != candles_.end() && it->timestamp_ms == c.timestamp_ms) {
+            // Sub-minute candles are rebuilt from captured trades, whose newest
+            // seconds can still be partial: never trade a local candle for one
+            // holding fewer trades.
+            if (timeframe_seconds_ < 60 && c.tbuy + c.tsell < it->tbuy + it->tsell) continue;
+            *it = c;
+        } else {
+            candles_.insert(it, c);
+        }
+        ++changed;
+    }
+    while (candles_.size() > MAX_CANDLES) candles_.pop_front();
+    if (!candles_.empty()) oldest_candle_timestamp_ = candles_.front().timestamp_ms;
+    if (changed) mark_dirty();
+    note_seam_batch(batch);
+}
+
 void CandleManager::update(double visible_x_min, double visible_x_max) {
     // Time-based candle finalization - live mode only.
     // During replay, candle period transitions are driven by trade/candle
@@ -84,6 +141,18 @@ void CandleManager::update(double visible_x_min, double visible_x_max) {
         const int64_t candle_end_ms = current_candle_.timestamp_ms + (timeframe_seconds_ * 1000);
         if (now_ms >= candle_end_ms) {
             finalize_current_candle();
+        }
+    }
+    if (seam_from_ms_ > 0 && std::chrono::steady_clock::now() >= seam_retry_at_) {
+        if (seam_attempts_ >= kSeamRetries) {
+            seam_from_ms_ = 0;  // Give up: the gap stays visible, never invented.
+        } else {
+            ++seam_attempts_;
+            seam_retry_at_ = std::chrono::steady_clock::now() +
+                             std::chrono::milliseconds(kSeamFirstRetryMs << seam_attempts_);
+            const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            request_recent(static_cast<size_t>((now_ms - seam_from_ms_) / (timeframe_seconds_ * 1000)) + 3);
         }
     }
     // Auto-load more candles when scrolled near the left edge
@@ -125,6 +194,7 @@ void CandleManager::change_timeframe(const int64_t new_timeframe_seconds) {
             agg.low = std::min(agg.low, c.low);
             agg.close = c.close;
             agg.volume += c.volume;
+            agg.trade_stats_unavailable |= c.trade_stats_unavailable;
             agg.vbuy += c.vbuy;
             agg.vsell += c.vsell;
             agg.tbuy += c.tbuy;
@@ -154,6 +224,7 @@ void CandleManager::change_timeframe(const int64_t new_timeframe_seconds) {
     follow_live_ = true;
     initial_load_complete_ = false;
     is_loading_ = false;
+    seam_from_ms_ = 0;  // The new timeframe's batch opens its own.
     // Update keys
     timeframe_seconds_ = new_timeframe_seconds;
     candle_stream_key_ = StreamKey{pair_, Terminal::Stream::Candles, timeframe_seconds_};
@@ -207,6 +278,8 @@ void CandleManager::reset_for_seek(int64_t seek_time_ms) {
     // ticks are stale for the Line chart (candle-close fallback covers the gap
     // until fresh replay trades refill it).
     clear_ticks();
+    pending_trades_.clear();
+    seam_from_ms_ = 0;
     cache_dirty_ = true;
     cached_timestamps_.clear();
     cached_opens_.clear();
@@ -301,12 +374,25 @@ size_t CandleManager::visible_candles_for_timeframe() const {
 
 void CandleManager::handle_trade(const Terminal::Trade& trade) {
     realtime_trades_.append(trade);
-    if (!initial_load_complete_) return;  // Don't build candles until batch arrives
+    if (!initial_load_complete_) {
+        // Don't build candles until the batch arrives. Live, keep the trade
+        // for fold_pending_trades so the request's round trip leaves no gap.
+        if (replay_start_time_ms_ == 0) {
+            if (pending_trades_.size() >= kMaxPendingTrades)
+                pending_trades_.erase(pending_trades_.begin(),
+                    pending_trades_.begin() + static_cast<std::ptrdiff_t>(kMaxPendingTrades / 2));
+            pending_trades_.push_back(trade);
+        }
+        return;
+    }
     // After a seek, suppress trade-based candle building until the historical
     // batch arrives. Without this, trades create a building candle at the seek
     // target before the batch, then the batch collides with it - producing
-    // doubled candles with wrong open/high/low.
-    if (is_loading_) return;
+    // doubled candles with wrong open/high/low. Seeks are replay-only; a live
+    // scroll-back or reference load only prepends older candles, and gating
+    // it dropped the live edge's trades for the whole round trip.
+    if (is_loading_ && replay_start_time_ms_ > 0) return;
+    if (seam_from_ms_ > 0 && live_from_ms_ == 0) live_from_ms_ = get_candle_timestamp(trade.timestamp_ms);
     // Track latest replay time for timeframe-change batch requests
     if (replay_start_time_ms_ > 0 && trade.timestamp_ms > replay_latest_time_ms_) {
         replay_latest_time_ms_ = trade.timestamp_ms;
@@ -515,7 +601,8 @@ void CandleManager::handle_candle(const Terminal::Candle& candle) {
     // batch arrives. Without this, streaming ticks from the new consumer
     // create a building candle before the batch, then the batch arrives and
     // collides - producing doubled candles and mixed green/red bodies.
-    if (is_loading_) {
+    // Replay-only, as in handle_trade.
+    if (is_loading_ && replay_start_time_ms_ > 0) {
         return;
     }
 
@@ -583,6 +670,7 @@ void CandleManager::handle_candle(const Terminal::Candle& candle) {
             // Keep the finalized close (trade tape / server-final authoritative); a late
             // partial's aggregated close lags the tape. Enrich H/L/volume only.
             back.volume = std::max(back.volume, aligned.volume);
+            back.trade_stats_unavailable |= aligned.trade_stats_unavailable;
             back.vbuy   = std::max(back.vbuy,   aligned.vbuy);
             back.vsell  = std::max(back.vsell,  aligned.vsell);
             back.tbuy   = std::max(back.tbuy,   aligned.tbuy);
@@ -612,6 +700,7 @@ void CandleManager::handle_candle(const Terminal::Candle& candle) {
                 current_candle_.close = aligned.close;
             }
             current_candle_.volume = aligned.volume;
+            current_candle_.trade_stats_unavailable = aligned.trade_stats_unavailable;
             current_candle_.vbuy = aligned.vbuy;
             current_candle_.vsell = aligned.vsell;
             current_candle_.tbuy = aligned.tbuy;
@@ -713,6 +802,13 @@ void CandleManager::handle_candle(const Terminal::Candle& candle) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 void CandleManager::handle_candle_batch(std::span<const Terminal::Candle> batch) {
+    if (recent_pending_) {
+        recent_pending_ = false;
+        if (initial_load_complete_ && replay_start_time_ms_ == 0) {
+            merge_recent(batch);
+            return;
+        }
+    }
     if (batch.empty()) {
         is_loading_ = false;
         carried_candle_valid_ = false;
@@ -764,13 +860,16 @@ void CandleManager::handle_candle_batch(std::span<const Terminal::Candle> batch)
         // it instead of creating a duplicate.
         //
         // LIVE MODE: Only pop if wall clock is still within the candle's period
-        // (the candle hasn't finished yet).
+        // (the candle hasn't finished yet), or it is the server's live candle
+        // (final = false): a 1s one has usually closed by the time the batch
+        // lands, and left in place it sits past the history as a partial bar
+        // with the gap before it. As the building candle, update() closes it.
         if (!candles_.empty()) {
             const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()
             ).count();
             const int64_t candle_end_ms = candles_.back().timestamp_ms + (timeframe_seconds_ * 1000);
-            if (now_ms < candle_end_ms) {
+            if (now_ms < candle_end_ms || !candles_.back().final) {
                 const auto& last = candles_.back();
                 if (has_current_candle_ &&
                     current_candle_.timestamp_ms == last.timestamp_ms) {
@@ -778,6 +877,7 @@ void CandleManager::handle_candle_batch(std::span<const Terminal::Candle> batch)
                     current_candle_.high   = std::max(current_candle_.high, last.high);
                     current_candle_.low    = std::min(current_candle_.low, last.low);
                     current_candle_.volume = std::max(current_candle_.volume, last.volume);
+                    current_candle_.trade_stats_unavailable |= last.trade_stats_unavailable;
                     current_candle_.vbuy   = std::max(current_candle_.vbuy, last.vbuy);
                     current_candle_.vsell  = std::max(current_candle_.vsell, last.vsell);
                 } else {
@@ -788,10 +888,54 @@ void CandleManager::handle_candle_batch(std::span<const Terminal::Candle> batch)
                 mark_dirty();
             }
         }
+        const int64_t history_end = candles_.empty() ? 0 : candles_.back().timestamp_ms;
+        // A pending trade the history already holds means it reached the live
+        // feed; otherwise sub-minute history (captured trades) ends before it.
+        const bool reached_live = !pending_trades_.empty() &&
+            get_candle_timestamp(pending_trades_.front().timestamp_ms) <= history_end;
+        const int64_t first_live = fold_pending_trades();
+        if (timeframe_seconds_ < 60 && history_end > 0 && !reached_live)
+            open_seam(history_end, first_live);
     }
 
     is_loading_ = false;
     mark_dirty();
+}
+
+// Trades that arrived while the initial batch was in flight, in arrival order.
+// Periods the history holds keep its candle. When the server appended its live
+// candle (now the building one), that period keeps the server's state and the
+// periods between the history and it are built from these trades ahead of it.
+// Later periods build normally. Returns the first period not in the history.
+int64_t CandleManager::fold_pending_trades() {
+    const int64_t held = candles_.empty() ? std::numeric_limits<int64_t>::min()
+                                          : candles_.back().timestamp_ms;
+    const bool has_live = has_current_candle_;
+    const Terminal::Candle live = current_candle_;
+    has_current_candle_ = false;
+    bool live_restored = !has_live;
+    int64_t first_live = 0;
+    for (const auto& trade : pending_trades_) {
+        const int64_t period = get_candle_timestamp(trade.timestamp_ms);
+        if (period <= held) continue;
+        if (!live_restored && period >= live.timestamp_ms) {
+            finalize_current_candle();
+            current_candle_ = live;
+            has_current_candle_ = true;
+            live_restored = true;
+        }
+        if (first_live == 0) first_live = period;
+        append_tick(trade.timestamp_ms, trade.price);
+        if (has_live && period == live.timestamp_ms) continue;
+        build_candle_from_trade(trade);
+    }
+    if (!live_restored) {
+        finalize_current_candle();
+        current_candle_ = live;
+        has_current_candle_ = true;
+    }
+    pending_trades_.clear();
+    return first_live;
 }
 
 // Replay batches end at the playhead (`bucket < playhead + 1`), so the LAST
@@ -843,6 +987,7 @@ void CandleManager::adopt_replay_building_candle() {
             current_candle_.low    = std::min(carried_candle_.low,  current_candle_.open);
             current_candle_.close  = carried_candle_.close;
             current_candle_.volume = carried_candle_.volume;
+            current_candle_.trade_stats_unavailable = carried_candle_.trade_stats_unavailable;
             current_candle_.vbuy   = carried_candle_.vbuy;
             current_candle_.vsell  = carried_candle_.vsell;
             current_candle_.tbuy   = carried_candle_.tbuy;

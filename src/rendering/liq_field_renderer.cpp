@@ -42,7 +42,7 @@ void LiqFieldRenderer::rebuild(uint8_t lmask, int64_t tf_ms) {
     norm_lo_ = 0.0f;
     norm_hi_ = 0.0f;
     bw_ = 0.0;
-    auto& cm = ctx_.candle_mgr();
+    const auto& cm = candle_source();
     const auto& candles = cm.candles();
     const bool has_bld = cm.has_building_candle();
     if (candles.empty() && !has_bld) return;
@@ -260,7 +260,7 @@ void LiqFieldRenderer::rebuild(uint8_t lmask, int64_t tf_ms) {
 // Shared by the Field render AND the Liq Profile marginal, so the profile works even when the Field
 // layer itself is toggled off. Cheap no-op when nothing changed.
 void LiqFieldRenderer::ensure_cache() {
-    auto& cm = ctx_.candle_mgr();
+    const auto& cm = candle_source();
     const auto& candles = cm.candles();
     if (candles.empty() && !cm.has_building_candle()) return;
     const uint8_t lmask = ctx_.liq_heatmap_mgr().get_leverage_mask();
@@ -287,7 +287,7 @@ void LiqFieldRenderer::ensure_cache() {
 // edge if still pending), colored by its own fuel intensity → the traded region stays dense and the same
 // level shows different colors on either side of a sweep.
 void LiqFieldRenderer::render() {
-    auto& cm = ctx_.candle_mgr();
+    const auto& cm = candle_source();
     const auto& candles = cm.candles();
     const bool has_bld = cm.has_building_candle();
     if (candles.empty() && !has_bld) return;
@@ -495,7 +495,7 @@ void LiqFieldRenderer::render() {
 // stepped tail). Returns false on any unsupported case so render() falls
 // through to the rect path (the A/B fallback).
 bool LiqFieldRenderer::render_textured(int64_t tf_ms) {
-    auto& cm = ctx_.candle_mgr();
+    const auto& cm = candle_source();
     const auto& candles = cm.candles();
     const bool has_bld = cm.has_building_candle();
 

@@ -88,11 +88,21 @@ void StatsWidget::handle_stat(const Terminal::Stat& stat) {
     // does not flicker to 0. (The backend sampler carry-forward is the real fix;
     // this also covers a not-yet-deployed backend + the very first stat.) Funding
     // is left as-is -- 0 is a legitimate funding rate.
+    // A publisher that states per-field clocks is authoritative: its zeros are
+    // unavailable fields, never a flicker to hide by carrying a value forward.
     const Terminal::Stat prev_shown = current_stat_;
     current_stat_ = stat;
+    if (StatFreshness::stated(stat)) return;
     if (current_stat_.mark_price == 0.0)        current_stat_.mark_price        = prev_shown.mark_price;
     if (current_stat_.open_interest_usd == 0.0) current_stat_.open_interest_usd = prev_shown.open_interest_usd;
     if (current_stat_.next_funding_time == 0)   current_stat_.next_funding_time = prev_shown.next_funding_time;
+}
+
+// Freshness of one stat field against the widget clock. Legacy stats report
+// Legacy so existing venues render unchanged.
+StatFreshness::Field StatsWidget::stat_field(int64_t clock_ms, int64_t stale_after_ms) const {
+    return StatFreshness::field(StatFreshness::stated(current_stat_), clock_ms,
+                                static_cast<int64_t>(Entitlements::wall_now_ms()), stale_after_ms);
 }
 
 void StatsWidget::update() {
@@ -120,6 +130,7 @@ void StatsWidget::render() {
     ImGui::SetNextWindowSizeConstraints(ImVec2(320.0f, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,   ImVec2(0.0f, 0.0f));
+    place_new_window();
     const bool vis = ImGui::Begin(title_.c_str(), &is_open, ImGuiWindowFlags_NoScrollbar);
     if (!vis) { ImGui::End(); ImGui::PopStyleVar(2); return; }
 
@@ -220,13 +231,20 @@ void StatsWidget::render_header_price() {
     // Mark price (large mono) + 24h change (placeholder - no 24h field on the stream)
     y += 21.0f;
     char mk[40];
-    snprintf(mk, sizeof(mk), fmt_.price_fmt, current_stat_.mark_price);
+    const auto mark_state = stat_field(current_stat_.mark_price_ms, 30000);
+    if (mark_state.state == StatFreshness::State::Unavailable) snprintf(mk, sizeof(mk), "--");
+    else snprintf(mk, sizeof(mk), fmt_.price_fmt, current_stat_.mark_price);
     ImGui::PushFont(Fonts::mono_lg());
-    dl->AddText(ImVec2(org.x + PADX, y), col(Tokens::TX1), mk);
+    dl->AddText(ImVec2(org.x + PADX, y), col(mark_state.state == StatFreshness::State::Stale ? Tokens::TX3 : Tokens::TX1), mk);
     const float mw = ImGui::CalcTextSize(mk).x;
     ImGui::PopFont();
     ImGui::PushFont(Fonts::mono_sm());
-    dl->AddText(ImVec2(org.x + PADX + mw + 10.0f, y + 9.0f), col(Tokens::TX3), "-- %");
+    char mark_note[32] = "-- %";
+    if (mark_state.state == StatFreshness::State::Stale) {
+        char age[16]; StatFreshness::age_label(mark_state.age_ms, age, sizeof(age));
+        snprintf(mark_note, sizeof(mark_note), "MARK STALE %s", age);
+    }
+    dl->AddText(ImVec2(org.x + PADX + mw + 10.0f, y + 9.0f), col(Tokens::TX3), mark_note);
     ImGui::PopFont();
 
     // Sub-pairs: 24H H/L and 24H VOL (placeholders - TODO 24h ticker source)
@@ -504,12 +522,12 @@ void StatsWidget::feed_note() {
 // ── Order flow (premium core; leads) ────────────────────────────────────────
 void StatsWidget::render_order_flow() {
     feed_note();
-    const PositioningState* pos = ctx_.analytics_mgr().get_positioning(pair_.symbol);
+    const PositioningState* pos = ctx_.analytics_mgr().get_positioning(Terminal::pair_key(pair_.exchange, pair_.symbol));
 
     // VPIN - latest finalized volume-bucket print from the SeriesCache (already
     // parsed for the chart). Value + regime chip + fill gauge (amber). PRO.
     {
-        const auto& series = ctx_.series_mgr().vpin(pair_.symbol);
+        const auto& series = ctx_.series_mgr().vpin(Terminal::pair_key(pair_.exchange, pair_.symbol));
         char val[16] = "--";
         const char* chip = "--"; int chip_lvl = 0; float mval = 0.0f;
         if (!series.empty()) {
@@ -575,35 +593,57 @@ void StatsWidget::render_order_flow() {
 
 // ── Positioning ─────────────────────────────────────────────────────────────
 void StatsWidget::render_positioning() {
-    const PositioningState* pos = ctx_.analytics_mgr().get_positioning(pair_.symbol);
-    // Funding - LIVE rate + countdown to next funding. FREE, amber.
+    const PositioningState* pos = ctx_.analytics_mgr().get_positioning(Terminal::pair_key(pair_.exchange, pair_.symbol));
+    // Funding - LIVE rate + countdown to next funding. FREE, amber. A stated
+    // cadence is shown as-is (8H, 4H, 1H, NONE); nothing assumes eight hours.
     {
-        char val[24]; snprintf(val, sizeof(val), "%+.4f%%", current_stat_.funding * 100.0);
-        char det[32] = "NEXT --:--:--";
-        if (current_stat_.next_funding_time > 0) {
+        const auto funding_state = stat_field(current_stat_.funding_ms, 600000);
+        const bool stated = StatFreshness::stated(current_stat_);
+        char cadence[8]; StatFreshness::cadence_label(stated, current_stat_.funding_interval_minutes, cadence, sizeof(cadence));
+        char val[24];
+        if (funding_state.state == StatFreshness::State::Unavailable) snprintf(val, sizeof(val), "--");
+        else snprintf(val, sizeof(val), "%+.4f%%", current_stat_.funding * 100.0);
+        char det[48] = "NEXT --:--:--";
+        if (funding_state.state == StatFreshness::State::Unavailable && stated && current_stat_.funding_interval_minutes <= 0)
+            snprintf(det, sizeof(det), "NO FUNDING");
+        else if (current_stat_.next_funding_time > 0) {
             long long ms = current_stat_.next_funding_time
                          - static_cast<long long>(Entitlements::wall_now_ms());  // TODO(step 3): replay clock
             if (ms < 0) ms = 0;
             const long long s = ms / 1000;
-            snprintf(det, sizeof(det), "NEXT %02d:%02d:%02d",
-                     static_cast<int>(s / 3600), static_cast<int>((s % 3600) / 60), static_cast<int>(s % 60));
+            snprintf(det, sizeof(det), "NEXT %02d:%02d:%02d%s%s",
+                     static_cast<int>(s / 3600), static_cast<int>((s % 3600) / 60), static_cast<int>(s % 60),
+                     cadence[0] ? " \xc2\xb7 " : "", cadence);
         }
-        metric_row(Row{ .label = "FUNDING", .value = val, .value_col = Tokens::TX1,
-                        .detail = det, .detail_col = Tokens::TX1 });
+        if (funding_state.state == StatFreshness::State::Stale) {
+            char age[16]; StatFreshness::age_label(funding_state.age_ms, age, sizeof(age));
+            snprintf(det, sizeof(det), "STALE %s", age);
+        }
+        const ImVec4 fcol = funding_state.state == StatFreshness::State::Stale ? Tokens::TX3 : Tokens::TX1;
+        metric_row(Row{ .label = "FUNDING", .value = val, .value_col = fcol,
+                        .detail = det, .detail_col = fcol });
     }
     // Open interest - LIVE. The stat's open_interest_usd field actually carries
     // CONTRACT QTY (backend note in stat.go), so notional USD = contracts * mark.
     // 1H/4H deltas are PLACEHOLDER (need OI history). FREE.
     {
-        const double oi_usd = current_stat_.open_interest_usd * current_stat_.mark_price;
+        const auto oi_state = stat_field(current_stat_.open_interest_ms, 600000);
+        const auto mark_state_oi = stat_field(current_stat_.mark_price_ms, 30000);
+        const bool oi_known = oi_state.state != StatFreshness::State::Unavailable &&
+                              mark_state_oi.state != StatFreshness::State::Unavailable;
+        const double oi_usd = oi_known ? current_stat_.open_interest_usd * current_stat_.mark_price : 0.0;
         char val[24];
         if (oi_usd > 0.0) fmt_usd(oi_usd, val, sizeof(val));
         else              snprintf(val, sizeof(val), "--");
+        if (oi_state.state == StatFreshness::State::Stale) {
+            char age[16]; StatFreshness::age_label(oi_state.age_ms, age, sizeof(age));
+            snprintf(val, sizeof(val), "STALE %s", age);
+        }
         // 1H/4H deltas derived client-side from the OI history ring.
         char det[48] = "1H -- \xc2\xb7 4H --";
         bool h1 = false, h4 = false;
-        const double d1 = ctx_.analytics_mgr().oi_change_pct(pair_.symbol, 3600000, &h1);
-        const double d4 = ctx_.analytics_mgr().oi_change_pct(pair_.symbol, 14400000, &h4);
+        const double d1 = ctx_.analytics_mgr().oi_change_pct(Terminal::pair_key(pair_.exchange, pair_.symbol), 3600000, &h1);
+        const double d4 = ctx_.analytics_mgr().oi_change_pct(Terminal::pair_key(pair_.exchange, pair_.symbol), 14400000, &h4);
         if (h1 || h4) {
             char s1[12] = "--", s4[12] = "--";
             if (h1) snprintf(s1, sizeof(s1), "%+.1f%%", d1 * 100.0);
@@ -616,7 +656,7 @@ void StatsWidget::render_positioning() {
     {
         char val[16] = "--"; ImVec4 vcol = Tokens::TX1;
         bool hv = false;
-        const double v = ctx_.analytics_mgr().oi_velocity_per_min(pair_.symbol, &hv);
+        const double v = ctx_.analytics_mgr().oi_velocity_per_min(Terminal::pair_key(pair_.exchange, pair_.symbol), &hv);
         if (hv) {
             snprintf(val, sizeof(val), "%+.2f%%/m", v * 100.0);
             vcol = v >= 0.0 ? Tokens::UP : Tokens::DOWN;
@@ -637,7 +677,7 @@ void StatsWidget::render_positioning() {
 
 // ── Liquidations & risk (signature) ─────────────────────────────────────────
 void StatsWidget::render_liq_risk() {
-    const PositioningState* pos = ctx_.analytics_mgr().get_positioning(pair_.symbol);
+    const PositioningState* pos = ctx_.analytics_mgr().get_positioning(Terminal::pair_key(pair_.exchange, pair_.symbol));
     // Liquidations 24H - LIVE total + longs/shorts. FREE.
     {
         double ll = pos ? pos->long_liq_usd : 0.0, ls = pos ? pos->short_liq_usd : 0.0;

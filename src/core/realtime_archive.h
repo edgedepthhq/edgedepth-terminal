@@ -1,5 +1,6 @@
 #pragma once
 #include "core/realtime_history.h"
+#include "core/realtime_bubbles.h"
 #include <string>
 #include <unordered_set>
 #include <nlohmann/json.hpp>
@@ -30,6 +31,7 @@ public:
     void reset(bool discard_existing = true);
     void cancel_view();
     void append_trade(const Terminal::Trade&);
+    const RealtimeBubbleHistory& bubbles() const { return bubbles_; }
     bool query(int64_t from, int64_t to, int64_t cutoff, int64_t step, double tick, double native_tick = 0);
     bool take_view(std::deque<RealtimeDepthHistory::SamplePtr>&, std::deque<Terminal::Trade>&, int64_t& step);
     int64_t first = 0, last = 0;
@@ -48,6 +50,9 @@ private:
     std::vector<double> seed_;
     std::shared_ptr<pb::RealtimeHistory> deferred_seed_;
     std::unordered_set<int64_t> seen_ids_, seeded_ids_;
+    // Native string identities (venues without a numeric aggregate ID). The
+    // seed join uses the same bounded budget; a mixed feed stays complete.
+    std::unordered_set<std::string> seen_native_, seeded_native_;
     std::vector<std::pair<int64_t,int64_t>> seeded_ranges_;
     int64_t startup_live_first_ms_ = 0;
     int64_t first_depth_ms_ = 0;
@@ -68,6 +73,7 @@ private:
     Terminal::Pair pair_;
     std::string id_;
     std::vector<double> batch_, view_;
+    RealtimeBubbleHistory bubbles_;
     std::vector<RealtimeDepthHistory::SamplePtr> pending_;
     uint64_t serial_ = 0, book_generation_ = 0;
     int64_t clock_ = 0, last_depth_ms_ = 0;

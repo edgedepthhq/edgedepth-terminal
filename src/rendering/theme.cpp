@@ -1,4 +1,7 @@
 #include "rendering/theme.h"
+#include "ui/drawing/drawing_icons.h"
+#include "imgui_internal.h"   // ImGuiSelectableFlags_SpanAvailWidth
+#include <cfloat>
 
 #include <algorithm>
 #include <cstdarg>
@@ -55,8 +58,8 @@ namespace Theme {
             case Accent::Indigo: hex = 0x6d8bff; tx = 0x8ba3ff; soft = 0.15f; line = 0.55f; break;
             case Accent::Amber:  hex = 0xf0b350; tx = 0xf6c76e; soft = 0.15f; line = 0.55f; break;
             case Accent::Mono:   hex = 0xe7e9ed; tx = 0xffffff; soft = 0.13f; line = 0.45f; break;
-            case Accent::Teal:   // design default: accent #35c9c4, textTint #3fe0d0
-            default:             hex = 0x35c9c4; tx = 0x3fe0d0; soft = 0.14f; line = 0.55f; break;
+            case Accent::Teal:   // brand mint: accent #4ddbac, hover tint #78e7c4 (was cyan)
+            default:             hex = 0x4ddbac; tx = 0x78e7c4; soft = 0.14f; line = 0.55f; break;
         }
         Tokens::BRAND      = from_hex(hex);
         Tokens::BRAND_SOFT = from_hex(hex, soft);
@@ -138,7 +141,7 @@ namespace Theme {
         ImGui::TextUnformatted("Interface accent");
         int a = int(accent());
         ImGui::SetNextItemWidth(-1);
-        if (ImGui::Combo("##interface_accent", &a, "Teal\0Indigo\0Amber\0Neutral\0")) {
+        if (ImGui::Combo("##interface_accent", &a, "Mint\0Indigo\0Amber\0Neutral\0")) {
             set_accent(Accent(a)); changed = true;
         }
         if (ImGui::Button("Reset appearance")) {
@@ -323,6 +326,236 @@ namespace Theme {
         ImGui::TextColored(Tokens::TX3, "%s", label);
         ImGui::PopFont();
         ImGui::Spacing();
+    }
+
+    namespace {
+        constexpr float kMenuRowH  = 30.0f;
+        constexpr float kMenuPadX  = 10.0f;  // row inset for icon and hint
+        constexpr float kMenuIconW = 16.0f;
+        constexpr float kMenuGap   = 10.0f;  // icon to label
+        constexpr float kHintGap   = 24.0f;  // label to hint, minimum
+        constexpr float kLabelX    = kMenuPadX + kMenuIconW + kMenuGap;  // label column
+        constexpr float kGroupWrap = 300.0f;  // text width inside an open group
+
+        // The hover fill, hit box and natural width every row shares. The
+        // natural width goes to ItemSize (so an auto-sizing popup fits its
+        // widest row); the hit and hover box spans the whole menu.
+        bool row_selectable(const char* label, float natural_w, float h, bool enabled,
+                            ImGuiSelectableFlags flags) {
+            ImGui::PushID(label);
+            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+            ImGui::PushStyleColor(ImGuiCol_Header, Tokens::ACTIVE);
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, Tokens::ACTIVE);
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, Tokens::HOVER);
+            ImGui::BeginDisabled(!enabled);
+            const bool clicked = ImGui::Selectable("##menu_row", false,
+                flags | ImGuiSelectableFlags_SpanAvailWidth, ImVec2(natural_w, h));
+            ImGui::EndDisabled();
+            ImGui::PopStyleColor(3);
+            ImGui::PopStyleVar();
+            ImGui::PopID();
+            return clicked;
+        }
+
+        // Wrapped text in a menu keeps the row inset on its right as well as
+        // its left, and never pushes the menu wider than kGroupWrap needs.
+        float wrap_width() {
+            return std::min(kGroupWrap, std::max(160.0f, ImGui::GetContentRegionAvail().x - kMenuPadX));
+        }
+
+        float text_w(ImFont* font, const char* text) {
+            if (!text || !*text) return 0.0f;
+            ImGui::PushFont(font);
+            const float w = ImGui::CalcTextSize(text, nullptr, true).x;
+            ImGui::PopFont();
+            return w;
+        }
+    }
+
+    bool begin_menu(const char* id, float min_width, float max_height) {
+        // Every value below is latched by BeginPopup, so all of it pops
+        // straight away whether or not the popup is open.
+        ImGui::SetNextWindowSizeConstraints(ImVec2(min_width, 0.0f), ImVec2(FLT_MAX, max_height));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(5.0f, 5.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, Radius::R3);
+        ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.0f);
+        ImGui::PushStyleColor(ImGuiCol_PopupBg, Tokens::PANEL);
+        ImGui::PushStyleColor(ImGuiCol_Border, Tokens::BD2);
+        const bool open = ImGui::BeginPopup(id);
+        ImGui::PopStyleColor(2);
+        ImGui::PopStyleVar(3);
+        return open;
+    }
+
+    MenuRow menu_row(const char* label, const char* hint, bool enabled, bool keep_open,
+                     float trailing_w) {
+        const float label_w = text_w(Fonts::ui(), label);
+        const float hint_w = text_w(Fonts::mono_sm(), hint);
+        const float trail = trailing_w > 0.0f ? trailing_w + 8.0f : 0.0f;
+        const float natural = kLabelX + label_w + (hint_w > 0.0f ? kHintGap + hint_w : 0.0f) +
+                              trail + kMenuPadX;
+        const ImVec4 text = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+
+        MenuRow r;
+        ImGuiSelectableFlags flags = 0;
+        if (keep_open) flags |= ImGuiSelectableFlags_NoAutoClosePopups;
+        if (trailing_w > 0.0f) flags |= ImGuiSelectableFlags_AllowOverlap;
+        r.clicked = row_selectable(label, natural, kMenuRowH, enabled, flags);
+        r.hovered = enabled && ImGui::IsItemHovered();
+        r.right_clicked = r.hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+        r.min = ImGui::GetItemRectMin();
+        r.max = ImGui::GetItemRectMax();
+        const float cy = (r.min.y + r.max.y) * 0.5f;
+        r.icon = ImVec2(r.min.x + kMenuPadX + kMenuIconW * 0.5f, cy);
+        // The icon follows the label's colour (a warning row stays amber),
+        // muted until the row is hovered.
+        r.icon_col = !enabled ? u32(Tokens::TX4) : u32(text, r.hovered ? 1.0f : 0.6f);
+
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImGui::PushFont(Fonts::ui());
+        const float lx = r.min.x + kLabelX;
+        dl->AddText(ImVec2(lx, cy - ImGui::GetFontSize() * 0.5f), u32(enabled ? text : Tokens::TX4),
+                    label, ImGui::FindRenderedTextEnd(label));
+        ImGui::PopFont();
+        if (hint_w > 0.0f) {
+            ImGui::PushFont(Fonts::mono_sm());
+            const float hx = std::max(lx + label_w + kHintGap, r.max.x - kMenuPadX - trail - hint_w);
+            dl->AddText(ImVec2(hx, cy - ImGui::GetFontSize() * 0.5f),
+                        u32(enabled ? Tokens::TX3 : Tokens::TX4), hint);
+            ImGui::PopFont();
+        }
+        return r;
+    }
+
+    bool menu_item(drawing::UiIcon icon, const char* label, const char* hint, bool enabled,
+                   bool keep_open) {
+        const MenuRow r = menu_row(label, hint, enabled, keep_open);
+        drawing::draw_ui_icon(ImGui::GetWindowDrawList(), icon, r.icon, 6.5f, r.icon_col, 1.4f);
+        return r.clicked;
+    }
+
+    ImVec2 pro_tag_size() {
+        ImGui::PushFont(Fonts::label());
+        const ImVec2 t = ImGui::CalcTextSize("PRO");
+        ImGui::PopFont();
+        return ImVec2(t.x + 12.0f, t.y + 5.0f);
+    }
+
+    void draw_pro_tag(ImDrawList* dl, ImVec2 p) {
+        const ImVec2 sz = pro_tag_size();
+        dl->AddRectFilled(p, ImVec2(p.x + sz.x, p.y + sz.y), u32(Tokens::LOGO, 0.10f));
+        dl->AddRect(p, ImVec2(p.x + sz.x, p.y + sz.y), u32(Tokens::LOGO, 0.65f), 0.0f, 0, 1.0f);
+        ImGui::PushFont(Fonts::label());
+        dl->AddText(ImVec2(p.x + 6.0f, p.y + 2.5f), u32(Tokens::LOGO), "PRO");
+        ImGui::PopFont();
+    }
+
+    bool menu_toggle(const char* label, bool on, bool locked, const char* hint) {
+        const float trailing = locked ? pro_tag_size().x : 0.0f;
+        ImGui::PushStyleColor(ImGuiCol_Text, locked ? Tokens::TX3 : (on ? Tokens::TX1 : Tokens::TX2));
+        const MenuRow r = menu_row(label, locked ? nullptr : hint, true, /*keep_open=*/true, trailing);
+        ImGui::PopStyleColor();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        if (locked) {
+            drawing::draw_ui_icon(dl, drawing::UiIcon::Lock, r.icon, 6.0f,
+                                  u32(r.hovered ? Tokens::TX2 : Tokens::TX3), 1.3f);
+            const ImVec2 tag = pro_tag_size();
+            draw_pro_tag(dl, ImVec2(r.max.x - kMenuPadX - tag.x, (r.min.y + r.max.y - tag.y) * 0.5f));
+        } else {
+            const ImVec2 b0(r.icon.x - 7.0f, r.icon.y - 7.0f), b1(r.icon.x + 7.0f, r.icon.y + 7.0f);
+            if (on) {
+                dl->AddRectFilled(b0, b1, u32(Tokens::BRAND));
+                drawing::draw_ui_icon(dl, drawing::UiIcon::Check, r.icon, 5.0f, u32(Tokens::BRAND_INK), 1.6f);
+            } else {
+                dl->AddRect(b0, b1, u32(r.hovered ? Tokens::BD3 : Tokens::BD2), 0.0f, 0, 1.0f);
+            }
+        }
+        return r.clicked;
+    }
+
+    bool menu_item_locked(const char* label, const char* reason, bool pro, bool enabled) {
+        constexpr float kH = 46.0f;
+        const float label_w = text_w(Fonts::ui(), label);
+        const float reason_w = text_w(Fonts::label(), reason);
+        const float tag_w = pro ? pro_tag_size().x + kHintGap : 0.0f;
+        const float natural = kLabelX + std::max(label_w + tag_w, reason_w) + kMenuPadX;
+        const bool clicked = row_selectable(label, natural, kH, enabled, 0);
+        const bool hot = enabled && ImGui::IsItemHovered();
+        const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImGui::PushFont(Fonts::ui());
+        const float fs = ImGui::GetFontSize();
+        const float y1 = a.y + 7.0f;
+        // The lock sits on the action's own line: this is the row a Pro viewer
+        // clicks, shown with why it is closed rather than as a separate offer.
+        drawing::draw_ui_icon(dl, drawing::UiIcon::Lock, ImVec2(a.x + kMenuPadX + kMenuIconW * 0.5f, y1 + fs * 0.5f),
+                              6.0f, u32(pro ? Tokens::LOGO : Tokens::TX3, hot || !pro ? 1.0f : 0.85f), 1.3f);
+        dl->AddText(ImVec2(a.x + kLabelX, y1), u32(enabled ? Tokens::TX1 : Tokens::TX3), label);
+        ImGui::PopFont();
+        if (reason && *reason) {
+            ImGui::PushFont(Fonts::label());
+            dl->AddText(ImVec2(a.x + kLabelX, y1 + fs + 4.0f), u32(Tokens::TX3), reason);
+            ImGui::PopFont();
+        }
+        if (pro) {
+            const ImVec2 tag = pro_tag_size();
+            draw_pro_tag(dl, ImVec2(b.x - kMenuPadX - tag.x, y1 + (fs - tag.y) * 0.5f));
+        }
+        return clicked;
+    }
+
+    bool begin_menu_group(const char* label) {
+        ImGuiStorage* storage = ImGui::GetStateStorage();
+        const ImGuiID id = ImGui::GetID(label);
+        bool open = storage->GetBool(id, false);
+        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
+        const MenuRow r = menu_row(label, nullptr, true, /*keep_open=*/true);
+        ImGui::PopStyleColor();
+        if (r.clicked) { open = !open; storage->SetBool(id, open); }
+        drawing::draw_ui_icon(ImGui::GetWindowDrawList(),
+                              open ? drawing::UiIcon::ChevronDown : drawing::UiIcon::ChevronRight,
+                              r.icon, 5.0f, r.icon_col, 1.4f);
+        if (!open) return false;
+        ImGui::Indent(kLabelX);
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap_width());
+        ImGui::Dummy(ImVec2(0.0f, 2.0f));
+        return true;
+    }
+
+    void end_menu_group() {
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::PopTextWrapPos();
+        ImGui::Unindent(kLabelX);
+    }
+
+    void menu_note(const char* text) {
+        ImGui::Indent(kMenuPadX);
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + wrap_width());
+        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX3);
+        ImGui::TextWrapped("%s", text);
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+        ImGui::Unindent(kMenuPadX);
+    }
+
+    void menu_section(const char* label) {
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::PushFont(Fonts::label());
+        ImGui::GetWindowDrawList()->AddText(ImVec2(p.x + kMenuPadX, p.y + 8.0f),
+                                            u32(Tokens::TX3), label);
+        const ImVec2 size(ImGui::CalcTextSize(label).x + kMenuPadX * 2.0f,
+                          ImGui::GetFontSize() + 13.0f);
+        ImGui::PopFont();
+        ImGui::Dummy(size);
+    }
+
+    void menu_separator() {
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        const float w = ImGui::GetContentRegionAvail().x;
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x + 4.0f, p.y + 4.5f),
+                                            ImVec2(p.x + w - 4.0f, p.y + 4.5f),
+                                            u32(Tokens::BD1), 1.0f);
+        ImGui::Dummy(ImVec2(1.0f, 9.0f));
     }
 
     void begin_tooltip() {

@@ -34,6 +34,7 @@
 #include "../core/data_context.h"
 #include "../core/message_context.h"
 #include "replay_history_buffer.h"
+#include "lead_lag_tracker.h"
 
 class WebSocketClient;
 class PackReplayEngine;
@@ -57,11 +58,16 @@ public:
     struct SessionInfo {
         std::string session_id;
         std::string session_type;       // "nats" or "archive"
+        // symbols[0] is the primary market; symbols[1..] are compare markets
+        // played on the same clock (see DataContext::symbols). All on
+        // `exchange`: a session is single-venue.
         std::vector<std::string> symbols;
+        std::string exchange = "binancef";
         std::vector<std::string> streams; // Effective server-enforced stream grant
         int64_t start_time_ms = 0;      // Replay window start
         int64_t end_time_ms = 0;        // Replay window end
         int64_t current_time_ms = 0;    // Current playback position
+        int64_t confirmed_time_ms = 0;  // Last accepted server playhead for bounded reads
         float speed = 1.0f;             // Playback speed multiplier
         float progress = 0.0f;          // 0.0 to 1.0
         int64_t timeframe_ms = 300000;  // Current candle TF in ms (default 5m)
@@ -115,6 +121,29 @@ public:
     void set_lanes(WebSocketClient* nats_lane, WebSocketClient* archive_lane) {
         nats_lane_ = nats_lane;
         archive_lane_ = archive_lane;
+    }
+
+    // The venue every session this manager creates plays. A replay session is
+    // single-venue and the canvas is single-pair, so this is the boot route's
+    // exchange (main.cpp sets it right after construction). It rides the
+    // POST /replay/session body: "btcusdt" is listed on Binance AND Bybit, so
+    // the symbol alone no longer names a market and the backend refuses to
+    // guess. Never derived from a symbol name.
+    void set_exchange(const std::string& exchange) {
+        exchange_ = exchange.empty() ? std::string("binancef") : exchange;
+    }
+    const std::string& exchange() const { return exchange_; }
+    // The session's primary market as a routable pair (empty symbol when no
+    // session). Every replay-side pair is built through here or
+    // DataContext::primary_pair, never from a literal venue.
+    Terminal::Pair primary_pair() const {
+        return Terminal::Pair{info_.exchange, info_.symbols.empty() ? std::string() : info_.symbols.front()};
+    }
+    // Compare markets of the current session (symbols[1..]); empty for a plain
+    // single-market replay.
+    std::vector<std::string> compare_symbols() const {
+        if (info_.symbols.size() < 2) return {};
+        return std::vector<std::string>(info_.symbols.begin() + 1, info_.symbols.end());
     }
 
     // Which socket the CURRENT session's frames arrive on. Callers use this to
@@ -240,6 +269,23 @@ public:
     // ─── State Queries ───────────────────────────────────────────────────
     bool is_active() const;     // Includes a retained, frozen error context.
     bool is_playing() const { return info_.state == State::Playing; }
+    // Recorded-depth interruption the server is playing through (or a book the
+    // client itself found stale mid-play). Prices and trades continue; the DOM
+    // and RT depth hold the last verified book until the next observed snapshot.
+    struct DepthGap {
+        bool interrupted = false;   // currently inside an interruption
+        bool unverified = false;    // resumed without an observed snapshot
+        int64_t from_ms = 0;        // last verified depth before the gap
+        int64_t at_ms = 0;          // first unchained delta
+        int64_t to_ms = 0;          // where the chain resumed (0 while interrupted)
+    };
+    DepthGap depth_gap() const {
+        DepthGap gap;
+        gap.interrupted = server_depth_interrupted_ || depth_stale_;
+        gap.unverified = depth_unverified_;
+        gap.from_ms = depth_gap_from_ms_; gap.at_ms = depth_gap_at_ms_; gap.to_ms = depth_gap_to_ms_;
+        return gap;
+    }
     bool is_paused() const { return info_.state == State::Paused || info_.state == State::Error; }
     bool is_idle() const { return info_.state == State::Idle; }
     // Current playback speed multiplier (for the chart status chip).
@@ -257,6 +303,20 @@ public:
     // what holds the replay clock until real data is flowing - for ALL replays
     // (lessons AND the live terminal's "replay from here"), not just lessons.
     void tick_buffering_gate();
+
+    // ─── Compare replay: who moved first ─────────────────────────────────
+    // Live only while the session plays two or more markets (compare_symbols
+    // non-empty). Fed by the session's trade streams on the replay
+    // StreamManager, anchored at the session anchor and re-anchored on every
+    // deliberate seek ("from here" is the question each time). Recomputed a
+    // few times a second in tick_buffering_gate; read by the studio state
+    // emitter (the React strip) and the native control bar.
+    bool lead_lag_active() const { return lead_lag_.armed(); }
+    const leadlag::Result& lead_lag() const { return lead_lag_result_; }
+    // Trade-callback plumbing (public only because the StreamHandler callback
+    // is a free function): one per session market.
+    struct LeadLagSub { ReplayManager* self; Terminal::Pair pair; };
+    void lead_lag_on_trade(const std::string& symbol, int64_t ts_ms, double px);
 
     // Update the candle timeframe (called when user switches TF during replay).
     // Affects scrubber tick marks, candle-boundary snapping, skip amounts, and
@@ -361,21 +421,33 @@ public:
     void open_replay_launcher(const std::string& symbol, int64_t timeframe_seconds = 300);
 
     // Navigate the host browser to the FOCUSED research-replay viewer
-    // (the web app's /terminal?replay=) for an explicit window, seeked to
-    // seek_ms (0 = none). Live web terminal only: a no-op inside an embedded
-    // chrome (studio/lesson/event), and an in-place replay fallback in native
-    // dev builds (no browser to navigate to).
-    void open_focused_replay(const std::string& symbol, int64_t from_ms, int64_t to_ms,
-                             int64_t seek_ms);
+    // (the web app's /terminal?replay=<symbol>&exchange=<venue>) for an
+    // explicit window, seeked to seek_ms (0 = none). The venue is the CHART's
+    // pair venue, passed explicitly: a secondary chart opened from the picker
+    // can sit on another venue than the boot route, and the destination page
+    // boots a fresh canvas for exactly (exchange, symbol). Live web terminal
+    // only: a no-op inside an embedded chrome (studio/lesson/event), and an
+    // in-place replay fallback in native dev builds (no browser to navigate to).
+    //
+    // `with` names COMPARE markets (same venue) to play on the same clock
+    // beside `symbol`, as ?with=a,b. Empty means: keep the current session's
+    // compare set when re-anchoring from inside one (right-click on either
+    // chart of a two-market replay re-anchors both), else none.
+    void open_focused_replay(const std::string& exchange, const std::string& symbol,
+                             int64_t from_ms, int64_t to_ms, int64_t seek_ms,
+                             const std::vector<std::string>& with = {});
     // Convenience: a 4h window AROUND an anchor bar (30m lead), seeked to it.
-    void open_focused_replay_at(const std::string& symbol, int64_t anchor_ms);
+    void open_focused_replay_at(const std::string& exchange, const std::string& symbol,
+                                int64_t anchor_ms, const std::vector<std::string>& with = {});
 
     // Renders a context menu section for chart integration.
     // Called from within an ImGui::BeginPopup context.
     // hovered_time_ms: timestamp under cursor (from ImPlot mouse pos)
-    // symbol: current chart symbol
+    // exchange + symbol: the chart's pair (the venue travels with the symbol;
+    // see open_focused_replay)
     // Returns true if a replay was initiated.
     bool render_chart_context_menu(
+        const std::string& exchange,
         const std::string& symbol,
         int64_t hovered_time_ms,
         int64_t timeframe_seconds = 300,
@@ -403,6 +475,7 @@ public:
 private:
     WebSocketClient* nats_lane_;
     WebSocketClient* archive_lane_;
+    std::string exchange_ = "binancef";  // see set_exchange
     // The socket for the CURRENT session. session_type is set before the
     // session POST in both request paths (archive at request_archive_replay,
     // nats by default), so this is already correct by the time join_session
@@ -474,6 +547,21 @@ private:
     // Owns a complete set of managers for replay data isolation.
     // Created on replay_joined, destroyed on stop/error/reset.
     std::unique_ptr<DataContext> replay_ctx_;
+
+    // Compare replay lead/lag (see lead_lag_active). The trade subscriptions
+    // live on the replay context's StreamManager and die with it; the keys
+    // are kept so a context that is retired while this manager lives on can
+    // still be unsubscribed cleanly.
+    leadlag::Tracker lead_lag_;
+    leadlag::Result  lead_lag_result_;
+    int64_t          lead_lag_next_compute_ms_ = 0;
+    StreamManager*   lead_lag_streams_ = nullptr;   // the replay context's, while subscribed
+    // One subscription per session market. The trade callback is a plain
+    // function pointer with one void* (StreamHandler), so each leg gets its
+    // own small object carrying the manager and its symbol.
+    std::vector<std::unique_ptr<LeadLagSub>> lead_lag_subs_;
+    void arm_lead_lag(int64_t anchor_ms);
+    void disarm_lead_lag();
 
     // A replay context that has been swapped OUT but not yet freed.
     //
@@ -592,6 +680,19 @@ private:
     int64_t server_depth_asof_ms_ = 0;
     int64_t buffering_since_ms_ = 0;
     static constexpr int64_t BUFFERING_MAX_MS = 20000;
+    // Server-labelled recording interruption (archive gap recovery): the book is
+    // held, playback continues. depth_stale_ is the client's own detection of a
+    // book that stopped being fresh mid-play on a server that does not label gaps.
+    bool server_depth_interrupted_ = false;
+    bool depth_stale_ = false;
+    bool depth_unverified_ = false;
+    int64_t depth_gap_from_ms_ = 0, depth_gap_at_ms_ = 0, depth_gap_to_ms_ = 0;
+    // True once this session (or this seek) reached Playing: a later loss of
+    // depth freshness is a notice, never a fatal error.
+    bool primed_since_seek_ = false;
+    // Pending = the server is still reconstructing the book (priming traversal);
+    // RT history recording pauses on the replay book for its duration.
+    void set_depth_pending(bool pending);
 
     // ─── Internal Methods ────────────────────────────────────────────────
     void send_control(const char* action);

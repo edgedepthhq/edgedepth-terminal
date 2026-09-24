@@ -40,6 +40,8 @@ add_terminal_native_test(reach_math_test reach_math_test.cpp)
 add_terminal_native_test(renko_builder_test renko_builder_test.cpp)
 add_terminal_native_test(flat_map_test flat_map_test.cpp)
 add_terminal_native_test(url_router_test url_router_test.cpp)
+add_terminal_native_test(lead_lag_tracker_test lead_lag_tracker_test.cpp)
+add_terminal_native_test(trade_identity_test trade_identity_test.cpp)
 add_terminal_native_test(entitlements_test entitlements_test.cpp)
 add_terminal_native_test(dispatch_drain_test dispatch_drain_test.cpp)
 add_terminal_native_test(double_buffer_test double_buffer_test.cpp)
@@ -81,3 +83,17 @@ add_terminal_native_test(candle_bubble_display_test candle_bubble_display_test.c
 
 add_terminal_native_test(flow_positioning_test flow_positioning_test.cpp)
 target_link_libraries(flow_positioning_test PRIVATE nlohmann_json::nlohmann_json)
+
+# Merge rules for two windows sharing one symbol's drawings; compiles the
+# production manager natively (its storage bridge is Emscripten-only).
+add_terminal_native_test(drawing_merge_test drawing_merge_test.cpp)
+target_sources(drawing_merge_test PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../src/core/drawing_manager.cpp)
+target_link_libraries(drawing_merge_test PRIVATE nlohmann_json::nlohmann_json)
+
+add_terminal_native_test(dispatch_queue_bound_test dispatch_queue_bound_test.cpp)
+
+add_terminal_native_test(realtime_bubbles_test realtime_bubbles_test.cpp)
+target_link_libraries(realtime_bubbles_test PRIVATE nlohmann_json::nlohmann_json)
+
+add_terminal_native_test(liquidity_response_test liquidity_response_test.cpp)
+target_link_libraries(liquidity_response_test PRIVATE nlohmann_json::nlohmann_json)

@@ -44,6 +44,15 @@ namespace Menu {
         // When true, picker replaces existing widgets instead of adding new ones
         bool replace_mode = false;
 
+        // Compare-replay pick (chart right-click "Replay from here with..."):
+        // the row chosen becomes the COMPARE market of a focused replay of
+        // compare_symbol anchored at compare_anchor_ms, same venue. One-shot;
+        // cleared on pick or close.
+        bool        compare_mode = false;
+        std::string compare_exchange;
+        std::string compare_symbol;
+        int64_t     compare_anchor_ms = 0;
+
         // ── Cached filtered+sorted list (rebuilt only when inputs change) ──
         std::vector<const SymbolMetadata*> cached_visible;
         char prev_search[64] = {};
@@ -98,6 +107,9 @@ namespace Menu {
     };
     inline WidgetAddRequest g_widget_add_request;
 
+    // Identity for a new chart of `pair`: 1 = primary, >1 = secondary chart.
+    int next_chart_instance(const std::vector<std::unique_ptr<Widget>>& widgets,
+                            const Terminal::Pair& pair);
     void resolve_widget_add_request(
         std::vector<std::unique_ptr<Widget>>& widgets,
         const AppContext& ctx

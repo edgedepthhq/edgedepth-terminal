@@ -52,6 +52,10 @@ public:
     // deliberate bypasses ReplayManager's scrubber-drag debounce: false for a live
     // drag (let the debounce throttle), true for a discrete drop/click/step jump.
     void cmd_seek_progress(int milli_progress, bool deliberate);
+    // Exact seek target in epoch ms, split into two 32-bit halves (the raw
+    // export takes ints; 1000 progress steps over a 72-hour window are 4.3
+    // minutes apart, so the scrubber tooltip and the landing time disagreed).
+    void cmd_seek_ms(int hi, int lo, bool deliberate);
     // Relative nudge from the current position, in seconds (signed: negative = back).
     void cmd_skip(int seconds);
     // "Watch again": if the session ENDED (Stopped - the replay data context is
@@ -84,6 +88,7 @@ private:
     bool  pending_seek_ = false;
     float pending_seek_progress_ = 0.0f;   // 0..1
     bool  pending_seek_deliberate_ = false;
+    int64_t pending_seek_ms_ = 0;          // exact target; wins over progress
     bool  pending_skip_ = false;
     int   pending_skip_seconds_ = 0;       // signed: negative = backward
     bool release_checkpoint_ = false;

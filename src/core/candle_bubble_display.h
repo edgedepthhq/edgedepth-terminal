@@ -8,8 +8,9 @@ namespace CandleBubbleDisplay {
 inline float radius(double value, double reference) {
     if (!(reference > 0) || !(value > 0) || !std::isfinite(value)) return 0;
     // Log-compressed value, not area-proportional. Reference is independent of
-    // the user's visibility floor. P90/10x P90/100x P90 are ~9/16/22px.
-    return float(std::min(24.0, 3.0 + 2.0 * std::log2(1.0 + 8.0*value/reference)));
+    // the user's visibility floor. P90/10x P90/100x P90 are ~8/14/18px: large
+    // prints must not blot out the candle they sit on.
+    return float(std::min(18.0, 2.5 + 1.75 * std::log2(1.0 + 8.0*value/reference)));
 }
 struct Marker { size_t index; float x, y, radius; };
 // Input is strongest first with stable identity tie-breaks. A screen budget and

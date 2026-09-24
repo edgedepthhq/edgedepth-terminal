@@ -370,6 +370,7 @@ void DebugWidget::copy_selection_to_clipboard() const {
 // ── render ─────────────────────────────────────────────────────────────────
 void DebugWidget::render() {
     if (!is_open) return;
+    place_new_window();  // before our own size, so it wins
     ImGui::SetNextWindowSize(ImVec2(1000, 480), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin(title_.c_str(), &is_open, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();

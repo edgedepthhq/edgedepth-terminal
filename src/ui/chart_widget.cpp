@@ -17,6 +17,7 @@
 
 #include "ui/chart_widget.h"
 #include "rendering/observed_liquidations.h"
+#include "rendering/census_overlay.h"
 #include "ui/realtime_navigation.h"
 #include "core/drawing_manager.h"
 #include "ui/price_profile_renderer.h"
@@ -74,8 +75,8 @@ ChartProjection& chart_projection() {
 static void open_outcome_first_handoff(const Terminal::Pair& pair,
                                        const research_url::MoveSnap& move,
                                        int64_t range_minutes) {
-    if (!move.ok) return;
-    const std::string url = research_url::outcome_first_url(pair.symbol, move);
+    const std::string url = research_url::investigation_url(pair.symbol, move, pair.exchange);
+    if (url.empty()) return;
     // Hand-built JSON rather than nlohmann here: every value is either a
     // literal from the closed ladder/horizon lists or a number, and this is
     // the heaviest translation unit in the build.
@@ -109,8 +110,8 @@ static void render_investigate_menu_item(const Terminal::Pair& pair, int64_t min
     // "Find moments like this" (renamed 2026-08-24, James): the flagship
     // journey is see something -> right-click -> find similar -> replay,
     // and the menu item names the outcome, not the mechanism.
-    if (ImGui::MenuItem("Find moments like this",
-                        shortcut.empty() ? nullptr : shortcut.c_str(), false, enabled)) {
+    if (Theme::menu_item(drawing::UiIcon::Search, "Find moments like this",
+                         shortcut.empty() ? nullptr : shortcut.c_str(), enabled)) {
         ui::ResearchMomentPanel::instance().open(pair.symbol, minute_ms);
         ImGui::CloseCurrentPopup();
     }
@@ -122,17 +123,17 @@ static void render_investigate_menu_item(const Terminal::Pair& pair, int64_t min
     // shift-dragged range IS the outcome, and the door asks what preceded moves
     // like it across the sector. Needs a range that snapped onto the ladder, so
     // the shortcut column states the target the click will actually open.
-    const bool move_enabled = on_record && move.ok;
-    const std::string move_shortcut = research_url::move_label(move);
-    if (ImGui::MenuItem("Investigate this move",
-                        move_shortcut.empty() ? nullptr : move_shortcut.c_str(), false,
-                        move_enabled)) {
+    const bool move_enabled = on_record && move.end_minute_ms > move.start_minute_ms && move.start_minute_ms > 0;
+    const std::string move_shortcut = move_enabled ? "Exact UTC interval" : "";
+    if (Theme::menu_item(drawing::UiIcon::Move, "Investigate this move",
+                         move_shortcut.empty() ? nullptr : move_shortcut.c_str(),
+                         move_enabled)) {
         open_outcome_first_handoff(pair, move, range_minutes);
         ImGui::CloseCurrentPopup();
     }
     if (!move_enabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         Theme::tooltip("%s", on_record ? "Shift-drag at least one minute of loaded candles.\n"
-                                        "The move must reach at least 0.1% in its finishing direction."
+                                        "Use Select move on the investigation page to type a range."
                                        : "The record covers Binance USDT-M");
     }
 }
@@ -150,7 +151,7 @@ ChartWidget::SelectedMove ChartWidget::read_selected_move() const {
     const int64_t from = std::min(a, b);
     const int64_t to = std::max(a, b);
 
-    const int64_t tf_ms = ctx_.candle_mgr().timeframe_seconds() * 1000;
+    const int64_t tf_ms = candles().timeframe_seconds() * 1000;
     if (tf_ms <= 0) return out;
 
     double start_close = 0.0, end_close = 0.0, max_high = 0.0, min_low = 0.0;
@@ -169,16 +170,18 @@ ChartWidget::SelectedMove ChartWidget::read_selected_move() const {
         }
         end_close = c.close;
     };
-    for (const auto& c : ctx_.candle_mgr().candles()) {
+    for (const auto& c : candles().candles()) {
         if (c.timestamp_ms >= to) break;  // deque is ascending by timestamp
         fold(c);
     }
     // The forming candle lives outside the deque, so a drag that runs to the
     // live edge would otherwise stop one candle short of what the user saw.
-    if (ctx_.candle_mgr().has_building_candle()) fold(ctx_.candle_mgr().building_candle());
+    if (candles().has_building_candle()) fold(candles().building_candle());
 
     if (!have_range) return out;
     out.snap = research_url::snap_move(from, to, start_close, end_close, max_high, min_low);
+    out.snap.start_minute_ms = research_url::floor_minute_ms(from);
+    out.snap.end_minute_ms = research_url::floor_minute_ms(to);
     out.range_minutes = (to - from) / research_url::kMinuteMs;
     return out;
 }
@@ -211,26 +214,110 @@ static Terminal::Pair hl_census_pair_for(const Terminal::Pair& pair) {
     return {"hl", sym};
 }
 
+// Link-group state shared by every time-linked chart. One group: a canvas
+// plays one clock. Frame stamps, not flags, so a chart that stops rendering
+// (closed, hidden tab) drops out of the group without a teardown hook.
+namespace {
+struct TimeLink {
+    int    owner = 0;            // link_id_ of the chart that last drove the axis
+    int    owner_frame = -1;
+    double x_min = 0.0, x_max = 0.0;
+    bool   follow = true;        // the owner's follow-live latch
+    int    hover_owner = 0;      // link_id_ of the chart under the mouse
+    int    hover_frame = -1;
+    double hover_x = 0.0;
+    int    tf_seconds = 0;       // last timeframe broadcast
+    int    tf_frame = -1;
+    int    tf_owner = 0;
+    int    next_id = 1;
+};
+TimeLink g_time_link;
+}  // namespace
+
+CandleManager& ChartWidget::candles() const {
+    if (owned_candles_) return *owned_candles_;
+    if (compare_ && ctx_.replayer) {
+        if (const DataContext* rc = ctx_.replay_mgr().replay_context()) {
+            if (CandleManager* cm = rc->candles_for(pair_)) return *cm;
+        }
+    }
+    return ctx_.candle_mgr();
+}
+
 ChartWidget::ChartWidget(
     const Terminal::Pair& pair,
     const AppContext& ctx,
-    double tick_size)
+    double tick_size,
+    int instance,
+    bool compare)
     : pair_(pair)
     , ctx_(ctx)
+    , chart_instance_(std::max(1, instance))
+    , compare_(compare)
     , tick_size_(tick_size)
     , last_heatmap_update_ms_(std::chrono::steady_clock::now())
     , liq_field_(ctx)
 {
+    link_id_ = g_time_link.next_id++;
+    if (compare_) time_linked_ = true;
+    // A secondary chart cannot share the app-level manager: that holds ONE
+    // timeframe and ONE follow-live latch, which is exactly what the two
+    // charts must disagree on. Mirror main.cpp's construction of the app
+    // manager and DataContext's owned one, starting at the primary's current
+    // timeframe so the new chart opens looking like the one beside it. The
+    // StreamManager keeps a handler list per key, so a second trade
+    // subscriber for the pair and a candle subscriber for another timeframe
+    // both coexist with the primary's; the server subscription is shared and
+    // only released when the last handler leaves.
+    //
+    // The same applies to a chart of a DIFFERENT pair than the app-level
+    // manager's (opened from the picker in the live terminal): the app
+    // manager builds one market's candles, so such a chart must own its own
+    // or it draws the primary's candles under its own title. A compare chart
+    // is the exception: its manager already exists in the replay context.
+    // Live only, like the secondary rule above: during a replay the
+    // StreamManager in the context is the session's and is retired on exit,
+    // so a manager subscribed to it would dangle; such a chart keeps the old
+    // behaviour (reads the app-level manager).
+    const bool in_replay = ctx_.replayer && ctx_.replay_mgr().is_active();
+    const bool other_pair = !compare_ && !in_replay &&
+        (ctx_.candle_mgr().pair().exchange != pair_.exchange ||
+         ctx_.candle_mgr().pair().symbol   != pair_.symbol);
+    DataContext* replay_ctx = in_replay && !compare_ ? ctx_.replay_mgr().replay_context() : nullptr;
+    if (chart_instance_ > 1 && replay_ctx) {
+        // A secondary chart opened during a replay: its own manager on the
+        // replay StreamManager, built the way DataContext builds the compare
+        // managers, then brought to the playhead exactly as a seek would. The
+        // context lists it so later seeks, trims and suppressions reach it;
+        // the chart is a replay widget, so it closes with the replay and is
+        // erased a frame before the context (and this StreamManager) is freed.
+        owned_candles_ = std::make_unique<CandleManager>(
+            pair_, candles().timeframe_seconds(), ctx_.stream_mgr());
+        owned_candles_->subscribe();
+        owned_candles_->mark_ready_for_replay();
+        int64_t playhead_ms = ctx_.replay_mgr().interpolated_time_ms();
+        if (playhead_ms <= 0 && replay_ctx->candles)
+            playhead_ms = replay_ctx->candles->replay_start_time_ms();
+        owned_candles_->reset_for_seek(playhead_ms);
+        replay_ctx->chart_candles.push_back(owned_candles_.get());
+        replay_candles_ctx_ = replay_ctx;
+        liq_field_.set_candles(owned_candles_.get());
+    } else if (!in_replay && (chart_instance_ > 1 || other_pair)) {
+        owned_candles_ = std::make_unique<CandleManager>(
+            pair_, candles().timeframe_seconds(), ctx_.stream_mgr());
+        // Subscribes and requests the preload. The primary's initial_load runs
+        // on socket open (main.cpp); a secondary is only ever created from the
+        // UI of a connected live terminal, so the socket is already up.
+        owned_candles_->initial_load();
+        liq_field_.set_candles(owned_candles_.get());
+    }
     // TUT demo depth is easier to read with ten-tick rows. This is only
     // an initial pack default; the Depth settings still own user changes.
     if (EducationBoot::instance().is_pack() && pair_.exchange == "binancef" &&
         pair_.symbol == "tutusdt") rt_bucket_multiplier_ = 10;
-    title_tf_seconds_ = ctx_.candle_mgr().timeframe_seconds();
+    title_tf_seconds_ = candles().timeframe_seconds();
     timeframe_label_ = timeframe_to_string(title_tf_seconds_);
-    // Visible prefix carries the TF; identity after "###" is TF-independent so the
-    // chart stays docked across TF changes (matches layout.cpp's chart dock id).
-    title_ = std::string("     Chart  ") + widget_symbol_label(pair.symbol) + " " + timeframe_label_ +
-             "###chart_" + pair.exchange + "_" + pair.symbol;
+    rebuild_title();
     // tick_size_ == 0 means the registry has not answered for this pair yet.
     // The axis still has to print something, so it runs on price-magnitude
     // precision until refresh_instrument() binds the exchange's own.
@@ -245,7 +332,7 @@ ChartWidget::ChartWidget(
 
     // Subscribe to Volume stream for CVD intra-candle wicks
     {
-        volume_sub_tf_ms_ = ctx_.candle_mgr().timeframe_seconds() * 1000;
+        volume_sub_tf_ms_ = candles().timeframe_seconds() * 1000;
         StreamKey vol_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
         StreamHandler<Terminal::Volume> vol_handler{
             .widget_ptr = this,
@@ -259,7 +346,7 @@ ChartWidget::ChartWidget(
 
     // Subscribe to Stats stream for funding rate data
     {
-        stats_sub_tf_ms_ = ctx_.candle_mgr().timeframe_seconds() * 1000;
+        stats_sub_tf_ms_ = candles().timeframe_seconds() * 1000;
         StreamKey stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
         StreamHandler<Terminal::Stat> stat_handler{
             .widget_ptr = this,
@@ -306,6 +393,7 @@ ChartWidget::ChartWidget(
 }
 
 ChartWidget::~ChartWidget() {
+    if (replay_candles_ctx_) std::erase(replay_candles_ctx_->chart_candles, owned_candles_.get());
     if (rt_stream_mgr_)
         rt_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
     if (heatmap_stream_mgr_)
@@ -335,8 +423,21 @@ ChartWidget::~ChartWidget() {
     }
 }
 
+// Visible prefix carries the TF; identity after "###" is TF-independent so the
+// chart stays docked across TF changes (matches layout.cpp's chart dock id).
+// The primary's string is unchanged from before secondary charts existed, so
+// saved layouts and the default dock tree still match it. A secondary appends
+// its instance to both halves: the label so the tab reads as a second chart,
+// the identity so ImGui gives it a window of its own.
+void ChartWidget::rebuild_title() {
+    title_ = std::string("     Chart  ") + widget_symbol_label(pair_.symbol) + " " + timeframe_label_;
+    if (chart_instance_ > 1) title_ += " (" + std::to_string(chart_instance_) + ")";
+    title_ += "###chart_" + pair_.exchange + "_" + pair_.symbol;
+    if (chart_instance_ > 1) title_ += "_" + std::to_string(chart_instance_);
+}
+
 bool ChartWidget::is_loading() const {
-    return ctx_.candle_mgr().is_loading();
+    return candles().is_loading();
 }
 
 std::string ChartWidget::timeframe_to_string(int64_t seconds) {
@@ -361,8 +462,12 @@ void ChartWidget::refresh_instrument() {
 }
 
 void ChartWidget::set_chart_type(ChartType type) {
+    if (rt_mode_) set_rt_mode(false);   // puts the pre-real-time type back first
+    apply_chart_type(type);
+}
+
+void ChartWidget::apply_chart_type(ChartType type) {
     const ChartType previous = chart_type_;
-    if (rt_mode_) set_rt_mode(false);
     chart_type_ = type;
     if (previous != type) flow_history_.reset();
     auto& fp = ctx_.footprint_mgr();
@@ -371,7 +476,7 @@ void ChartWidget::set_chart_type(ChartType type) {
     if (type == ChartType::FootprintProfile) fp.mode = FootprintManager::Mode::Profile;
     if (type == ChartType::TPO) { tpo_zoom_pending_ = true; tpo_zoom_frames_ = 3; }
     if (type == ChartType::Renko || previous == ChartType::Renko) {
-        ctx_.candle_mgr().set_follow_live(true);
+        candles().set_follow_live(true);
         last_visible_range_.X.Min = last_visible_range_.X.Max = 0.0;
         last_visible_range_.Y.Min = last_visible_range_.Y.Max = 0.0;
         renko_view_t0_ms_ = renko_view_t1_ms_ = 0;
@@ -380,11 +485,18 @@ void ChartWidget::set_chart_type(ChartType type) {
 
 void ChartWidget::update() {
     ProfileScope _ps("ChartUpd");
+    time_link_adopt_timeframe();
     update_reference_context();
     update_flow_positioning();
+    update_liquidity_response();
+#ifdef EDGEDEPTH_EXPOSURE_V2_DEV
+    update_exposure_v2();
+#endif
     if (rt_archive_) capture_realtime_archive();
+    // Real-time mode draws sampled depth from its own subscription, so the
+    // candle heatmap stream is dropped for the duration and re-requested on exit.
     if (heatmap_stream_mgr_ &&
-        (!heatmap_enabled_ || !ct_allows_time_overlays(chart_type_) ||
+        (rt_mode_ || !heatmap_enabled_ || !ct_allows_time_overlays(chart_type_) ||
          heatmap_stream_mgr_ != &ctx_.stream_mgr())) {
         heatmap_stream_mgr_->unsubscribe_direct({pair_, Terminal::Stream::Heatmap, 0}, this);
         heatmap_stream_mgr_ = nullptr;
@@ -415,7 +527,7 @@ void ChartWidget::update() {
     // axis at price-magnitude precision than one printing 0.24 three rows
     // running. Replaced wholesale by refresh_instrument().
     if (!fmt_.resolved) {
-        const double px = ctx_.candle_mgr().last_close_price();
+        const double px = candles().last_close_price();
         if (px > 0.0) fmt_ = PriceFormatter::provisional_for_price(px);
     }
     if (chart_type_ == ChartType::Renko) {
@@ -423,14 +535,14 @@ void ChartWidget::update() {
         // to CandleManager (its scroll-load thresholds are timestamps). Use the
         // visible bricks' TIME window published by render_chart_renko instead.
         if (renko_view_t1_ms_ == 0) return;
-        ctx_.candle_mgr().update(static_cast<double>(renko_view_t0_ms_),
+        candles().update(static_cast<double>(renko_view_t0_ms_),
                                  static_cast<double>(renko_view_t1_ms_));
     } else {
         if (last_visible_range_.X.Max == 0 || last_visible_range_.Y.Max == 0 ||
             last_visible_range_.X.Min == 0) {
             return;
         }
-        ctx_.candle_mgr().update(last_visible_range_.X.Min, last_visible_range_.X.Max);
+        candles().update(last_visible_range_.X.Min, last_visible_range_.X.Max);
     }
 
     // CLIP_FACTORY P2: one-shot view overrides from the recorder script.
@@ -450,7 +562,10 @@ void ChartWidget::update() {
             // failing to load them.
             if (v->liq_profile >= 0) liq_profile_enabled_ = v->liq_profile != 0;
             if (v->liq_observed >= 0) liq_observed_enabled_ = v->liq_observed != 0;
-            if (v->ob_depth >= 0) heatmap_enabled_ = v->ob_depth != 0;
+            if (v->ob_depth >= 0) {
+                heatmap_enabled_ = v->ob_depth != 0;
+                if (v->realtime) rt_depth_enabled_ = heatmap_enabled_;   // recorded RT views used one flag
+            }
             if (v->vpvr >= 0 && vpvr_enabled_ != (v->vpvr != 0)) {
                 vpvr_enabled_ = v->vpvr != 0;
                 ctx_.vpvr_mgr().set_enabled(vpvr_enabled_);
@@ -465,7 +580,7 @@ void ChartWidget::update() {
     // crosses a user-set level (added from the chart right-click menu, live
     // mode only). One-shot: the level clears once it fires. Session-scoped.
     if (!alerts_.empty()) {
-        const double px = ctx_.candle_mgr().last_close_price();
+        const double px = candles().last_close_price();
         if (px > 0.0 && alert_last_price_ > 0.0) {
             for (size_t i = 0; i < alerts_.size();) {
                 const PriceAlert& a = alerts_[i];
@@ -501,13 +616,13 @@ void ChartWidget::update() {
         }
         if (px > 0.0) alert_last_price_ = px;
     } else {
-        const double px = ctx_.candle_mgr().last_close_price();
+        const double px = candles().last_close_price();
         if (px > 0.0) alert_last_price_ = px;
     }
 
-    if (!ctx_.candle_mgr().empty()) {
+    if (!candles().empty()) {
         auto* vol_ind = indicator_mgr_.get_indicator_of_type<Indicators::VolumeIndicator>();
-        if (vol_ind && vol_ind->get_bar_count() == 0 && ctx_.candle_mgr().is_initial_load_complete()) {
+        if (vol_ind && vol_ind->get_bar_count() == 0 && candles().is_initial_load_complete()) {
             vol_ind->clear();
             populate_volume_data(vol_ind);
             vol_ind->update();
@@ -516,9 +631,9 @@ void ChartWidget::update() {
 
         // CVD: populate on first data availability, update building candle each frame
         auto* cvd_ind = indicator_mgr_.get_indicator_of_type<Indicators::CVDIndicator>();
-        if (cvd_ind && cvd_ind->is_visible() && ctx_.candle_mgr().is_initial_load_complete()) {
+        if (cvd_ind && cvd_ind->is_visible() && candles().is_initial_load_complete()) {
             // Repopulate when candle count changes (new candle finalized or after clear)
-            const size_t current_count = ctx_.candle_mgr().count();
+            const size_t current_count = candles().count();
             if (current_count > 0 && cvd_ind->bar_count() != current_count) {
                 cvd_ind->clear();
                 populate_cvd_data(cvd_ind);
@@ -528,15 +643,15 @@ void ChartWidget::update() {
 
         // RSI: populate on first data, repopulate when candle count changes
         auto* rsi_ind = indicator_mgr_.get_indicator_of_type<Indicators::RSIIndicator>();
-        if (rsi_ind && rsi_ind->is_visible() && ctx_.candle_mgr().is_initial_load_complete()) {
-            const size_t current_count = ctx_.candle_mgr().count();
+        if (rsi_ind && rsi_ind->is_visible() && candles().is_initial_load_complete()) {
+            const size_t current_count = candles().count();
             if (current_count > 0 && rsi_ind->bar_count() != current_count) {
                 rsi_ind->clear();
-                for (const auto& candle : ctx_.candle_mgr().candles())
+                for (const auto& candle : candles().candles())
                     rsi_ind->add_candle(candle.timestamp_ms, candle.close);
             }
-            if (ctx_.candle_mgr().has_building_candle()) {
-                const auto& bc = ctx_.candle_mgr().building_candle();
+            if (candles().has_building_candle()) {
+                const auto& bc = candles().building_candle();
                 rsi_ind->set_building_candle(bc.timestamp_ms, bc.close);
             }
             rsi_ind->update();
@@ -544,15 +659,15 @@ void ChartWidget::update() {
 
         // MACD: same pattern
         auto* macd_ind = indicator_mgr_.get_indicator_of_type<Indicators::MACDIndicator>();
-        if (macd_ind && macd_ind->is_visible() && ctx_.candle_mgr().is_initial_load_complete()) {
-            const size_t current_count = ctx_.candle_mgr().count();
+        if (macd_ind && macd_ind->is_visible() && candles().is_initial_load_complete()) {
+            const size_t current_count = candles().count();
             if (current_count > 0 && macd_ind->bar_count() != current_count) {
                 macd_ind->clear();
-                for (const auto& candle : ctx_.candle_mgr().candles())
+                for (const auto& candle : candles().candles())
                     macd_ind->add_candle(candle.timestamp_ms, candle.close);
             }
-            if (ctx_.candle_mgr().has_building_candle()) {
-                const auto& bc = ctx_.candle_mgr().building_candle();
+            if (candles().has_building_candle()) {
+                const auto& bc = candles().building_candle();
                 macd_ind->set_building_candle(bc.timestamp_ms, bc.close);
             }
             macd_ind->update();
@@ -560,8 +675,8 @@ void ChartWidget::update() {
 
         // Funding Rate: populate from stats stream cache
         auto* funding_ind = indicator_mgr_.get_indicator_of_type<Indicators::FundingRateIndicator>();
-        if (funding_ind && funding_ind->is_visible() && ctx_.candle_mgr().is_initial_load_complete()) {
-            const size_t current_count = ctx_.candle_mgr().count();
+        if (funding_ind && funding_ind->is_visible() && candles().is_initial_load_complete()) {
+            const size_t current_count = candles().count();
             const bool have_funding_data = !funding_cache_.empty();
             if (current_count > 0 && have_funding_data &&
                 (funding_ind->bar_count() != current_count || funding_data_dirty_)) {
@@ -574,8 +689,8 @@ void ChartWidget::update() {
 
         // OI: populate from stats stream cache, repopulate when candles change or history arrives
         auto* oi_ind = indicator_mgr_.get_indicator_of_type<Indicators::OIIndicator>();
-        if (oi_ind && oi_ind->is_visible() && ctx_.candle_mgr().is_initial_load_complete()) {
-            const size_t current_count = ctx_.candle_mgr().count();
+        if (oi_ind && oi_ind->is_visible() && candles().is_initial_load_complete()) {
+            const size_t current_count = candles().count();
             // Only populate when we have OI data to work with (avoid spamming empty populate
             // while waiting for the async historical OI batch to arrive)
             const bool have_oi_data = !oi_ohlc_cache_.empty() || !oi_cache_.empty();
@@ -601,7 +716,7 @@ void ChartWidget::update() {
     // Skipped in Renko: the time-keyed overlays do not draw there, and
     // update_heatmap() reads last_visible_range_ as TIME (brick indices in Renko).
     if (!rt_mode_ && heatmap_enabled_ && ct_allows_time_overlays(chart_type_) &&
-        ctx_.candle_mgr().is_initial_load_complete()) {
+        candles().is_initial_load_complete()) {
         request_heatmap_data();  // First-time request, deferred from constructor
 
         update_heatmap();
@@ -612,14 +727,14 @@ void ChartWidget::update() {
     // Live census subscribes on the underlying-keyed HL pair. Its latest report
     // paints immediately; the separate bounded request adds recorded context.
     if (liq_census_enabled_ && ct_allows_time_overlays(chart_type_) &&
-        ctx_.candle_mgr().is_initial_load_complete() &&
+        candles().is_initial_load_complete() &&
         !liq_census_subscribed_ && !is_replay) {
         const StreamKey key{liq_census_pair_, Terminal::Stream::LiquidationLevels, 0};
         ctx_.stream_mgr().send_subscribe(key);
         liq_census_subscribed_ = true;
     }
     if (liq_census_enabled_ && Entitlements::is_pro() && liq_history_requested_ == 0 &&
-        ct_allows_time_overlays(chart_type_) && ctx_.candle_mgr().is_initial_load_complete() &&
+        ct_allows_time_overlays(chart_type_) && candles().is_initial_load_complete() &&
         !ctx_.replay_mgr().is_pack_mode()) {
         const int64_t end = is_replay ? ctx_.replay_mgr().interpolated_time_ms()
             : static_cast<int64_t>(emscripten_date_now());
@@ -640,8 +755,8 @@ void ChartWidget::set_liq_opacity(float v) {
 
 void ChartWidget::change_timeframe(const int new_tf_seconds)
 {
-    if (rt_mode_) set_chart_type(ChartType::Candles);
-    ctx_.candle_mgr().change_timeframe(new_tf_seconds);
+    if (rt_mode_) set_rt_mode(false);   // back to the pre-real-time chart type
+    candles().change_timeframe(new_tf_seconds);
     // The previous viewport is expressed in the old timeframe's domain. Reusing
     // it for even one frame makes the new timeframe's Y fit sample the wrong
     // candle window and can leave volatile symbols vertically compressed.
@@ -651,9 +766,18 @@ void ChartWidget::change_timeframe(const int new_tf_seconds)
     stored_x_min_ = 0.0;
     stored_x_max_ = 0.0;
     // Update ReplayManager's timeframe so scrubber ticks, candle-boundary
-    // snapping, and skip amounts use the correct timeframe.
-    if (ctx_.replayer) {
+    // snapping, and skip amounts use the correct timeframe. The replay clock
+    // follows the app-level manager, which only the primary chart drives: a
+    // secondary chart's timeframe is its own and must not re-time the replay.
+    if (ctx_.replayer && !owned_candles_ && !compare_) {
         ctx_.replay_mgr().set_timeframe_ms(static_cast<int64_t>(new_tf_seconds) * 1000);
+    }
+    // Linked charts read one time axis, so they read one timeframe too.
+    if (time_linked_) {
+        g_time_link.tf_seconds = new_tf_seconds;
+        g_time_link.tf_frame = ImGui::GetFrameCount();
+        g_time_link.tf_owner = link_id_;
+        link_tf_seen_frame_ = g_time_link.tf_frame;
     }
     ctx_.heatmap_mgr().set_timeframe(pair_, heatmap_mode_, ShaderHeatmapRenderer::candle_depth_seconds(new_tf_seconds));
     heatmap_data_requested_ = false;
@@ -720,7 +844,7 @@ void ChartWidget::change_timeframe(const int new_tf_seconds)
         funding_ind->set_timeframe(new_tf_seconds);
         // Re-request historical funding for new timeframe
         funding_history_requested_ = true;
-        const int count = static_cast<int>(ctx_.candle_mgr().count());
+        const int count = static_cast<int>(candles().count());
         ctx_.stream_mgr().request_historical_funding(pair_, new_tf_seconds, count > 0 ? count : 2880);
     }
     // Clear and reset OI indicator for new timeframe
@@ -746,12 +870,11 @@ void ChartWidget::render() {
     // TF-change path, not just the toolbar). Cheap int compare; the string is only
     // rebuilt on an actual change. The docking identity (after "###") is unchanged.
     {
-        const int64_t tf = ctx_.candle_mgr().timeframe_seconds();
+        const int64_t tf = candles().timeframe_seconds();
         if (tf != title_tf_seconds_) {
             title_tf_seconds_ = tf;
             timeframe_label_  = timeframe_to_string(tf);
-            title_ = std::string("     Chart  ") + widget_symbol_label(pair_.symbol) + " " + timeframe_label_ +
-                     "###chart_" + pair_.exchange + "_" + pair_.symbol;
+            rebuild_title();
         }
     }
 
@@ -765,6 +888,7 @@ void ChartWidget::render() {
     }
     ImGui::SetNextWindowClass(&window_class);
 
+    place_new_window();
     if (!ImGui::Begin(title_.c_str(), &is_open, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
@@ -816,14 +940,28 @@ void ChartWidget::render() {
                                    ImGui::GetContentRegionAvail().y);
         ImGui::SameLine(0.0f, 0.0f);
     }
-    ImGui::BeginChild("##chart_body", ImVec2(0, 0), false,
+    // Real-time owns its depth ladder: a column right of the chart body, so it
+    // is on screen exactly when the plot it aligns to is. Set before the plot,
+    // whose price scale keeps rows readable for it.
+    rt_dom_linked_ = rt_mode_ && rt_dom_shown_;
+    float ladder_width = 0.0f;
+    if (rt_dom_linked_) {
+        ImGui::PushFont(Theme::Fonts::mono_sm());
+        ladder_width = std::min(RealtimeDomLadder::preferred_width(),
+                                ImGui::GetContentRegionAvail().x * 0.45f);
+        ImGui::PopFont();
+    }
+    ImGui::BeginChild("##chart_body", ImVec2(ladder_width > 0.0f ? -ladder_width : 0.0f, 0), false,
                       ImGuiWindowFlags_NoScrollbar |
                           ImGuiWindowFlags_NoScrollWithMouse);
 
     if (chart_type_ != ChartType::Renko) {
         const bool selected = replay_selection_.start_ms != replay_selection_.end_ms;
         if (selected) {
-            ImGui::TextDisabled("Right-click range to investigate");
+            if (pair_.exchange == "binancef" && ImGui::SmallButton("Investigate selection")) {
+                const auto move = read_selected_move();
+                open_outcome_first_handoff(pair_, move.snap, move.range_minutes);
+            }
             // Stack at narrow widths rather than colliding with the hint.
             if (ImGui::GetContentRegionAvail().x > 490.0f) ImGui::SameLine(0, 12);
             if (ImGui::SmallButton("Clear selection")) replay_selection_ = {};
@@ -836,16 +974,16 @@ void ChartWidget::render() {
     // read "Follow live" / "Following live" at all times, which looked like a
     // second live mode next to the Real-time pill in the toolbar; the resting
     // state now draws nothing (the chart IS at the edge).
-    if (chart_type_ != ChartType::TPO && !ctx_.candle_mgr().follow_live()) {
+    if (chart_type_ != ChartType::TPO && !candles().follow_live()) {
         if (replay_selection_.start_ms != replay_selection_.end_ms &&
             ImGui::GetContentRegionAvail().x > 650.0f)
             ImGui::SameLine(0, 16);
         if (ImGui::SmallButton(ctx_.replay_mgr().is_active() ? "Jump to playhead" : "Jump to latest")) {
-            ctx_.candle_mgr().set_follow_live(true);
+            candles().set_follow_live(true);
         }
     }
     if (rt_mode_ && !rt_auto_price_) {
-        if (!ctx_.candle_mgr().follow_live()) ImGui::SameLine(0, 12);
+        if (!candles().follow_live()) ImGui::SameLine(0, 12);
         if (ImGui::SmallButton("Follow price")) {
             rt_auto_price_ = true;
             rt_price_window_ = {};
@@ -897,6 +1035,15 @@ void ChartWidget::render() {
 
     ImGui::EndChild();  // ##chart_body
     ImGui::PopStyleVar();
+    if (ladder_width > 0.0f) {
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::PushFont(Theme::Fonts::mono_sm());
+        ImGui::BeginChild("##rt_dom_ladder", ImVec2(0, 0), false,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        rt_dom_ladder_.render(rt_dom_frame_, fmt_, &rt_dom_shown_);
+        ImGui::EndChild();
+        ImGui::PopFont();
+    }
 
     ImGui::End();
 }
@@ -917,12 +1064,12 @@ void ChartWidget::render_chart() {
                                       : "Waiting for synchronized depth and trades...");
         return;
     }
-    const auto& timestamps = ctx_.candle_mgr().timestamps();
-    if (!rt_mode_ && timestamps.empty() && !ctx_.candle_mgr().has_building_candle()) {
+    const auto& timestamps = candles().timestamps();
+    if (!rt_mode_ && timestamps.empty() && !candles().has_building_candle()) {
         ImGui::Text("No candle data available");
         return;
     }
-    const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
+    const int64_t tf_sec = candles().timeframe_seconds();
     // Calculate X range. When no finalized candles exist yet (fresh/volatile
     // symbol still loading history, or replay before the first drip) the old
     // code anchored x_min at 0.0, so the axis spanned 1970 to now with a single
@@ -935,10 +1082,10 @@ void ChartWidget::render_chart() {
         x_max = timestamps.back();
     } else {
         int64_t anchor_ms;
-        if (ctx_.candle_mgr().has_building_candle()) {
-            anchor_ms = ctx_.candle_mgr().building_candle().timestamp_ms;
-        } else if (!ctx_.candle_mgr().tick_times().empty()) {
-            anchor_ms = ctx_.candle_mgr().tick_times().back();
+        if (candles().has_building_candle()) {
+            anchor_ms = candles().building_candle().timestamp_ms;
+        } else if (!candles().tick_times().empty()) {
+            anchor_ms = candles().tick_times().back();
         } else if (ctx_.replay_mgr().is_active()) {
             anchor_ms = ctx_.replay_mgr().interpolated_time_ms();
         } else {
@@ -946,13 +1093,13 @@ void ChartWidget::render_chart() {
                 std::chrono::system_clock::now().time_since_epoch()).count();
         }
         const int64_t span_ms =
-            static_cast<int64_t>(ctx_.candle_mgr().visible_candles_for_timeframe()) *
+            static_cast<int64_t>(candles().visible_candles_for_timeframe()) *
             tf_sec * 1000LL;
         x_max = static_cast<double>(anchor_ms);
         x_min = static_cast<double>(anchor_ms - span_ms);
     }
-    if (ctx_.candle_mgr().has_building_candle()) {
-        x_max = std::max(x_max, static_cast<double>(ctx_.candle_mgr().building_candle().timestamp_ms));
+    if (candles().has_building_candle()) {
+        x_max = std::max(x_max, static_cast<double>(candles().building_candle().timestamp_ms));
     }
     const double x_padding = static_cast<double>(tf_sec) * 1000.0 * 3.0;
     x_max += x_padding;
@@ -980,11 +1127,11 @@ void ChartWidget::render_chart() {
         x_max = std::max(x_max, preview_max);
     }
 
-    if (ctx_.candle_mgr().follow_live()) {
-        const size_t visible_candles = ctx_.candle_mgr().visible_candles_for_timeframe();
-        if (ctx_.candle_mgr().count() > visible_candles) {
-            const auto& candles = ctx_.candle_mgr().candles();
-            x_min = static_cast<double>(candles[candles.size() - visible_candles].timestamp_ms);
+    if (candles().follow_live()) {
+        const size_t visible_candles = candles().visible_candles_for_timeframe();
+        if (candles().count() > visible_candles) {
+            const auto& series = candles().candles();
+            x_min = static_cast<double>(series[series.size() - visible_candles].timestamp_ms);
         }
     }
 
@@ -1015,7 +1162,7 @@ void ChartWidget::render_chart() {
             : std::chrono::duration_cast<std::chrono::milliseconds>(
                   std::chrono::system_clock::now().time_since_epoch()).count();
         const double span_ms =
-            static_cast<double>(ctx_.candle_mgr().visible_candles_for_timeframe()) *
+            static_cast<double>(candles().visible_candles_for_timeframe()) *
             static_cast<double>(tf_sec) * 1000.0;
         x_max = static_cast<double>(anchor_ms) + x_padding;
         x_min = x_max - span_ms;
@@ -1027,7 +1174,7 @@ void ChartWidget::render_chart() {
     // normal follow_live() X/Y path (above / below) takes over. Wheel zoom keeps
     // following; deliberate pan clears the latch in handle_plot_interaction.
     if (rt_mode_ && !rt_was_on_) {
-        ctx_.candle_mgr().set_follow_live(true);
+        candles().set_follow_live(true);
     }
     rt_was_on_ = rt_mode_;
     if (rt_mode_) {
@@ -1112,7 +1259,7 @@ void ChartWidget::render_chart() {
         const double min_x_span = rt_mode_ ? 5000.0 : kMinVisibleCandles * timeframe_ms;
         const double max_x_span = rt_mode_ ? (double(RealtimeArchive::target_ms) / 0.88) : kMaxVisibleCandles * timeframe_ms;
         bool zoom_clamped = false;
-        if (!ctx_.candle_mgr().follow_live() && chart_type_ != ChartType::TPO) {
+        if (!candles().follow_live() && chart_type_ != ChartType::TPO) {
             const double span = last_visible_range_.X.Max - last_visible_range_.X.Min;
             if (span > 0.0 && (span < min_x_span || span > max_x_span)) {
                 const double clamped_span = std::clamp(span, min_x_span, max_x_span);
@@ -1138,19 +1285,21 @@ void ChartWidget::render_chart() {
         } else if (chart_type_ == ChartType::TPO) {
             // TPO mode: don't follow live - let user control zoom freely
             ImPlot::SetupAxisLimits(ImAxis_X1, x_min, x_max, ImPlotCond_Once);
-        } else if (ctx_.candle_mgr().follow_live() || zoom_clamped) {
-            ImPlot::SetupAxisLimits(ImAxis_X1,
-                zoom_clamped ? last_visible_range_.X.Min : x_min,
-                zoom_clamped ? last_visible_range_.X.Max : x_max,
-                ImPlotCond_Always);
         } else {
-            ImPlot::SetupAxisLimits(ImAxis_X1, x_min, x_max, ImPlotCond_Once);
+            // A linked follower takes the group's axis verbatim (see
+            // time_link_apply); otherwise the chart's own follow/zoom rules.
+            double lx_min = zoom_clamped ? last_visible_range_.X.Min : x_min;
+            double lx_max = zoom_clamped ? last_visible_range_.X.Max : x_max;
+            bool force_always = candles().follow_live() || zoom_clamped;
+            time_link_apply(lx_min, lx_max, force_always);
+            ImPlot::SetupAxisLimits(ImAxis_X1, lx_min, lx_max,
+                                    force_always ? ImPlotCond_Always : ImPlotCond_Once);
         }
         // Y-axis from VISIBLE candles only.
         // timestamps are sorted ascending → binary-search the visible index
         // range instead of scanning ALL loaded candles (up to 200k after
         // scroll-back) every frame. FPS item, 2026-07-05.
-        const bool use_follow_range = ctx_.candle_mgr().follow_live() &&
+        const bool use_follow_range = candles().follow_live() &&
                                       chart_type_ != ChartType::TPO;
         const double visible_x_min = use_follow_range || last_visible_range_.X.Min <= 0
             ? x_min : last_visible_range_.X.Min;
@@ -1158,8 +1307,8 @@ void ChartWidget::render_chart() {
             ? x_max : last_visible_range_.X.Max;
         double y_min = std::numeric_limits<double>::infinity();
         double y_max = -std::numeric_limits<double>::infinity();
-        const auto& lows = ctx_.candle_mgr().lows();
-        const auto& highs = ctx_.candle_mgr().highs();
+        const auto& lows = candles().lows();
+        const auto& highs = candles().highs();
         {
             ProfileScope _ps("YLimits");
             const auto lo_it = std::lower_bound(timestamps.begin(), timestamps.end(), visible_x_min);
@@ -1172,8 +1321,8 @@ void ChartWidget::render_chart() {
             }
         }
         // Include building candle if visible
-        if (ctx_.candle_mgr().has_building_candle()) {
-            const auto& bc = ctx_.candle_mgr().building_candle();
+        if (candles().has_building_candle()) {
+            const auto& bc = candles().building_candle();
             if (bc.timestamp_ms >= visible_x_min && bc.timestamp_ms <= visible_x_max) {
                 y_min = std::min(y_min, bc.low);
                 y_max = std::max(y_max, bc.high);
@@ -1199,7 +1348,7 @@ void ChartWidget::render_chart() {
                 const double ghost_from =
                     static_cast<double>(ctx_.replay_mgr().interpolated_time_ms());
                 const double ghost_to =
-                    ctx_.candle_mgr().follow_live() ? x_max : visible_x_max;
+                    candles().follow_live() ? x_max : visible_x_max;
                 double plo = 0.0, phi = 0.0;
                 if (ghost_to > ghost_from &&
                     pv->minmax_in_range(ghost_from, ghost_to, plo, phi)) {
@@ -1268,11 +1417,11 @@ void ChartWidget::render_chart() {
                 // No candles at all yet: anchor a thin band around the best known
                 // price so a fresh/volatile symbol never shows a degenerate 0..1
                 // axis on RT load. Building close, else last close, else newest tick.
-                double ref = ctx_.candle_mgr().last_close_price();
-                if (ref <= 0.0 && ctx_.candle_mgr().has_building_candle())
-                    ref = ctx_.candle_mgr().building_candle().close;
-                if (ref <= 0.0 && !ctx_.candle_mgr().tick_prices().empty())
-                    ref = ctx_.candle_mgr().tick_prices().back();
+                double ref = candles().last_close_price();
+                if (ref <= 0.0 && candles().has_building_candle())
+                    ref = candles().building_candle().close;
+                if (ref <= 0.0 && !candles().tick_prices().empty())
+                    ref = candles().tick_prices().back();
                 if (ref > 0.0) { y_min = ref * 0.995; y_max = ref * 1.005; }
                 else { y_min = 0; y_max = 1; }
             }
@@ -1283,6 +1432,26 @@ void ChartWidget::render_chart() {
             y_min = center - half;
             y_max = center + half;
         }
+#ifdef EDGEDEPTH_EXPOSURE_V2_DEV
+        // Fit only currently accepted display data, and only when the user asked
+        // for it: the scenario bands sit about 7% from price, so chasing them by
+        // default squashes the candles into a line. Exact and average histories
+        // remain separate. Summary bin edges use the unchanged source grid.
+        if (exposure_enabled_ && exposure_fit_bands_ && !rt_mode_ && chart_type_==ChartType::Candles) {
+            if (exposure_averages_) {
+                if (const auto* summary=exposure_summary_.view(exposure_clock_)) for (const auto& column:summary->columns) {
+                    if (column.end<visible_x_min || column.start>visible_x_max) continue;
+                    for (const auto& cell:column.cells) if (exposure::shown(cell.band,exposure_display_)) {
+                        y_min=std::min(y_min,cell.band.low);y_max=std::max(y_max,cell.band.high);
+                    }
+                }
+            } else if (const auto* timeline=exposure_history_.view())
+                exposure::rectangles(*timeline,exposure_clock_,[&](auto&,const exposure::Band& band,int64_t begin,int64_t end) {
+                    if (end<visible_x_min || begin>visible_x_max || !exposure::shown(band,exposure_display_)) return;
+                    y_min=std::min(y_min,band.low);y_max=std::max(y_max,band.high);
+                });
+        }
+#endif
         const double y_span = y_max - y_min;
         const double y_padding = y_span > 0.0
             ? y_span * 0.08
@@ -1399,10 +1568,13 @@ void ChartWidget::render_chart() {
             }
             render_heatmap_tooltip();
         }
-        if (rt_mode_ && rt_renderer_ && heatmap_enabled_) {
+        if (rt_mode_ && rt_renderer_ && rt_depth_enabled_) {
             configure_depth_fidelity(*rt_renderer_);
             rt_renderer_->render_cells(rt_renderer_->get_column_interval_ms(), heatmap_sensitivity_, false, rt_extend_depth_ && (!rt_history_view_ || realtime_live_edge()));
         }
+#ifdef EDGEDEPTH_EXPOSURE_V2_DEV
+        render_exposure_v2(heatmap_replay_cutoff>0?heatmap_replay_cutoff:int64_t(emscripten_date_now()));
+#endif
         // 1.5 Liquidation timeline heatmap (the predictive shader map) -- ENABLED 2026-06-27.
         //     Re-enabled on the L1 footprint-located estimator field (peaky + persistent on the
         //     scoreboard + offline render). Per-level brightness is the per-tier USD with a
@@ -1451,8 +1623,8 @@ void ChartWidget::render_chart() {
             ProfileScope _ps("Candles");
             // Real building-candle OHLC (used by Candles / FP).
             BuildingOHLC bld{0, 0, 0, 0, false};
-            if (ctx_.candle_mgr().has_building_candle()) {
-                const auto& bc = ctx_.candle_mgr().building_candle();
+            if (candles().has_building_candle()) {
+                const auto& bc = candles().building_candle();
                 bld = {bc.open, bc.high, bc.low, bc.close, true};
             }
             if (!rt_mode_) switch (chart_type_) {
@@ -1466,11 +1638,11 @@ void ChartWidget::render_chart() {
                     // Heikin Ashi: same plot_candles tiers, HA arrays as the source.
                     // The building HA candle is derived per frame from the last
                     // finalized HA pair (falls back to the seed when none exists).
-                    const auto& ha_o = ctx_.candle_mgr().ha_opens();
-                    const auto& ha_c = ctx_.candle_mgr().ha_closes();
+                    const auto& ha_o = candles().ha_opens();
+                    const auto& ha_c = candles().ha_closes();
                     BuildingOHLC ha_bld{0, 0, 0, 0, false};
-                    if (ctx_.candle_mgr().has_building_candle()) {
-                        const auto& bc = ctx_.candle_mgr().building_candle();
+                    if (candles().has_building_candle()) {
+                        const auto& bc = candles().building_candle();
                         const double hb_close = (bc.open + bc.high + bc.low + bc.close) * 0.25;
                         const double hb_open  = (!ha_o.empty())
                             ? (ha_o.back() + ha_c.back()) * 0.5
@@ -1480,8 +1652,8 @@ void ChartWidget::render_chart() {
                         ha_bld = {hb_open, hb_high, hb_low, hb_close, true};
                     }
                     plot_candles(visible_x_min, visible_x_max,
-                                 ctx_.candle_mgr().ha_opens(), ctx_.candle_mgr().ha_highs(),
-                                 ctx_.candle_mgr().ha_lows(),  ctx_.candle_mgr().ha_closes(),
+                                 candles().ha_opens(), candles().ha_highs(),
+                                 candles().ha_lows(),  candles().ha_closes(),
                                  ha_bld);
                     break;
                 }
@@ -1491,8 +1663,8 @@ void ChartWidget::render_chart() {
                 case ChartType::Renko:
                 default:
                     plot_candles(visible_x_min, visible_x_max,
-                                 ctx_.candle_mgr().opens(), ctx_.candle_mgr().highs(),
-                                 ctx_.candle_mgr().lows(),  ctx_.candle_mgr().closes(), bld);
+                                 candles().opens(), candles().highs(),
+                                 candles().lows(),  candles().closes(), bld);
                     break;
             }
         }
@@ -1548,14 +1720,14 @@ void ChartWidget::render_chart() {
         if (chart_type_ != ChartType::TPO && !ctx_.replay_mgr().is_loading()) {
             double cur_price = 0.0;
             bool have_price = false, bullish = true;
-            if (ctx_.candle_mgr().has_building_candle()) {
-                const auto& bc = ctx_.candle_mgr().building_candle();
+            if (candles().has_building_candle()) {
+                const auto& bc = candles().building_candle();
                 cur_price = bc.close;
                 bullish = bc.close >= bc.open;
                 have_price = true;
-            } else if (!ctx_.candle_mgr().closes().empty()) {
-                const auto& cl = ctx_.candle_mgr().closes();
-                const auto& op = ctx_.candle_mgr().opens();
+            } else if (!candles().closes().empty()) {
+                const auto& cl = candles().closes();
+                const auto& op = candles().opens();
                 cur_price = cl.back();
                 bullish = cl.back() >= op.back();
                 have_price = true;
@@ -1581,6 +1753,7 @@ void ChartWidget::render_chart() {
         // handle_plot_interaction so captures_mouse() gates the chart's own
         // handlers the same frame. (The input-map override is applied in
         // begin_frame, before BeginPlot - too late to matter from here.)
+        render_liquidity_response();
         render_reference_context();
         drawing_layer_.render_in_plot(ctx_, fmt_,
                                       ct_allows_time_overlays(chart_type_),
@@ -1591,9 +1764,94 @@ void ChartWidget::render_chart() {
         last_visible_range_ = ImPlot::GetPlotLimits();
         x_axis_min_ = last_visible_range_.X.Min;
         x_axis_max_ = last_visible_range_.X.Max;
+        // Linked charts: mirror the other chart's crosshair time, and publish
+        // this chart's axis + hover for the rest of the group.
+        if (time_linked_ && !rt_mode_ && chart_type_ != ChartType::TPO) {
+            time_link_draw_mirror();
+            time_link_publish();
+        }
         ImPlot::EndPlot();
     }
     ImPlot::PopStyleVar(2);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Time link (compare replay): one axis, one crosshair time, one timeframe
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Follower side, before BeginPlot's X setup. The owner is whichever linked
+// chart the mouse is over (it drives the axis); when nothing is hovered the
+// last owner keeps publishing, so a follower keeps tracking it. Ownership
+// is a frame stamp: an owner that stopped rendering releases the group.
+void ChartWidget::time_link_apply(double& x_min, double& x_max, bool& force_always) {
+    if (!time_linked_ || rt_mode_ || chart_type_ == ChartType::TPO) return;
+    const int frame = ImGui::GetFrameCount();
+    const TimeLink& l = g_time_link;
+    if (l.owner == 0 || l.owner == link_id_ || l.owner_frame < frame - 2) return;
+    if (l.follow) {
+        // Both follow the same clock at the same timeframe: the chart's own
+        // follow range already lands on the owner's. Match the latch only.
+        if (!candles().follow_live()) candles().set_follow_live(true);
+        return;
+    }
+    if (candles().follow_live()) candles().set_follow_live(false);
+    if (l.x_max > l.x_min) {
+        x_min = l.x_min;
+        x_max = l.x_max;
+        last_visible_range_.X.Min = l.x_min;
+        last_visible_range_.X.Max = l.x_max;
+        force_always = true;
+    }
+}
+
+// Owner side, after the plot: the hovered chart takes ownership; the current
+// owner re-stamps every frame it renders so followers keep tracking.
+void ChartWidget::time_link_publish() {
+    const int frame = ImGui::GetFrameCount();
+    TimeLink& l = g_time_link;
+    const bool hovered = ImPlot::IsPlotHovered() || ImPlot::IsAxisHovered(ImAxis_X1);
+    const bool owner_gone = l.owner == 0 || l.owner_frame < frame - 2;
+    if (hovered || owner_gone || l.owner == link_id_) {
+        l.owner = link_id_;
+        l.owner_frame = frame;
+        l.x_min = last_visible_range_.X.Min;
+        l.x_max = last_visible_range_.X.Max;
+        l.follow = candles().follow_live();
+    }
+    if (hovered) {
+        l.hover_owner = link_id_;
+        l.hover_frame = frame;
+        l.hover_x = ImPlot::GetPlotMousePos().x;
+    }
+}
+
+// A dashed vertical at the other chart's crosshair time. Drawn inside the
+// plot (clip rect), so it never leaks over the axes.
+void ChartWidget::time_link_draw_mirror() {
+    const TimeLink& l = g_time_link;
+    const int frame = ImGui::GetFrameCount();
+    if (l.hover_owner == 0 || l.hover_owner == link_id_ || l.hover_frame < frame - 1) return;
+    const ImPlotRect lim = ImPlot::GetPlotLimits();
+    if (l.hover_x < lim.X.Min || l.hover_x > lim.X.Max) return;
+    ImPlot::PushPlotClipRect();
+    ImDrawList* dl = ImPlot::GetPlotDrawList();
+    const float x = ImPlot::PlotToPixels(l.hover_x, lim.Y.Min).x;
+    const ImVec2 top(x, ImPlot::GetPlotPos().y);
+    const float bottom = ImPlot::GetPlotPos().y + ImPlot::GetPlotSize().y;
+    const ImU32 col = Theme::u32(Theme::Tokens::BRAND, 0.55f);
+    // 6 px dash, 4 px gap.
+    for (float y = top.y; y < bottom; y += 10.0f)
+        dl->AddLine(ImVec2(x, y), ImVec2(x, std::min(y + 6.0f, bottom)), col, 1.0f);
+    ImPlot::PopPlotClipRect();
+}
+
+// Per frame (update): adopt a timeframe another linked chart switched to.
+void ChartWidget::time_link_adopt_timeframe() {
+    if (!time_linked_) return;
+    const TimeLink& l = g_time_link;
+    if (l.tf_seconds <= 0 || l.tf_owner == link_id_ || l.tf_frame <= link_tf_seen_frame_) return;
+    link_tf_seen_frame_ = l.tf_frame;
+    if (candles().timeframe_seconds() != l.tf_seconds) change_timeframe(l.tf_seconds);
 }
 
 
@@ -1626,9 +1884,9 @@ double ChartWidget::renko_resolved_size() {
     }
     // ATR not ready yet (too few candles) → temporary %-of-price size, NOT frozen,
     // so it re-resolves to ATR next frame once candles have loaded.
-    double ref = ctx_.candle_mgr().last_close_price();
-    if (ref <= 0.0 && !ctx_.candle_mgr().closes().empty())
-        ref = ctx_.candle_mgr().closes().back();
+    double ref = candles().last_close_price();
+    if (ref <= 0.0 && !candles().closes().empty())
+        ref = candles().closes().back();
     const int tmp = RenkoBuilder::auto_brick_ticks(ref, tick_size_);
     return static_cast<double>(std::max(1, tmp)) * tick_size_;
 }
@@ -1636,9 +1894,9 @@ double ChartWidget::renko_resolved_size() {
 // Average True Range over the most recent `period` CLOSED candles (price units).
 // 0 when there are too few candles.
 double ChartWidget::renko_atr(int period) const {
-    const auto& highs  = ctx_.candle_mgr().highs();
-    const auto& lows   = ctx_.candle_mgr().lows();
-    const auto& closes = ctx_.candle_mgr().closes();
+    const auto& highs  = candles().highs();
+    const auto& lows   = candles().lows();
+    const auto& closes = candles().closes();
     const size_t n = std::min({highs.size(), lows.size(), closes.size()});
     if (period < 1 || n < static_cast<size_t>(period) + 1) return 0.0;
     double sum = 0.0;
@@ -1655,9 +1913,9 @@ double ChartWidget::renko_atr(int period) const {
 // size / timeframe change, then fold the building candle in per frame.
 void ChartWidget::ensure_renko() {
     const double bsize = renko_resolved_size();
-    const auto& closes = ctx_.candle_mgr().closes();
-    const auto& ts     = ctx_.candle_mgr().timestamps();
-    const int64_t tf   = ctx_.candle_mgr().timeframe_seconds();
+    const auto& closes = candles().closes();
+    const auto& ts     = candles().timestamps();
+    const int64_t tf   = candles().timeframe_seconds();
     const size_t  n    = std::min(closes.size(), ts.size());
     // Key on the last CLOSED candle's TIMESTAMP, never its close. The client
     // mutates a closed candle's close during replay (finalize-replace, late
@@ -1696,8 +1954,8 @@ void ChartWidget::ensure_renko() {
     // those stay append-only and permanent. On candle close they hand off to
     // committed. fold_building() clears the list first, so with no building candle
     // (passing the last committed close) it simply stays empty.
-    if (ctx_.candle_mgr().has_building_candle()) {
-        const auto& bc = ctx_.candle_mgr().building_candle();
+    if (candles().has_building_candle()) {
+        const auto& bc = candles().building_candle();
         renko_.fold_building(bc.close, bc.timestamp_ms);
     } else {
         renko_.fold_building(n > 0 ? closes[n - 1] : 0.0,
@@ -1793,7 +2051,7 @@ void ChartWidget::setup_renko_axis_ticks(double vis_i_min, double vis_i_max) con
 }
 
 void ChartWidget::render_chart_renko() {
-    const bool follow = ctx_.candle_mgr().follow_live();
+    const bool follow = candles().follow_live();
 
     // ── Scroll-load view stability (capture BEFORE ensure_renko may rebuild) ──
     // A historical prepend shifts every brick index right; anchor the view to the
@@ -1893,12 +2151,12 @@ void ChartWidget::render_chart_renko() {
         // Live price (REAL close, never a brick level) - drives the forming brick,
         // the current-price tag, AND the Y-limits (so the forming tip never clips).
         double cur_price = 0.0; bool have_price = false, bullish = true;
-        if (ctx_.candle_mgr().has_building_candle()) {
-            const auto& bc = ctx_.candle_mgr().building_candle();
+        if (candles().has_building_candle()) {
+            const auto& bc = candles().building_candle();
             cur_price = bc.close; bullish = bc.close >= bc.open; have_price = true;
-        } else if (!ctx_.candle_mgr().closes().empty()) {
-            const auto& cl = ctx_.candle_mgr().closes();
-            const auto& op = ctx_.candle_mgr().opens();
+        } else if (!candles().closes().empty()) {
+            const auto& cl = candles().closes();
+            const auto& op = candles().opens();
             cur_price = cl.back(); bullish = cl.back() >= op.back(); have_price = true;
         }
 
@@ -2013,7 +2271,7 @@ void ChartWidget::render_chart_renko() {
         if (ImPlot::IsPlotHovered()) {
             if (ImGui::GetIO().MouseWheel != 0 ||
                 ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
-                ctx_.candle_mgr().set_follow_live(false);
+                candles().set_follow_live(false);
             }
             const ImPlotPoint m = ImPlot::GetPlotMousePos();
             // R key → replay from the brick under the cursor → focused view.
@@ -2021,7 +2279,7 @@ void ChartWidget::render_chart_renko() {
                 !ImGui::GetIO().WantTextInput && !ctx_.replay_mgr().is_active()) {
                 const int64_t t = brick_time_at(m.x);
                 if (t > 0)
-                    ctx_.replay_mgr().open_focused_replay_at(pair_.symbol, t);
+                    ctx_.replay_mgr().open_focused_replay_at(pair_.exchange, pair_.symbol, t);
             }
             // Right-click → context menu (replay actions) anchored at the brick time.
             if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
@@ -2072,41 +2330,23 @@ void ChartWidget::render_chart_renko() {
         }
         // Renko context menu (rendered every frame so it stays open once opened) -
         // replay actions keyed to the brick's source-candle time, plus copy price.
-        // 450 wide (measured): narrower clipped the MenuItem shortcut values
-        // the replay datetime, the copy price). The widest label ("Replay
-        // range (shift-drag to select)") sets the label column; the replay
-        // datetime needs ~120px after it.
-        ImGui::SetNextWindowSize(ImVec2(450.0f, 0.0f));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 8));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, Theme::Radius::R3);
-        ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 4));
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(14, 11));
-        ImGui::PushStyleColor(ImGuiCol_PopupBg, Theme::Tokens::PANEL);
-        ImGui::PushStyleColor(ImGuiCol_Border, Theme::Tokens::BD2);
-        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, Theme::Tokens::ELEV);
-        ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::TX1);
-        if (Theme::begin_popup("##RenkoCtx")) {
-            // Menu chrome is monospace (JetBrains Mono) to match the design (1f).
-            ImGui::PushFont(Theme::Fonts::mono_sm());
+        // Same rows as the candle menu, and like it the menu sizes to them.
+        if (Theme::begin_menu("##RenkoCtx", 280.0f)) {
             // The research reads - same placement rule as the candle menu:
             // they sit above the replay block.
             render_investigate_menu_item(pair_, context_menu_minute_ms_, context_menu_move_.snap,
                                          context_menu_move_.range_minutes);
-            ImGui::Separator();
-            // Replay actions (entitlement-gated inside): Start Replay · <time>,
-            // Stop Replay · Esc. No range (shift-drag select is off in Renko).
+            Theme::menu_separator();
+            // Replay actions (entitlement-gated inside). No range: shift-drag
+            // select is off in Renko.
             ctx_.replay_mgr().render_chart_context_menu(
-                pair_.symbol, context_menu_time_ms_,
-                ctx_.candle_mgr().timeframe_seconds(), 0, 0);
-            ImGui::Separator();
+                pair_.exchange, pair_.symbol, context_menu_time_ms_,
+                candles().timeframe_seconds(), 0, 0);
+            Theme::menu_separator();
             char pbc[32]; fmt_.format_price(pbc, sizeof(pbc), context_menu_price_);
-            if (ImGui::MenuItem("Copy price", pbc)) ImGui::SetClipboardText(pbc);
-            ImGui::PopFont();
+            if (Theme::menu_item(drawing::UiIcon::Copy, "Copy price", pbc)) ImGui::SetClipboardText(pbc);
             ImGui::EndPopup();
         }
-        ImGui::PopStyleColor(4);
-        ImGui::PopStyleVar(5);
 
         last_visible_range_ = ImPlot::GetPlotLimits();
         x_axis_min_ = last_visible_range_.X.Min;
@@ -2154,13 +2394,13 @@ void ChartWidget::render_renko_settings_popup() {
 
 // OHLCV readout - top-left overlay, hovered candle (or latest when idle)
 void ChartWidget::draw_ohlc_readout() const {
-    const auto& ts = ctx_.candle_mgr().timestamps();
+    const auto& ts = candles().timestamps();
     if (ts.empty()) return;
-    const auto& opens  = ctx_.candle_mgr().opens();
-    const auto& highs  = ctx_.candle_mgr().highs();
-    const auto& lows   = ctx_.candle_mgr().lows();
-    const auto& closes = ctx_.candle_mgr().closes();
-    const auto& vols   = ctx_.candle_mgr().volumes();
+    const auto& opens  = candles().opens();
+    const auto& highs  = candles().highs();
+    const auto& lows   = candles().lows();
+    const auto& closes = candles().closes();
+    const auto& vols   = candles().volumes();
 
     // hovered candle, else most recent
     size_t idx = ts.size() - 1;
@@ -2255,7 +2495,7 @@ void ChartWidget::plot_candles(double visible_x_min, double visible_x_max,
                                const std::vector<double>& src_closes,
                                const BuildingOHLC& bld) {
     ImDrawList* draw_list = ImPlot::GetPlotDrawList();
-    const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
+    const int64_t tf_sec = candles().timeframe_seconds();
     const double timeframe_ms = chart_type_ == ChartType::FlowPositioning ? 60000.0 : static_cast<double>(tf_sec) * 1000.0;
     const double half_width = timeframe_ms * 0.35;  // ~70% body, ~30% gap (was 0.49 = no gap)
     const bool fp_thin = ctx_.footprint_mgr().enabled;  // Thin candle body when FP active
@@ -2277,7 +2517,7 @@ void ChartWidget::plot_candles(double visible_x_min, double visible_x_max,
     ImPlot::PushPlotClipRect();
     // X axis is always the REAL timestamps; OHLC comes from the passed source
     // spans (real arrays for Candles/FP, derived HA arrays for Heikin Ashi).
-    const auto& timestamps = ctx_.candle_mgr().timestamps();
+    const auto& timestamps = candles().timestamps();
     const auto& opens = src_opens;
     const auto& closes = src_closes;
     const auto& lows = src_lows;
@@ -2288,8 +2528,8 @@ void ChartWidget::plot_candles(double visible_x_min, double visible_x_max,
     // finalized candle drawn while the live price tag (= building close) floats above
     // it. Skip the stale finalized one in the loops below and ALWAYS draw the building
     // candle, so the rendered live candle's close sits on the price tag.
-    const double building_x = ctx_.candle_mgr().has_building_candle()
-        ? static_cast<double>(ctx_.candle_mgr().building_candle().timestamp_ms) : -1.0;
+    const double building_x = candles().has_building_candle()
+        ? static_cast<double>(candles().building_candle().timestamp_ms) : -1.0;
     // Safety: OHLC spans must be parallel to the timestamps (HA cache is built
     // from the same deque, so this holds; guard against a transient mismatch).
     const size_t n_draw = std::min({timestamps.size(), opens.size(),
@@ -2392,90 +2632,111 @@ void ChartWidget::plot_candles(double visible_x_min, double visible_x_max,
 // Line chart (ChartType::Line) - a close-price polyline vs time. Real-time
 // resolution (§5.1): the recent-tick ring buffer (CandleManager::tick_times /
 // tick_prices) supplies points across the window it covers, so the line moves
-// tick-by-tick; for the region OLDER than the oldest retained tick we fall back
-// to finalized candle closes; the building candle's (timestamp, close) is the
-// final live point. When points-per-pixel is high, the stream is min/max
-// decimated to one vertical segment per pixel column so a fast market stays a
-// clean, cheap line. Stroked with the up/accent Theme token; culled to the rect.
+// tick-by-tick; for the bars OLDER than that window we fall back to finalized
+// candle closes. A candle bar is drawn CENTRED on its period's open time
+// (draw_single_candle spans timestamps[i] +/- 0.35 tf) and its close vertex
+// sits there too, while the period's trades run from open to open + tf, so
+// ticks are shifted back by half a period - the candle-bubble convention
+// (render_candle_bubbles) - and each period's ticks land inside its own bar.
+// The newest tick is the live point; the building candle's close stands in
+// only until its first trade arrives (a close at the period's OPEN time after
+// newer ticks sent the stroke back in time and drew an arrowhead at the live
+// end). When points-per-pixel is high, the stream is decimated per pixel
+// column to first / min / max / last, so a fast market stays a clean, cheap
+// line that still ends on the newest tick. Stroked with the up/accent token.
 void ChartWidget::plot_line(double visible_x_min, double visible_x_max) {
     ImDrawList* draw_list = ImPlot::GetPlotDrawList();
-    // Pixel clipping is handled by PushPlotClipRect below; culling here is by the
-    // visible X range in add_point().
-    const auto& timestamps = ctx_.candle_mgr().timestamps();
-    const auto& closes     = ctx_.candle_mgr().closes();
-    const auto& tick_times  = ctx_.candle_mgr().tick_times();
-    const auto& tick_prices = ctx_.candle_mgr().tick_prices();
+    const auto& timestamps = candles().timestamps();
+    const auto& closes     = candles().closes();
+    const auto& tick_times  = candles().tick_times();
+    const auto& tick_prices = candles().tick_prices();
+    const double shift_ms = static_cast<double>(candles().timeframe_seconds()) * 500.0;
 
-    // Oldest retained tick time: candle closes cover strictly OLDER than this so
-    // the two sources do not double-plot the same region.
+    // Oldest retained tick in bar coordinates: candle closes cover only the bars
+    // strictly left of it, so the two sources never double-plot a region and the
+    // seam stays monotone in X (the bar holding that tick is tick-owned).
     const bool have_ticks = !tick_times.empty();
-    const int64_t tick_floor_ms = have_ticks
-        ? tick_times.front() : std::numeric_limits<int64_t>::max();
+    const double tick_floor_x = have_ticks
+        ? static_cast<double>(tick_times.front()) - shift_ms
+        : std::numeric_limits<double>::max();
 
-    // Per-pixel-column min/max decimation: as we walk points left→right we keep
-    // one column open at a time, emitting its min and max (in plot Y) before
-    // moving to the next column. This preserves spikes at ~2 points per column.
+    // Per-pixel-column decimation: as we walk points left→right we keep one
+    // column open at a time and emit its first point, its two extremes in the
+    // order they occurred, and its last point. The stroke enters and leaves
+    // every column where the data did, so the live end IS the newest tick.
     line_pts_.clear();
-    int    cur_col   = std::numeric_limits<int>::min();
-    ImVec2 col_first{}, col_min{}, col_max{};
-    bool   col_open  = false;
+    int    cur_col = std::numeric_limits<int>::min();
+    ImVec2 col_first{}, col_last{}, col_min{}, col_max{};
+    int    col_seq = 0, col_min_seq = 0, col_max_seq = 0;
+    bool   col_open = false;
 
     auto flush_col = [&]() {
         if (!col_open) return;
-        // Emit in a stable order so the polyline stays monotone in X: first the
-        // column's entry point, then its extreme-low and extreme-high pixels.
-        line_pts_.push_back(col_first);
-        if (col_min.y != col_first.y) line_pts_.push_back(col_min);
-        if (col_max.y != col_first.y && col_max.y != col_min.y) line_pts_.push_back(col_max);
+        const size_t base = line_pts_.size();
+        auto push = [&](const ImVec2& p) {
+            // The same pixel row twice in one column adds nothing to the stroke.
+            if (line_pts_.size() > base && line_pts_.back().y == p.y) return;
+            line_pts_.push_back(p);
+        };
+        push(col_first);
+        if (col_min_seq <= col_max_seq) { push(col_min); push(col_max); }
+        else                            { push(col_max); push(col_min); }
+        push(col_last);
         col_open = false;
     };
     auto add_point = [&](double x_ms, double price) {
-        if (x_ms < visible_x_min || x_ms > visible_x_max) return;  // X cull
         const ImVec2 px = ImPlot::PlotToPixels(x_ms, price);
         const int col = static_cast<int>(px.x);
         if (col != cur_col) {
             flush_col();
-            cur_col  = col;
-            col_first = px;
-            col_min   = px;
-            col_max   = px;
+            cur_col   = col;
+            col_first = col_last = col_min = col_max = px;
+            col_seq   = col_min_seq = col_max_seq = 0;
             col_open  = true;
         } else {
-            if (px.y < col_min.y) col_min = px;   // lower pixel y = higher price
-            if (px.y > col_max.y) col_max = px;
+            ++col_seq;
+            col_last = px;
+            if (px.y < col_min.y) { col_min = px; col_min_seq = col_seq; }  // lower pixel y = higher price
+            if (px.y > col_max.y) { col_max = px; col_max_seq = col_seq; }
         }
     };
+    // One point past each edge of the window so the stroke enters and leaves
+    // off-plot instead of starting inside it; PushPlotClipRect clips the rest.
 
-    // 1) Candle-close fallback for the region older than the oldest tick.
+    // 1) Candle closes, at the bar centre, for the bars left of the tick region.
     if (!timestamps.empty()) {
         const auto it = std::ranges::lower_bound(timestamps, visible_x_min);
-        size_t i0 = 0;
-        if (it != timestamps.begin())
-            i0 = static_cast<size_t>(std::distance(timestamps.cbegin(), it)) - 1;
+        size_t i0 = static_cast<size_t>(std::distance(timestamps.cbegin(), it));
+        if (i0 > 0) --i0;
         const size_t n = std::min(timestamps.size(), closes.size());
         for (size_t i = i0; i < n; i++) {
-            if (timestamps[i] > visible_x_max) break;
-            if (static_cast<int64_t>(timestamps[i]) >= tick_floor_ms) break;  // ticks own this
+            if (timestamps[i] >= tick_floor_x) break;  // ticks own this bar
             add_point(timestamps[i], closes[i]);
+            if (timestamps[i] > visible_x_max) break;
         }
     }
 
-    // 2) Tick region (newest, high-resolution). Binary-search the first visible.
+    // 2) Ticks, shifted into their bars (newest, high-resolution region).
     if (have_ticks) {
         const auto it = std::lower_bound(tick_times.begin(), tick_times.end(),
-                                         static_cast<int64_t>(visible_x_min));
+                                         static_cast<int64_t>(visible_x_min + shift_ms));
         size_t j0 = static_cast<size_t>(std::distance(tick_times.begin(), it));
+        if (j0 > 0) --j0;
         const size_t n = std::min(tick_times.size(), tick_prices.size());
         for (size_t j = j0; j < n; j++) {
-            if (static_cast<double>(tick_times[j]) > visible_x_max) break;
-            add_point(static_cast<double>(tick_times[j]), tick_prices[j]);
+            const double x = static_cast<double>(tick_times[j]) - shift_ms;
+            add_point(x, tick_prices[j]);
+            if (x > visible_x_max) break;
         }
     }
 
-    // 3) Building candle close = the final live point (right edge).
-    if (ctx_.candle_mgr().has_building_candle()) {
-        const auto& bc = ctx_.candle_mgr().building_candle();
-        add_point(static_cast<double>(bc.timestamp_ms), bc.close);
+    // 3) Building candle close, at its bar centre, only while no tick has
+    //    reached its period (fresh load, or server candles without trades).
+    //    Once one has, the newest tick already is the live point.
+    if (candles().has_building_candle()) {
+        const auto& bc = candles().building_candle();
+        if (!have_ticks || tick_times.back() < bc.timestamp_ms)
+            add_point(static_cast<double>(bc.timestamp_ms), bc.close);
     }
 
     flush_col();
@@ -2486,34 +2747,6 @@ void ChartWidget::plot_line(double visible_x_min, double visible_x_max) {
                                Theme::u32(Theme::Tokens::UP), 0, 1.5f);
         ImPlot::PopPlotClipRect();
     }
-
-    // RT (real-time view): a small filled dot on the live edge - the newest
-    // point (building candle close, else newest tick, else last candle close).
-    // Subtle marker so the eye lands on "now". Only in RT mode.
-    if (rt_mode_) {
-        double edge_x = 0.0, edge_y = 0.0;
-        bool have_edge = false;
-        if (ctx_.candle_mgr().has_building_candle()) {
-            const auto& bc = ctx_.candle_mgr().building_candle();
-            edge_x = static_cast<double>(bc.timestamp_ms);
-            edge_y = bc.close;
-            have_edge = true;
-        } else if (have_ticks) {
-            edge_x = static_cast<double>(tick_times.back());
-            edge_y = tick_prices.back();
-            have_edge = true;
-        } else if (!timestamps.empty() && !closes.empty()) {
-            edge_x = timestamps.back();
-            edge_y = closes.back();
-            have_edge = true;
-        }
-        if (have_edge && edge_x >= visible_x_min && edge_x <= visible_x_max) {
-            const ImVec2 edge_px = ImPlot::PlotToPixels(edge_x, edge_y);
-            ImPlot::PushPlotClipRect();
-            draw_list->AddCircleFilled(edge_px, 3.25f, Theme::u32(Theme::Tokens::UP));
-            ImPlot::PopPlotClipRect();
-        }
-    }
 }
 
 // Heikin Ashi visible extents (Phase 2): min HA low / max HA high over the
@@ -2522,9 +2755,9 @@ void ChartWidget::plot_line(double visible_x_min, double visible_x_max) {
 // HA cache has no data in range (caller keeps its real-candle extents then).
 void ChartWidget::ha_visible_extents(double visible_x_min, double visible_x_max,
                                      double& y_min, double& y_max) const {
-    const auto& ts      = ctx_.candle_mgr().timestamps();
-    const auto& ha_low  = ctx_.candle_mgr().ha_lows();
-    const auto& ha_high = ctx_.candle_mgr().ha_highs();
+    const auto& ts      = candles().timestamps();
+    const auto& ha_low  = candles().ha_lows();
+    const auto& ha_high = candles().ha_highs();
     if (ts.empty()) return;
     const size_t n = std::min({ts.size(), ha_low.size(), ha_high.size()});
     const auto lo_it = std::lower_bound(ts.begin(), ts.end(), visible_x_min);
@@ -2537,11 +2770,11 @@ void ChartWidget::ha_visible_extents(double visible_x_min, double visible_x_max,
     }
     // Building HA candle (computed per frame in render_chart; recompute the pair
     // here from the last finalized HA values to include it in the frame).
-    if (ctx_.candle_mgr().has_building_candle() && n > 0) {
-        const auto& bc = ctx_.candle_mgr().building_candle();
+    if (candles().has_building_candle() && n > 0) {
+        const auto& bc = candles().building_candle();
         if (bc.timestamp_ms >= visible_x_min && bc.timestamp_ms <= visible_x_max) {
-            const auto& ha_open  = ctx_.candle_mgr().ha_opens();
-            const auto& ha_close = ctx_.candle_mgr().ha_closes();
+            const auto& ha_open  = candles().ha_opens();
+            const auto& ha_close = candles().ha_closes();
             const size_t last = n - 1;
             const double prev_o = ha_open[last];
             const double prev_c = ha_close[last];
@@ -2631,11 +2864,6 @@ void ChartWidget::render_controls() {
         d->AddTriangleFilled(ImVec2(cx - 3.0f, cy - 1.5f), ImVec2(cx + 3.0f, cy - 1.5f),
                              ImVec2(cx, cy + 2.5f), col);
     };
-    // Two-stroke check mark inside a box at (bx, by), nominal size s, colour col.
-    auto draw_check = [](ImDrawList* d, float bx, float by, float s, ImU32 col) {
-        d->AddLine(ImVec2(bx + s * 0.24f, by + s * 0.52f), ImVec2(bx + s * 0.42f, by + s * 0.72f), col, 1.5f);
-        d->AddLine(ImVec2(bx + s * 0.42f, by + s * 0.72f), ImVec2(bx + s * 0.78f, by + s * 0.30f), col, 1.5f);
-    };
     // Chart-type glyph: 1:1 port of the design SVGs into a 14x14 box at (ox, oy).
     // chart_type_ index: 0 Candles, 1 FP Cluster, 2 FP Profile, 3 Heikin, 4 Line, 5 TPO.
     auto draw_ctype_glyph = [](ImDrawList* d, int t, float ox, float oy, ImU32 col) {
@@ -2697,13 +2925,17 @@ void ChartWidget::render_controls() {
         d->AddPolyline(bot, 3, col, 0, 1.2f);
     };
 
-    // Layer on-count drives the badge and the layers-menu header.
-    const int layers_on = (session_vwap_ ? 1 : 0) + (previous_day_ ? 1 : 0) +
+    // Layer on-count drives the badge and the layers-menu header. Real-time
+    // mode counts its own layer set (the menu lists the same set).
+    const int layers_on = (liquidity_response_enabled_ ? 1 : 0) + (rt_mode_
+        ? (rt_depth_enabled_ ? 1 : 0) + (rt_bubbles_ ? 1 : 0) + (rt_trade_line_ ? 1 : 0)
+            + (rt_candles_ ? 1 : 0) + (liq_observed_enabled_ ? 1 : 0) + (rt_liq_strip_ ? 1 : 0)
+        : (session_vwap_ ? 1 : 0) + (previous_day_ ? 1 : 0) +
         (previous_week_ ? 1 : 0) + (vwap_anchor_ms_ ? 1 : 0) + (liq_dense_field_ ? 1 : 0)
                         + (candle_bubbles_ ? 1 : 0)
                         + (liq_profile_enabled_ ? 1 : 0) + (liq_observed_enabled_ ? 1 : 0)
                         + (liq_census_enabled_ ? 1 : 0)
-                        + (heatmap_enabled_ ? 1 : 0) + (vpvr_enabled_ ? 1 : 0);
+                        + (heatmap_enabled_ ? 1 : 0) + (vpvr_enabled_ ? 1 : 0));
 
     auto chart_type_label = [](ChartType type) -> const char* {
         switch (type) {
@@ -2858,17 +3090,18 @@ void ChartWidget::render_controls() {
     }
 
     const char* requested_popup = nullptr;
-    if (Theme::begin_popup("##chart_tools")) {
-        if (ImGui::MenuItem("Indicators")) requested_popup = "indicators_popup";
-        if (ImGui::MenuItem("Chart settings")) {
+    if (Theme::begin_menu("##chart_tools")) {
+        using drawing::UiIcon;
+        if (Theme::menu_item(UiIcon::Pulse, "Indicators")) requested_popup = "indicators_popup";
+        if (Theme::menu_item(UiIcon::Gear, "Chart settings")) {
             if (rt_mode_) requested_popup = "rt_chart_settings";
             else liq_settings_panel_.open();
         }
-        if (ImGui::MenuItem("Add widget")) requested_popup = "add_widget_popup";
+        if (Theme::menu_item(UiIcon::Plus, "Add widget")) requested_popup = "add_widget_popup";
         if (!ClipRecorder::focus_active() && !edu::RecorderRuntime::instance().active() &&
-            ImGui::MenuItem("Drawing tools")) requested_popup = "chart_draw_popup";
-        ImGui::Separator();
-        ImGui::TextDisabled("Shift + drag selects a move");
+            Theme::menu_item(UiIcon::Pencil, "Drawing tools")) requested_popup = "chart_draw_popup";
+        Theme::menu_separator();
+        Theme::menu_section("SHIFT + DRAG SELECTS A MOVE");
         ImGui::EndPopup();
     }
     if (requested_popup) ImGui::OpenPopup(requested_popup);
@@ -2907,51 +3140,23 @@ void ChartWidget::render_controls() {
             cx += w + 12.0f;
 
             }
-            ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, Theme::Radius::R3);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 6.0f));
-            ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
-            ImGui::PushStyleColor(ImGuiCol_PopupBg, Theme::Tokens::PANEL);
-            ImGui::PushStyleColor(ImGuiCol_Border, Theme::Tokens::BD2);
-            if (Theme::begin_popup("chart_draw_popup")) {
+            if (Theme::begin_menu("chart_draw_popup", 220.0f)) {
                 drawing::render_tool_menu_rows(ctx_.drawing_mgr());
                 ImGui::EndPopup();
             }
-            ImGui::PopStyleColor(2);
-            ImGui::PopStyleVar(3);
         }
     }
 
-    auto push_menu_style = []() {
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 6));
-        ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, Theme::Radius::R3);
-        ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 4));
-        ImGui::PushStyleColor(ImGuiCol_PopupBg, Theme::Tokens::PANEL);
-        ImGui::PushStyleColor(ImGuiCol_Border, Theme::Tokens::BD2);
-    };
-    auto pop_menu_style = []() { ImGui::PopStyleColor(2); ImGui::PopStyleVar(4); };
-    // Popover header row (Hanken micro-label, text-3).
-    auto menu_header = [](const char* s) {
-        const float base_x = ImGui::GetCursorPosX();
-        ImGui::SetCursorPos(ImVec2(base_x + 5.0f, ImGui::GetCursorPosY() + 4.0f));
-        ImGui::PushFont(Theme::Fonts::label());
-        ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::TX3);
-        ImGui::TextUnformatted(s);
-        ImGui::PopStyleColor();
-        ImGui::PopFont();
-        ImGui::SetCursorPosX(base_x);
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 5.0f);
-    };
 
 
     // A chart-local action inherits this chart's market, including its venue.
+    // The menu sizes to its rows: it used to be pinned at 260px, and the
+    // "Chart  TAKE/USDT" hint ran past the right edge because the label
+    // column is set by the widest label ("Chart of another market...").
     ImGui::SetNextWindowPos(ImVec2(widget_anchor.x, widget_anchor.y + 4.0f), ImGuiCond_Appearing);
-    ImGui::SetNextWindowSize(ImVec2(260.0f, 0.0f));
-    push_menu_style();
-    ImGui::PushFont(Theme::Fonts::ui());
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8, 10));
-    if (Theme::begin_popup("add_widget_popup")) {
-        menu_header("ADD WIDGET");
+    if (Theme::begin_menu("add_widget_popup", 250.0f)) {
+        using drawing::UiIcon;
+        Theme::menu_section("ADD WIDGET");
         using PW = Menu::SymbolPickerState::PendingWidget;
         const bool embedded = EducationBoot::instance().is_embedded()
                            || EducationBoot::instance().is_pack();
@@ -2962,22 +3167,49 @@ void ChartWidget::render_controls() {
             Menu::g_widget_add_request.tick_size = tick_size_;
             Menu::g_widget_add_request.pending = true;
         };
-        if (ImGui::MenuItem("Chart"))     add(PW::Charts);
-        if (ImGui::MenuItem("Orderbook")) add(PW::Orderbook);
-        if (ImGui::MenuItem("Depth of market (DOM)"))       add(PW::DOM);
-        if (ImGui::MenuItem("Trades"))    add(PW::Trades);
-        if (ImGui::MenuItem("Market statistics"))     add(PW::Stats);
-        if (ImGui::MenuItem("Debug"))     add(PW::Debug);
-        ImGui::Separator();
-        if (ImGui::MenuItem("Paper Trading")) add(PW::PaperTrading);
-        if (!embedded && ImGui::MenuItem("Watchlist (24h change)")) add(PW::Watchlist);
-        if (!embedded && ImGui::MenuItem("Replay Library")) add(PW::ReplayLibrary);
+        // Chart names its market: this row inherits ONE/USDT, the next opens
+        // the finder for a chart of a different market in the same layout.
+        // Until 2026-09-20 nothing opened the finder in add mode (the header
+        // and Ctrl-K both navigate), so a two-market layout was unreachable
+        // even though a chart of another pair owns its own manager. The
+        // finder renders only in the full shell, and a fresh chart of another
+        // pair during a replay has no session data to draw, so the row is
+        // disabled there rather than inert. A second chart of THIS market
+        // works in a replay: it builds its own manager in the replay context.
+        const std::string this_market = widget_symbol_label(pair_.symbol);
+        if (Theme::menu_item(UiIcon::Candles, "Chart", this_market.c_str())) add(PW::Charts);
+        {
+            const bool other_ok = !embedded && !ctx_.replay_mgr().is_active();
+            if (Theme::menu_item(UiIcon::Globe, "Chart of another market\xe2\x80\xa6", nullptr, other_ok)) {
+                auto& pk = Menu::g_symbol_picker;
+                pk.pending           = PW::Charts;
+                pk.replace_mode      = false;
+                pk.compare_mode      = false;
+                pk.selected_exchange = pair_.exchange;
+                pk.search_buf[0]     = '\0';
+                pk.open              = true;
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                if (other_ok)
+                    Theme::tooltip("Add a chart of any market beside this one.\nStarts on %s; switch venue in the finder.", pair_.exchange.c_str());
+                else if (embedded)
+                    Theme::tooltip("The finder is available in the live terminal.");
+                else
+                    Theme::tooltip("A replay plays its session markets only.\nUse the chart menu: Replay from here with\xe2\x80\xa6");
+            }
+        }
+        Theme::menu_separator();
+        if (Theme::menu_item(UiIcon::Book, "Orderbook")) add(PW::Orderbook);
+        if (Theme::menu_item(UiIcon::Ladder, "Depth of market", "DOM")) add(PW::DOM);
+        if (Theme::menu_item(UiIcon::Tape, "Trades")) add(PW::Trades);
+        if (Theme::menu_item(UiIcon::Bars, "Market statistics")) add(PW::Stats);
+        Theme::menu_separator();
+        if (Theme::menu_item(UiIcon::Wallet, "Paper trading")) add(PW::PaperTrading);
+        if (!embedded && Theme::menu_item(UiIcon::Star, "Watchlist")) add(PW::Watchlist);
+        if (!embedded && Theme::menu_item(UiIcon::Library, "Replay library")) add(PW::ReplayLibrary);
+        if (Theme::menu_item(UiIcon::Terminal, "Debug log")) add(PW::Debug);
         ImGui::EndPopup();
     }
-
-    ImGui::PopStyleVar();
-    ImGui::PopFont();
-    pop_menu_style();
 
     // (RT toggle relocated to the TIMEFRAME dropdown - app_shell render_tf_menu.
     //  It now applies to every chart type, not just the Line, so the old Line-
@@ -2991,51 +3223,79 @@ void ChartWidget::render_controls() {
         ImGui::OpenPopup("hm_settings");
         open_heatmap_settings_ = false;
     }
-    push_menu_style();
-    if (Theme::begin_popup("hm_settings")) {
-        ImGui::TextUnformatted("Order book depth");
-        ImGui::Separator();
+    // Depth settings: the shared menu chrome, grouping as chips (like the
+    // leverage chips), toggles as rows and the explanations as notes.
+    if (Theme::begin_menu("hm_settings", 300.0f)) {
+        using drawing::UiIcon;
+        Theme::menu_section(rt_mode_ ? "REAL-TIME DEPTH \xc2\xb7 PRICE GROUPING" : "ORDER BOOK DEPTH \xc2\xb7 PRICE GROUPING");
         const int multipliers[] = {1, 2, 5, 10, 20};
-        const char* labels[] = {"UHD (1x)", "HD (2x)", "SD (5x)", "LD (10x)", "ULD (20x)"};
+        const char* labels[] = {"UHD", "HD", "SD", "LD", "ULD"};
         int& multiplier = rt_mode_ ? rt_bucket_multiplier_ : heatmap_bucket_multiplier_;
         int selected = 0;
         for (int i = 0; i < 5; ++i)
             if (multiplier == multipliers[i]) selected = i;
-        ImGui::SetNextItemWidth(155.0f);
-        bool changed = ImGui::Combo("Fidelity", &selected, labels, 5);
+        bool changed = false;
+        {
+            ImGui::Indent(6.0f);
+            const float gap = 4.0f;
+            const float chip_w = std::max(46.0f, (ImGui::GetContentRegionAvail().x - 6.0f - gap * 4.0f) / 5.0f);
+            for (int i = 0; i < 5; ++i) {
+                if (i > 0) ImGui::SameLine(0.0f, gap);
+                ImGui::PushID(700 + i);
+                if (Theme::choice_button(labels[i], selected == i, ImVec2(chip_w, 26.0f)) && selected != i) {
+                    selected = i;
+                    changed = true;
+                }
+                if (ImGui::IsItemHovered())
+                    Theme::tooltip("%d native tick%s per row", multipliers[i], multipliers[i] == 1 ? "" : "s");
+                ImGui::PopID();
+            }
+            ImGui::Unindent(6.0f);
+        }
         multiplier = multipliers[selected];
         if (changed && rt_mode_) { rt_auto_fit_ = {}; rt_effective_multiplier_ = multiplier; }
+        auto* recon = rt_mode_ ? rt_renderer_.get() : ctx_.heatmap_mgr().get_reconstructor(pair_, heatmap_mode_);
+        if (recon) {
+            char bucket[48], line[96];
+            snprintf(bucket, sizeof(bucket), fmt_.price_fmt, recon->get_display_bucket_size());
+            snprintf(line, sizeof(line), "Each row now covers %s.", bucket);
+            ImGui::Dummy(ImVec2(0.0f, 4.0f));
+            Theme::menu_note(line);
+        }
+        Theme::menu_separator();
         if (rt_mode_) {
-            ImGui::TextUnformatted(rt_auto_fit_history_ ? "Auto-fit uses this as the minimum grouping." : "RT keeps the selected price grouping fixed.");
-            ImGui::TextUnformatted("Changing price grouping recalibrates the color scale.");
+            if (recon) {
+                const bool warm = recon->realtime_warm();
+                if (Theme::menu_toggle("Cool-to-warm palette", warm)) recon->set_realtime_warm(!warm);
+            }
         } else {
-            changed |= ImGui::Checkbox("Adapt to zoom", &heatmap_adapt_to_zoom_);
+            if (Theme::menu_toggle("Adapt to zoom", heatmap_adapt_to_zoom_)) {
+                heatmap_adapt_to_zoom_ = !heatmap_adapt_to_zoom_;
+                changed = true;
+            }
             if (ImGui::IsItemHovered())
                 Theme::tooltip("Group more price rows when zoomed out.\nTurn off for the exact selected grouping.");
         }
-        auto* recon = rt_mode_ ? rt_renderer_.get() : ctx_.heatmap_mgr().get_reconstructor(pair_, heatmap_mode_);
-        if (recon) {
-            if (rt_mode_) {
-                bool warm = recon->realtime_warm();
-                if (ImGui::Checkbox("Cool-to-warm palette", &warm)) recon->set_realtime_warm(warm);
-                if (ImGui::Button("Recalibrate colors")) recon->recalibrate_realtime_colors();
-            }
-            if (!rt_mode_) {
-                if (ImGui::Button("Recalibrate colors")) recon->recalibrate_candle_colors();
-                ImGui::TextDisabled("Colors stay fixed until regrouping or recalibration.");
-                ImGui::Text("Depth sampling: %lld seconds", (long long)recon->get_column_interval_ms() / 1000);
-                ImGui::TextDisabled("Zoom in for finer time sampling, where recorded.");
-                ImGui::TextDisabled("Blank areas may be outside the loaded depth range.");
-            }
-            if (changed) recon->set_bucket_multiplier(rt_mode_ ? rt_effective_multiplier_ : multiplier);
-            ImGui::TextUnformatted("Effective price bucket:");
-            ImGui::SameLine();
-            ImGui::Text(fmt_.price_fmt, recon->get_display_bucket_size());
+        if (recon && Theme::menu_item(UiIcon::Refresh, "Recalibrate colors", nullptr, true, /*keep_open=*/true)) {
+            if (rt_mode_) recon->recalibrate_realtime_colors();
+            else recon->recalibrate_candle_colors();
         }
-        ImGui::TextDisabled("Fidelity changes price grouping, not tile duration.");
+        if (changed && recon) recon->set_bucket_multiplier(rt_mode_ ? rt_effective_multiplier_ : multiplier);
+        Theme::menu_separator();
+        if (rt_mode_) {
+            Theme::menu_note(rt_auto_fit_history_ ? "Auto-fit uses this grouping as its minimum. Changing it recalibrates the colours."
+                                                  : "Real-time keeps the selected grouping fixed. Changing it recalibrates the colours.");
+        } else if (recon) {
+            char sampling[200];
+            snprintf(sampling, sizeof(sampling),
+                     "Colours stay fixed until regrouping or recalibration. Depth is sampled every %lld seconds here; zoom in for finer sampling where recorded. Blank areas may be outside the loaded depth range.",
+                     (long long)recon->get_column_interval_ms() / 1000);
+            Theme::menu_note(sampling);
+        }
+        Theme::menu_note("Grouping changes price rows, not tile duration.");
+        ImGui::Dummy(ImVec2(0.0f, 4.0f));
         ImGui::EndPopup();
     }
-    pop_menu_style();
     // ═══════════════════════════════════════════════════════════════════════
     // Chart View dropdown: one base rendering mode at a time.
     // ═══════════════════════════════════════════════════════════════════════
@@ -3045,11 +3305,8 @@ void ChartWidget::render_controls() {
     // Chart-view menu: price views first, then order-flow views. Each row says
     // what changes, so the menu works as a compact feature inventory too.
     ImGui::SetNextWindowPos(ImVec2(ct_anchor.x, ct_anchor.y + 4.0f));
-    ImGui::SetNextWindowSize(ImVec2(330.0f, 0.0f));
-    push_menu_style();
     int settings_view = -1;
-    if (Theme::begin_popup("chart_type_popup")) {
-        menu_header("CHART VIEW \xc2\xb7 8 OPTIONS");
+    if (Theme::begin_menu("chart_type_popup", 280.0f)) {
         struct CtRow { const char* label; const char* detail; int idx; };
         const CtRow rows[8] = {
             {"Candles", "Standard OHLC bars", 0},
@@ -3061,75 +3318,54 @@ void ChartWidget::render_controls() {
             {"Flow & Positioning", "Aligned aggression, raw OI and evidence", 7},
             {"TPO market profile", "Time spent at each price", 5} };
         ImDrawList* d = ImGui::GetWindowDrawList();
+        constexpr float kGearW = 26.0f, kCheckW = 18.0f;
         for (int r = 0; r < 8; ++r) {
             if (r == 0 || r == 4) {
-                if (r == 4) {
-                    const ImVec2 sep = ImGui::GetCursorScreenPos();
-                    d->AddLine(ImVec2(sep.x + 5.0f, sep.y), ImVec2(sep.x + ImGui::GetContentRegionAvail().x - 5.0f, sep.y),
-                               Theme::u32(Theme::Tokens::BD1), 1.0f);
-                }
-                menu_header(r == 0 ? "PRICE" : "ORDER FLOW");
+                if (r == 4) Theme::menu_separator();
+                Theme::menu_section(r == 0 ? "PRICE" : "ORDER FLOW");
             }
             const int idx = rows[r].idx;
             const bool active = (chart_type_ == static_cast<ChartType>(idx));
-            const float row_w = ImGui::GetContentRegionAvail().x;
-            const float row_h = 32.0f;
-            const ImVec2 rp = ImGui::GetCursorScreenPos();
-            ImGui::PushID(r);
             const bool has_settings = idx == 1 || idx == 2 || idx == 5 || idx == 6;
-            const float settings_w = has_settings ? 68.0f : 0.0f;
-            const bool pressed = ImGui::InvisibleButton("##ctrow", ImVec2(row_w - settings_w, row_h),
-                ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-            const bool hov = ImGui::IsItemHovered();
-            const bool rclick = pressed && ImGui::IsMouseReleased(ImGuiMouseButton_Right);
-            const bool clicked = pressed && !rclick;
-            ImGui::PopID();
-            if (hov) d->AddRectFilled(rp, ImVec2(rp.x + row_w, rp.y + row_h),
-                                      Theme::u32(Theme::Tokens::ELEV), Theme::Radius::R2);
-            draw_ctype_glyph(d, idx, rp.x + 9.0f, rp.y + (row_h - 14.0f) * 0.5f,
-                             Theme::u32(Theme::Tokens::TX2));
-            ImGui::PushFont(Theme::Fonts::ui());
-            d->AddText(ImVec2(rp.x + 32.0f, rp.y + 7.0f),
-                       Theme::u32(Theme::Tokens::TX1), rows[r].label);
-            ImGui::PopFont();
-            if (hov) Theme::tooltip("%s", rows[r].detail);
+            // The row keeps room for the active check and, where the view has
+            // settings, a gear submitted over the row's right end.
+            ImGui::PushStyleColor(ImGuiCol_Text, active ? Theme::Tokens::TX1 : Theme::Tokens::TX2);
+            const Theme::MenuRow row = Theme::menu_row(rows[r].label, nullptr, true, false,
+                                                       kCheckW + (has_settings ? kGearW : 0.0f));
+            ImGui::PopStyleColor();
+            draw_ctype_glyph(d, idx, row.icon.x - 7.0f, row.icon.y - 7.0f, row.icon_col);
+            if (row.hovered) Theme::tooltip("%s", rows[r].detail);
+            const float gear_x = row.max.x - 10.0f - (has_settings ? kGearW : 0.0f);
             if (active)
-                draw_check(d, rp.x + row_w - settings_w - 18.0f, rp.y + 8.0f, 12.0f,
-                           Theme::u32(Theme::Tokens::BRAND_TX));
-            if (clicked) {
-                set_chart_type(static_cast<ChartType>(idx));
-                ImGui::CloseCurrentPopup();
-            }
+                drawing::draw_ui_icon(d, drawing::UiIcon::Check,
+                                      ImVec2(gear_x - kCheckW * 0.5f - 2.0f, row.icon.y), 5.0f,
+                                      Theme::u32(Theme::Tokens::BRAND_TX), 1.6f);
+            if (row.clicked) set_chart_type(static_cast<ChartType>(idx));
             bool settings_clicked = false;
             if (has_settings) {
                 ImGui::PushID(r);
-                ImGui::SetCursorScreenPos(ImVec2(rp.x + row_w - settings_w, rp.y + 3.0f));
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-                ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
-                settings_clicked = ImGui::SmallButton("Settings");
-                ImGui::PopStyleVar();
-                ImGui::PopStyleColor();
+                const ImVec2 gp(gear_x, row.min.y + (row.max.y - row.min.y - 24.0f) * 0.5f);
+                ImGui::SetCursorScreenPos(gp);
+                settings_clicked = ImGui::InvisibleButton("##ct_gear", ImVec2(kGearW, 24.0f));
+                const bool gear_hov = ImGui::IsItemHovered();
+                if (gear_hov) {
+                    d->AddRectFilled(gp, ImVec2(gp.x + kGearW, gp.y + 24.0f), Theme::u32(Theme::Tokens::HOVER));
+                    Theme::tooltip("%s settings", rows[r].label);
+                }
+                drawing::draw_ui_icon(d, drawing::UiIcon::Gear, ImVec2(gp.x + kGearW * 0.5f, gp.y + 12.0f), 6.0f,
+                                      Theme::u32(gear_hov ? Theme::Tokens::TX1 : Theme::Tokens::TX3), 1.3f);
                 ImGui::PopID();
-                ImGui::SetCursorScreenPos(ImVec2(rp.x, rp.y + row_h));
+                ImGui::SetCursorScreenPos(ImVec2(row.min.x, row.max.y));
             }
-            if (has_settings && (settings_clicked || rclick)) {
+            if (has_settings && (settings_clicked || row.right_clicked)) {
                 ImGui::CloseCurrentPopup();
                 settings_view = idx;
             }
         }
-        {
-            const ImVec2 fp = ImGui::GetCursorScreenPos();
-            d->AddLine(ImVec2(fp.x + 5.0f, fp.y), ImVec2(fp.x + ImGui::GetContentRegionAvail().x - 5.0f, fp.y),
-                       Theme::u32(Theme::Tokens::BD1), 1.0f);
-            ImGui::PushFont(Theme::Fonts::label());
-            d->AddText(ImVec2(fp.x + 9.0f, fp.y + 9.0f), Theme::u32(Theme::Tokens::TX3),
-                       "SETTINGS ALSO OPEN WITH RIGHT-CLICK");
-            ImGui::PopFont();
-            ImGui::Dummy(ImVec2(278.0f, 28.0f));
-        }
+        Theme::menu_separator();
+        Theme::menu_section("RIGHT-CLICK A VIEW FOR ITS SETTINGS");
         ImGui::EndPopup();
     }
-    pop_menu_style();
 
     // Open at the same window/ID scope as the settings panel, not inside the menu.
     if (settings_view == 1 || settings_view == 2) footprint_settings_panel_.open();
@@ -3143,61 +3379,63 @@ void ChartWidget::render_controls() {
     render_renko_settings_popup();
 
     // Layers menu (multi-select) + a liquidation leverage sub-section.
+    // Rows are Theme::menu_toggle: they keep the menu open, and a Pro-gated
+    // row shows a lock and PRO tag and routes its click to the upsell.
     ImGui::SetNextWindowPos(ImVec2(ly_anchor.x, ly_anchor.y + 4.0f));
-    ImGui::SetNextWindowSize(ImVec2(360.0f, 0.0f));
-    ImGui::SetNextWindowSizeConstraints(ImVec2(300, 0),
-        ImVec2(420, ImGui::GetMainViewport()->WorkSize.y - 32));
-    push_menu_style();
-    if (Theme::begin_popup("layers_popup")) {
+    if (Theme::begin_menu("layers_popup", 320.0f, ImGui::GetMainViewport()->WorkSize.y - 32.0f)) {
         char hdr[32]; snprintf(hdr, sizeof(hdr), "LAYERS \xc2\xb7 %d ON", layers_on);
-        menu_header(hdr);
-        ImDrawList* d = ImGui::GetWindowDrawList();
+        Theme::menu_section(hdr);
         const float row_w = ImGui::GetContentRegionAvail().x;
-        const float row_h = 30.0f;
         const bool pro = Entitlements::is_pro();
-        auto layer_section = [&](const char* label) {
-            const ImVec2 p = ImGui::GetCursorScreenPos();
-            ImGui::PushFont(Theme::Fonts::label());
-            d->AddText(ImVec2(p.x + 9.0f, p.y + 8.0f),
-                       Theme::u32(Theme::Tokens::TX3), label);
-            ImGui::PopFont();
-            ImGui::Dummy(ImVec2(row_w, 25.0f));
+        auto layer_section = [](const char* label) { Theme::menu_section(label); };
+        auto layer_row = [](const char* label, bool on, bool locked) {
+            return Theme::menu_toggle(label, on, locked);
         };
+        using drawing::UiIcon;
 
-        // One checklist row (14px checkbox + label). `locked` = Pro-gated: shows a
-        // padlock and, on click, funnels into the upsell instead of toggling.
-        auto layer_row = [&](const char* label, bool on, bool locked) -> bool {
-            const float item_w = ImGui::GetContentRegionAvail().x;
-            ImGui::PushID(label);
-            const ImVec2 rp = ImGui::GetCursorScreenPos();
-            const bool clicked = ImGui::InvisibleButton("##lr", ImVec2(item_w, row_h));
-            const bool hov = ImGui::IsItemHovered();
-            ImGui::PopID();
-            if (hov) d->AddRectFilled(rp, ImVec2(rp.x + item_w, rp.y + row_h),
-                                      Theme::u32(Theme::Tokens::ELEV), Theme::Radius::R2);
-            const float bx = rp.x + 9.0f, by = rp.y + (row_h - 14.0f) * 0.5f;
-            if (locked) {
-                d->AddRect(ImVec2(bx + 1.0f, by + 6.0f), ImVec2(bx + 11.0f, by + 13.0f),
-                           Theme::u32(Theme::Tokens::TX3), 1.0f, 0, 1.0f);
-                d->PathArcTo(ImVec2(bx + 6.0f, by + 6.0f), 3.0f, 3.14159265f, 6.2831853f, 8);
-                d->PathStroke(Theme::u32(Theme::Tokens::TX3), 0, 1.0f);
-            } else if (on) {
-                d->AddRectFilled(ImVec2(bx, by), ImVec2(bx + 14.0f, by + 14.0f),
-                                 Theme::u32(Theme::Tokens::BRAND), 2.0f);
-                draw_check(d, bx, by, 14.0f, Theme::u32(Theme::Tokens::BRAND_INK));
-            } else {
-                d->AddRect(ImVec2(bx, by), ImVec2(bx + 14.0f, by + 14.0f),
-                           Theme::u32(Theme::Tokens::BD2), 2.0f, 0, 1.0f);
+        if (layer_row("Absorption price bands (pilot)", liquidity_response_enabled_, false)) {
+            liquidity_response_enabled_ = !liquidity_response_enabled_;
+            liquidity_response_history_.reset();
+        }
+        if (Theme::begin_menu_group("Absorption details")) {
+            render_liquidity_response_settings(); Theme::end_menu_group();
+        }
+        if (rt_mode_) {
+            // Real-time mode has its own layer set: the candle-chart rows below
+            // draw nothing here, and "Order book depth" must mean the sampled
+            // depth cells, not the candle heatmap. The same toggles live in the
+            // Real-time settings panel; the candle rows return on leaving the mode.
+            layer_section("REAL-TIME VIEW");
+            {
+                const bool c = layer_row("Order book depth", rt_depth_enabled_, false);
+                if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+                    open_heatmap_settings_ = true;
+                    ImGui::CloseCurrentPopup();
+                }
+                if (ImGui::IsItemHovered())
+                    Theme::tooltip("Sampled book behind the trades. Off leaves trades, quotes and liquidations on a clear background.");
+                if (c) rt_depth_enabled_ = !rt_depth_enabled_;
             }
-            ImGui::PushFont(Theme::Fonts::ui());
-            const ImU32 lc = Theme::u32(locked ? Theme::Tokens::TX3
-                                               : (on ? Theme::Tokens::TX1 : Theme::Tokens::TX2));
-            d->AddText(ImVec2(bx + 23.0f, rp.y + (row_h - ImGui::GetFontSize()) * 0.5f), lc, label);
-            ImGui::PopFont();
-            return clicked;
-        };
-
-        if (ImGui::TreeNode("Price levels")) {
+            if (layer_row("Trade bubbles (every trade)", rt_bubbles_, false)) rt_bubbles_ = !rt_bubbles_;
+            if (layer_row("Trade-price line", rt_trade_line_, false)) rt_trade_line_ = !rt_trade_line_;
+            if (layer_row("1s observed candles", rt_candles_, false)) {
+                rt_candles_ = !rt_candles_;
+                chart_type_ = rt_candles_ ? ChartType::Candles : ChartType::Line;
+            }
+            if (Theme::menu_item(UiIcon::Gear, "Depth settings\xe2\x80\xa6")) {
+                open_heatmap_settings_ = true;
+                ImGui::CloseCurrentPopup();
+            }
+            Theme::menu_separator();
+            layer_section("LIQUIDATIONS");
+            if (layer_row("Observed liquidation diamonds", liq_observed_enabled_, false))
+                liq_observed_enabled_ = !liq_observed_enabled_;
+            if (layer_row("Liquidation activity strip", rt_liq_strip_, false))
+                rt_liq_strip_ = !rt_liq_strip_;
+            Theme::menu_separator();
+            Theme::menu_note("Candle layers return when you leave real-time mode.");
+        } else {
+        if (Theme::begin_menu_group("Price levels")) {
             ImGui::TextWrapped("Add the daily average price or levels from the previous day and week.");
             if (layer_row("Daily VWAP (UTC)", session_vwap_, false)) {
                 session_vwap_ = !session_vwap_; reference_update_time_ = -1;
@@ -3208,10 +3446,10 @@ void ChartWidget::render_controls() {
             if (layer_row("Previous week high / low / close", previous_week_, false)) {
                 previous_week_ = !previous_week_; reference_update_time_ = -1;
             }
-            if (ImGui::TreeNode("How these levels work")) {
+            if (Theme::begin_menu_group("How these levels work")) {
                 ImGui::TextWrapped("VWAP is an average price weighted by trading volume. The daily line resets at midnight UTC; the week starts Monday.");
                 ImGui::TextWrapped("Right-click a candle to anchor VWAP. Missing bars stop VWAP and hide incomplete day/week levels.");
-                ImGui::TreePop();
+                Theme::end_menu_group();
             }
             if (vwap_anchor_ms_ && ImGui::Button("Clear anchored VWAP")) {
                 vwap_anchor_ms_ = 0; anchored_vwap_data_.clear();
@@ -3221,16 +3459,17 @@ void ChartWidget::render_controls() {
                 (previous_day_ && !previous_day_data_.complete) ||
                 (previous_week_ && !previous_week_data_.complete)) {
                 ImGui::TextWrapped("Some history is missing. Load earlier candles to show these levels. Coarse candles may not align to the selected period.");
-                ImGui::BeginDisabled(ctx_.candle_mgr().is_loading());
+                ImGui::BeginDisabled(candles().is_loading());
                 if (ImGui::Button("Load earlier candles")) {
                     // Bounded, explicit read, ending at the observed replay clock.
-                    ctx_.candle_mgr().request_historical(20160, reference_asof_);
+                    candles().request_historical(20160, reference_asof_);
                 }
                 ImGui::EndDisabled();
             }
             if (!ct_allows_time_overlays(chart_type_)) ImGui::TextWrapped("Reference overlays appear on time-based chart views.");
-            ImGui::TreePop();
+            Theme::end_menu_group();
         }
+        Theme::menu_separator();
         layer_section("LIQUIDATIONS");
 
         // Liquidation Heatmap = the client Field (free).
@@ -3239,12 +3478,12 @@ void ChartWidget::render_controls() {
             liq_shelf_cache_ts_ = -1;
         }
         if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) open_liq_settings_ = true;
-        if (ImGui::TreeNode("Heatmap source")) {
+        if (Theme::begin_menu_group("Heatmap source")) {
             ImGui::TextWrapped("Candle-derived estimate (lf.v2). Brightness is relative weight, not liquidation dollars or probability. Historical shading can change when more candles load.");
             const double cap = liq_field::max_leverage(pair_.exchange, pair_.symbol);
             if (cap > 0) ImGui::TextWrapped("Pinned July 2026 leverage cap: %.0fx. This is a model assumption, not current account leverage.", cap);
             else ImGui::TextWrapped("No pinned venue cap for this market. Selected leverage tiers are assumptions.");
-            ImGui::TreePop();
+            Theme::end_menu_group();
         }
         // Liq Levels HL = REAL predictive levels from the HL census (Pro, P2e) -
         // ground truth, never folded into the modelled "Liq Levels" above. Keyed
@@ -3265,9 +3504,28 @@ void ChartWidget::render_controls() {
         // Liq Profile = price-marginal of the Field (free).
         if (layer_row("Liquidation profile", liq_profile_enabled_, false))
             liq_profile_enabled_ = !liq_profile_enabled_;
-        if (ImGui::TreeNode("Hyperliquid history")) {
-            ImGui::TextWrapped("Observed wallet sample, all leverage tiers. Violet: long risk. Mint: short risk. Earlier gaps stay unknown. The latest report holds to the playhead, dims when stale, and shows its age. Hover for position notional.");
-            ImGui::TextWrapped("Loads up to six hours of recorded snapshots automatically when this layer is enabled in a connected Pro session. Retains four markets. Cross-venue overlays use HL prices, not Binance liquidation triggers.");
+#ifdef EDGEDEPTH_EXPOSURE_V2_DEV
+        // Exposure V2 = the server's recorded per-minute scenario bands (pilot,
+        // Pro): where positions opened since capture began would sit under a
+        // fixed buffer. Not the candle field above and never summed with it.
+        if (layer_row("Exposure V2 bands (pilot)", pro && exposure_enabled_, !pro)) {
+            if (!pro) ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Layer,
+                                                     nullptr, "exposure_v2");
+            else { exposure_enabled_ = !exposure_enabled_; exposure_history_.reset(); exposure_summary_.reset(); }
+        }
+        if (Theme::begin_menu_group("Exposure V2 settings")) {
+            render_exposure_v2_settings();
+            Theme::end_menu_group();
+        }
+#endif
+        if (Theme::begin_menu_group("Hyperliquid exposure settings")) {
+            ImGui::Checkbox("Show historical heatmap", &liq_census_show_history_);
+            ImGui::SetNextItemWidth(140);
+            ImGui::InputFloat("Minimum zone (USD)", &liq_census_min_usd_, 1000, 10000, "%.0f");
+            if (!std::isfinite(liq_census_min_usd_)) liq_census_min_usd_ = 1000;
+            liq_census_min_usd_ = std::clamp(liq_census_min_usd_, 0.0f, 1e12f);
+            ImGui::TextWrapped("Right-edge bars show the latest sampled exposure. Width is proportional to position notional; labels show the largest visible zones and distance from the snapshot HL mark. Violet: longs. Mint: shorts. Reports older than two minutes have no current profile. Hover the summary for coverage and wallet age.");
+            ImGui::TextWrapped("Optional history keeps original snapshot times and gaps. Loads up to six hours in a connected Pro session and retains four markets. Cross-venue overlays use HL prices. A price crossing or a disappearing observation does not confirm liquidation.");
             ImGui::BeginDisabled(pro && ctx_.replay_mgr().is_pack_mode());
             if (ImGui::Button("Load previous 6h of HL snapshots")) {
                 if (!pro) {
@@ -3284,7 +3542,7 @@ void ChartWidget::render_controls() {
             if (liq_history_requested_ < 0) ImGui::TextWrapped("History needs a connected session with a current Pro token. Reconnect and try again.");
             if (liq_history_requested_ > 0) ImGui::TextWrapped("History requested. Available snapshots appear on the chart; gaps remain unknown.");
             if (ctx_.replay_mgr().is_pack_mode()) ImGui::TextWrapped("Pack replay shows only census snapshots recorded in that pack.");
-            ImGui::TreePop();
+            Theme::end_menu_group();
         }
         // Observed = real @forceOrder prints via the liquidations stream (Pro).
         if (layer_row("Observed liquidations", pro && liq_observed_enabled_, !pro)) {
@@ -3293,11 +3551,7 @@ void ChartWidget::render_controls() {
                                                  nullptr, "liq_observed");
         }
 
-        {
-            const ImVec2 sep = ImGui::GetCursorScreenPos();
-            d->AddLine(ImVec2(sep.x + 5.0f, sep.y), ImVec2(sep.x + row_w - 5.0f, sep.y),
-                       Theme::u32(Theme::Tokens::BD1), 1.0f);
-        }
+        Theme::menu_separator();
         layer_section("MARKET STRUCTURE");
 
         // OB Depth = orderbook depth heatmap (free). Right-click opens its settings.
@@ -3308,7 +3562,7 @@ void ChartWidget::render_controls() {
                 ImGui::CloseCurrentPopup();
             }
             if (c) heatmap_enabled_ = !heatmap_enabled_;
-            if (ImGui::Button("Depth settings...", ImVec2(row_w, 24.0f))) {
+            if (Theme::menu_item(UiIcon::Gear, "Depth settings\xe2\x80\xa6")) {
                 open_heatmap_settings_ = true;
                 ImGui::CloseCurrentPopup();
             }
@@ -3322,7 +3576,7 @@ void ChartWidget::render_controls() {
             if (ImGui::IsItemHovered())
                 Theme::tooltip("Large trades drawn as bubbles on the candles: colored by taker buy/sell using your selected palette, sized on a compressed value scale.\n"
                                "Real-time mode (beside the timeframes) shows every trade with the order book behind it.");
-            if (candle_bubbles_ && ImGui::TreeNode("Bubble settings")) {
+            if (candle_bubbles_ && Theme::begin_menu_group("Bubble settings")) {
                 ImGui::PushFont(Theme::Fonts::ui());
                 ImGui::SetNextItemWidth(130.0f);
                 ImGui::InputFloat("Minimum value", &candle_bubble_min_, 1000, 10000, "%.0f");
@@ -3350,7 +3604,7 @@ void ChartWidget::render_controls() {
                     if (!candle_bubble_history_.error.empty() && ImGui::SmallButton("Retry history")) candle_bubble_history_.reset();
                 }
                 ImGui::PopFont();
-                ImGui::TreePop();
+                Theme::end_menu_group();
             }
         }
         // VPVR = volume profile visible range (free). Right-click opens its settings.
@@ -3366,18 +3620,23 @@ void ChartWidget::render_controls() {
 
         // LIQ LEV sub-section: leverage tiers (Pro). Drives BOTH the field and the
         // levels via the reconstructor leverage mask.
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 6.0f);
-        { const ImVec2 sp = ImGui::GetCursorScreenPos();
-          d->AddLine(ImVec2(sp.x + 2.0f, sp.y), ImVec2(sp.x + row_w - 2.0f, sp.y),
-                     Theme::u32(Theme::Tokens::BD1), 1.0f); }
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 6.0f);
-        menu_header("LIQUIDATION LEVERAGE");
+        Theme::menu_separator();
+        {
+            const ImVec2 hp = ImGui::GetCursorScreenPos();
+            Theme::menu_section("LIQUIDATION LEVERAGE");
+            if (!pro) {
+                ImGui::PushFont(Theme::Fonts::label());
+                const float lw = ImGui::CalcTextSize("LIQUIDATION LEVERAGE").x;
+                ImGui::PopFont();
+                Theme::draw_pro_tag(ImGui::GetWindowDrawList(), ImVec2(hp.x + 10.0f + lw + 8.0f, hp.y + 5.0f));
+            }
+        }
         {
             struct Lev { const char* label; bool* flag; };
             Lev levs[4] = { {"25\xc3\x97", &liq_lev_25x_}, {"50\xc3\x97", &liq_lev_50x_},
                             {"75\xc3\x97", &liq_lev_75x_}, {"100\xc3\x97", &liq_lev_100x_} };
             const float gap = 6.0f;
-            const float chip_w = (row_w - gap * 3.0f) / 4.0f;
+            const float chip_w = std::max(52.0f, (row_w - gap * 3.0f) / 4.0f);
             const float chip_h = 24.0f;
             const ImVec2 base = ImGui::GetCursorScreenPos();
             ImGui::Dummy(ImVec2(row_w, chip_h));   // reserve the chip band so the popup auto-grows its bounds
@@ -3405,9 +3664,9 @@ void ChartWidget::render_controls() {
                 ctx_.liq_heatmap_mgr().set_leverage_mask(mask);
             }
         }
+        }   // !rt_mode_: candle-chart layer rows
         ImGui::EndPopup();
     }
-    pop_menu_style();
 
     // ═══════════════════════════════════════════════════════════════════════
     // Indicators popup: subplots only. Anything drawn on the main chart belongs
@@ -3423,6 +3682,7 @@ void ChartWidget::render_controls() {
     int indi_active_n = 0;
     if (!indi_suppressed) {
         if (indicator_mgr_.has_indicator_of_type<Indicators::VolumeIndicator>())      ++indi_active_n;
+        if (indicator_mgr_.has_indicator_of_type<Indicators::AbsorptionIndicator>()) ++indi_active_n;
         if (indicator_mgr_.has_indicator_of_type<Indicators::CVDIndicator>())         ++indi_active_n;
         if (indicator_mgr_.has_indicator_of_type<Indicators::RSIIndicator>())         ++indi_active_n;
         if (indicator_mgr_.has_indicator_of_type<Indicators::MACDIndicator>())        ++indi_active_n;
@@ -3597,6 +3857,14 @@ void ChartWidget::render_controls() {
                 }
             }
 
+            if (!indi_suppressed) {
+                const bool active = indicator_mgr_.has_indicator_of_type<Indicators::AbsorptionIndicator>();
+                if (indi_row("Absorption activity", active, "Recorded bid/ask activity. Pilot: Binance BTC/SOL, one-minute candles and above.") == 1) {
+                    if (active) indicator_mgr_.remove_indicator_of_type<Indicators::AbsorptionIndicator>();
+                    else add_absorption_indicator();
+                }
+            }
+
             // CVD
             if (!indi_suppressed) {
                 const bool active = indicator_mgr_.has_indicator_of_type<Indicators::CVDIndicator>();
@@ -3697,7 +3965,7 @@ void ChartWidget::render_controls() {
             else liq_settings_panel_.open();
         }
         }
-        ImGui::SetNextWindowSizeConstraints(ImVec2(390, 0), ImVec2(390, ImGui::GetMainViewport()->WorkSize.y - 80));
+        ImGui::SetNextWindowSizeConstraints(ImVec2(300, 0), ImVec2(340, ImGui::GetMainViewport()->WorkSize.y - 80));
         if (Theme::begin_popup("rt_chart_settings")) {
             ImGui::TextColored(Theme::Tokens::TX2, "RT SETTINGS");
             ImGui::Separator();
@@ -3979,7 +4247,7 @@ void ChartWidget::handle_plot_interaction() {
             replay_selection_.start_ms = replay_selection_.press_ms;
             replay_selection_.end_ms = static_cast<int64_t>(
                 ImPlot::PixelsToPlot(ImVec2(x, mouse.y)).x);
-            ctx_.candle_mgr().set_follow_live(false);
+            candles().set_follow_live(false);
         }
         if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             replay_selection_.active = false;
@@ -4039,15 +4307,17 @@ void ChartWidget::handle_plot_interaction() {
         if (!draw_cap && ImGui::IsMouseDragging(ImGuiMouseButton_Left) &&
             (!rt_mode_ || realtime_pan_detaches(ImGui::GetMouseDragDelta(ImGuiMouseButton_Left).x,
                                                 ImGui::GetMouseDragDelta(ImGuiMouseButton_Left).y))) {
-            ctx_.candle_mgr().set_follow_live(false);
+            candles().set_follow_live(false);
+            if (rt_mode_) rt_auto_fit_.navigate();
         } else if (!draw_cap && rt_mode_ && wheel != 0) {
             const auto zoom = realtime_zoom(limits.X.Size(), wheel,
-                ImPlot::GetInputMap().ZoomRate, ctx_.candle_mgr().follow_live(),
+                ImPlot::GetInputMap().ZoomRate, candles().follow_live(),
                 rt_paused_ || ctx_.replay_mgr().is_paused());
             rt_span_ms_ = zoom.span_ms;
-            ctx_.candle_mgr().set_follow_live(zoom.follow);
+            candles().set_follow_live(zoom.follow);
+            rt_auto_fit_.navigate();   // the new window's history fits at once
         } else if (!draw_cap && wheel != 0) {
-            ctx_.candle_mgr().set_follow_live(false);
+            candles().set_follow_live(false);
         }
 
         // ─── R key: replay from crosshair → focused view ───────────────
@@ -4056,10 +4326,10 @@ void ChartWidget::handle_plot_interaction() {
             !ctx_.replay_mgr().is_active()) {
             // Snap to candle boundary so replay starts at exact candle start
             int64_t raw_time = static_cast<int64_t>(crosshair_state_.plot_pos.x);
-            int64_t tf_ms = ctx_.candle_mgr().timeframe_seconds() * 1000;
+            int64_t tf_ms = candles().timeframe_seconds() * 1000;
             int64_t cursor_time_ms = (raw_time / tf_ms) * tf_ms;
             if (cursor_time_ms > 0)
-                ctx_.replay_mgr().open_focused_replay_at(pair_.symbol, cursor_time_ms);
+                ctx_.replay_mgr().open_focused_replay_at(pair_.exchange, pair_.symbol, cursor_time_ms);
         }
 
         // ─── Right-click → open context menu ────────────────────
@@ -4073,7 +4343,7 @@ void ChartWidget::handle_plot_interaction() {
             // Snap to candle boundary (floor) so replay starts at exact candle start
             {
                 int64_t raw_time = static_cast<int64_t>(crosshair_state_.plot_pos.x);
-                int64_t tf_ms = ctx_.candle_mgr().timeframe_seconds() * 1000;
+                int64_t tf_ms = candles().timeframe_seconds() * 1000;
                 context_menu_time_ms_ = (raw_time / tf_ms) * tf_ms;
                 // Research reads a MINUTE: floor the SAME capture to 60000, in
                 // this block, while the plot is still hovered. Reusing the
@@ -4137,7 +4407,7 @@ void ChartWidget::handle_plot_interaction() {
                 const double q1 = crosshair_state_.plot_pos.y;
                 const double dprice = q1 - measure_.p0;
                 const double dpct = measure_.p0 != 0.0 ? (dprice / measure_.p0) * 100.0 : 0.0;
-                const int64_t tf_ms = ctx_.candle_mgr().timeframe_seconds() * 1000;
+                const int64_t tf_ms = candles().timeframe_seconds() * 1000;
                 const int64_t dt_ms = std::llabs(static_cast<int64_t>(t1) - measure_.t0_ms);
                 const long bars = tf_ms > 0 ? static_cast<long>(dt_ms / tf_ms) : 0;
                 const ImVec2 a = ImPlot::PlotToPixels(ImPlotPoint((double)measure_.t0_ms, measure_.p0));
@@ -4185,27 +4455,14 @@ void ChartWidget::handle_plot_interaction() {
     }
 
     // ─── Context menu popup (must be outside IsPlotHovered block) ────
-    // 450 wide (measured): narrower clipped the MenuItem shortcut values
-    // the replay datetime, the copy price). The widest label ("Replay
-    // range (shift-drag to select)") sets the label column; the replay
-    // datetime needs ~120px after it.
-    ImGui::SetNextWindowSize(ImVec2(450.0f, 0.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6, 8));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, Theme::Radius::R3);
-    ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, 1.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 4));
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(14, 11));
-    ImGui::PushStyleColor(ImGuiCol_PopupBg, Theme::Tokens::PANEL);
-    ImGui::PushStyleColor(ImGuiCol_Border, Theme::Tokens::BD2);
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, Theme::Tokens::ELEV);
-    ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::TX1);
-    if (Theme::begin_popup("##ChartCtx")) {
+    // Grouped as chart tools, research reads, replay, copy. The menu sizes to
+    // its rows (it was pinned at 450px so the replay datetime would fit).
+    if (Theme::begin_menu("##ChartCtx", 280.0f)) {
+        using drawing::UiIcon;
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
             selection_escape_frame_ = ImGui::GetFrameCount();
             ImGui::CloseCurrentPopup();
         }
-        // Context actions use the same readable face as other menus.
-        ImGui::PushFont(Theme::Fonts::ui());
 
         const bool replaying = ctx_.replay_mgr().is_active();
         char price_buf[32];
@@ -4213,33 +4470,32 @@ void ChartWidget::handle_plot_interaction() {
 
         // Add alert - live chart only (an alert on a historical replay is meaningless).
         if (!replaying) {
-            if (ImGui::MenuItem("Add alert", price_buf)) {
+            if (Theme::menu_item(UiIcon::Bell, "Add alert", price_buf)) {
                 PriceAlert al;
                 al.price = context_menu_price_;
-                al.arm_above = (context_menu_price_ > ctx_.candle_mgr().last_close_price());
+                al.arm_above = (context_menu_price_ > candles().last_close_price());
                 alerts_.push_back(al);
-                alert_last_price_ = ctx_.candle_mgr().last_close_price();
+                alert_last_price_ = candles().last_close_price();
 #ifdef __EMSCRIPTEN__
                 EM_ASM({
                     if (window.Notification && Notification.permission === 'default')
                         Notification.requestPermission();
                 });
 #endif
-                ImGui::CloseCurrentPopup();
             }
         }
 
-        if (ImGui::MenuItem("Anchor VWAP here")) {
+        if (Theme::menu_item(UiIcon::Anchor, "Anchor VWAP here")) {
             vwap_anchor_ms_ = context_menu_time_ms_; reference_update_time_ = -1;
         }
         // Measure ruler - anchor here; readout follows the cursor (click/Esc clears).
-        if (ImGui::MenuItem("Measure from here")) {
+        if (Theme::menu_item(UiIcon::Ruler, "Measure from here")) {
             measure_.active = true;
             measure_.t0_ms  = context_menu_time_ms_;
             measure_.p0     = context_menu_price_;
-            ImGui::CloseCurrentPopup();
         }
 
+        Theme::menu_separator();
         // The research reads - READS, not replays, so they sit above the replay
         // block. Both use the MINUTE capture (context_menu_minute_ms_), never
         // the timeframe-floored replay timestamp beside it.
@@ -4247,41 +4503,39 @@ void ChartWidget::handle_plot_interaction() {
                                      context_menu_move_.range_minutes);
 
         if (replay_selection_.start_ms != replay_selection_.end_ms &&
-            ImGui::MenuItem("Clear selection", "Esc")) {
+            Theme::menu_item(UiIcon::Close, "Clear selection", "Esc")) {
             replay_selection_ = {};
             context_menu_move_ = {};
         }
 
-        ImGui::Separator();
+        Theme::menu_separator();
 
-        // Replay actions (entitlement-gated inside): Start Replay · <time>,
-        // Replay range…, Stop Replay · Esc.
+        // Replay actions (entitlement-gated inside): Replay from here <time>,
+        // Replay with..., Replay range, Stop replay Esc.
         ctx_.replay_mgr().render_chart_context_menu(
+            pair_.exchange,
             pair_.symbol,
             context_menu_time_ms_,
-            ctx_.candle_mgr().timeframe_seconds(),
+            candles().timeframe_seconds(),
             replay_selection_.start_ms,
             replay_selection_.end_ms
         );
 
-        ImGui::Separator();
+        Theme::menu_separator();
 
-        if (ImGui::MenuItem("Copy price", price_buf)) {
+        if (Theme::menu_item(UiIcon::Copy, "Copy price", price_buf)) {
             ImGui::SetClipboardText(price_buf);
         }
 
-        ImGui::PopFont();
         ImGui::EndPopup();
     }
-    ImGui::PopStyleColor(4);
-    ImGui::PopStyleVar(5);
 }
 
 // Crosshair
 
 void ChartWidget::render_crosshair(const ImPlotPoint& mouse_pos) const {
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
-    const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
+    const int64_t tf_sec = candles().timeframe_seconds();
     // Snap to nearest candle timestamp
     const double timeframe_ms = chart_type_ == ChartType::FlowPositioning ? 60000.0 : static_cast<double>(tf_sec) * 1000.0;
     const double snapped_time = rt_mode_ ? mouse_pos.x : std::round(mouse_pos.x / timeframe_ms) * timeframe_ms;
@@ -4423,7 +4677,7 @@ void ChartWidget::render_indicators() {
 }
 
 void ChartWidget::populate_volume_data(Indicators::VolumeIndicator* vol_ind) const {
-    for (const auto& candle : ctx_.candle_mgr().candles()) {
+    for (const auto& candle : candles().candles()) {
         const bool bullish = candle.close >= candle.open;
         // Convert base volume to quote volume (USDT) for display
         vol_ind->add_bar(candle.timestamp_ms, candle.volume * candle.close, bullish);
@@ -4434,7 +4688,7 @@ void ChartWidget::add_volume_indicator() {
     if (indicator_mgr_.has_indicator_of_type<Indicators::VolumeIndicator>()) return;
 
     auto volume_ind = std::make_unique<Indicators::VolumeIndicator>();
-    volume_ind->set_timeframe(ctx_.candle_mgr().timeframe_seconds());
+    volume_ind->set_timeframe(candles().timeframe_seconds());
     populate_volume_data(volume_ind.get());
     volume_ind->update();
     indicator_mgr_.add_indicator(std::move(volume_ind));
@@ -4444,8 +4698,8 @@ void ChartWidget::update_volume_indicators() {
     auto* vol_ind = indicator_mgr_.get_indicator_of_type<Indicators::VolumeIndicator>();
     if (!vol_ind) return;
 
-    if (ctx_.candle_mgr().has_building_candle()) {
-        const auto& bc = ctx_.candle_mgr().building_candle();
+    if (candles().has_building_candle()) {
+        const auto& bc = candles().building_candle();
         const bool bullish = bc.close >= bc.open;
         vol_ind->set_current_bar(bc.timestamp_ms, bc.volume * bc.close, bullish);
     }
@@ -4456,7 +4710,7 @@ void ChartWidget::add_cvd_indicator() {
     if (indicator_mgr_.has_indicator_of_type<Indicators::CVDIndicator>()) return;
 
     auto cvd_ind = std::make_unique<Indicators::CVDIndicator>();
-    cvd_ind->set_timeframe(ctx_.candle_mgr().timeframe_seconds());
+    cvd_ind->set_timeframe(candles().timeframe_seconds());
     populate_cvd_data(cvd_ind.get());
     cvd_ind->update();
     indicator_mgr_.add_indicator(std::move(cvd_ind));
@@ -4468,7 +4722,11 @@ void ChartWidget::populate_cvd_data(Indicators::CVDIndicator* cvd_ind) const {
     if (cvd_ind->bar_count() > 0) {
         cvd_ind->clear();
     }
-    for (const auto& candle : ctx_.candle_mgr().candles()) {
+    const auto& history = candles().candles();
+    cvd_ind->set_history_unavailable(std::any_of(history.begin(), history.end(),
+        [](const auto& c) { return c.trade_stats_unavailable; }));
+    for (const auto& candle : history) {
+        if (candle.trade_stats_unavailable) continue;
         // Check if we have intra-candle CVD wick data from Volume stream
         auto it = cvd_wick_cache_.find(candle.timestamp_ms);
         if (it != cvd_wick_cache_.end()) {
@@ -4497,9 +4755,10 @@ void ChartWidget::update_cvd_indicator() {
     auto* cvd_ind = indicator_mgr_.get_indicator_of_type<Indicators::CVDIndicator>();
     if (!cvd_ind) return;
 
-    if (ctx_.candle_mgr().has_building_candle()) {
-        const auto& bc = ctx_.candle_mgr().building_candle();
-        cvd_ind->set_building_candle(bc.timestamp_ms,
+    if (candles().has_building_candle()) {
+        const auto& bc = candles().building_candle();
+        cvd_ind->set_building_unavailable(bc.trade_stats_unavailable);
+        if (!bc.trade_stats_unavailable) cvd_ind->set_building_candle(bc.timestamp_ms,
                                      bc.vbuy * bc.close,
                                      bc.vsell * bc.close);
     }
@@ -4537,13 +4796,13 @@ void ChartWidget::add_funding_rate_indicator() {
     // Request historical funding data if we haven't already
     if (!funding_history_requested_) {
         funding_history_requested_ = true;
-        const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
-        const int count = static_cast<int>(ctx_.candle_mgr().count());
+        const int64_t tf_sec = candles().timeframe_seconds();
+        const int count = static_cast<int>(candles().count());
         ctx_.stream_mgr().request_historical_funding(pair_, tf_sec, count > 0 ? count : 2880);
     }
 
     auto ind = std::make_unique<Indicators::FundingRateIndicator>();
-    ind->set_timeframe(ctx_.candle_mgr().timeframe_seconds());
+    ind->set_timeframe(candles().timeframe_seconds());
     populate_funding_data(ind.get());
     ind->update();
     indicator_mgr_.add_indicator(std::move(ind));
@@ -4553,7 +4812,7 @@ void ChartWidget::populate_funding_data(Indicators::FundingRateIndicator* ind) c
     // Funding data comes from stats stream, keyed by candle timestamp.
     // For candles that don't have a matching stat, use the most recent known funding.
     double last_funding = 0;
-    for (const auto& candle : ctx_.candle_mgr().candles()) {
+    for (const auto& candle : candles().candles()) {
         auto it = funding_cache_.find(candle.timestamp_ms);
         if (it != funding_cache_.end()) {
             last_funding = it->second;
@@ -4566,8 +4825,8 @@ void ChartWidget::update_funding_indicator() {
     auto* ind = indicator_mgr_.get_indicator_of_type<Indicators::FundingRateIndicator>();
     if (!ind) return;
 
-    if (ctx_.candle_mgr().has_building_candle()) {
-        const auto& bc = ctx_.candle_mgr().building_candle();
+    if (candles().has_building_candle()) {
+        const auto& bc = candles().building_candle();
         ind->set_building_bar(bc.timestamp_ms, latest_funding_rate_);
     }
     ind->update();
@@ -4582,7 +4841,7 @@ void ChartWidget::add_oi_indicator() {
     request_historical_oi();
 
     auto ind = std::make_unique<Indicators::OIIndicator>();
-    ind->set_timeframe(ctx_.candle_mgr().timeframe_seconds());
+    ind->set_timeframe(candles().timeframe_seconds());
     populate_oi_data(ind.get());
     ind->update();
     indicator_mgr_.add_indicator(std::move(ind));
@@ -4591,15 +4850,15 @@ void ChartWidget::add_oi_indicator() {
 void ChartWidget::request_historical_oi() {
     if (oi_history_requested_) return;
     oi_history_requested_ = true;
-    const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
-    const int count = static_cast<int>(ctx_.candle_mgr().count());
+    const int64_t tf_sec = candles().timeframe_seconds();
+    const int count = static_cast<int>(candles().count());
     ctx_.stream_mgr().request_historical_oi(pair_, tf_sec, count > 0 ? count : 2880);
 }
 
 void ChartWidget::populate_oi_data(Indicators::OIIndicator* ind) const {
     double last_close = 0;
     int ohlc_hits = 0, live_hits = 0, fwd_fills = 0, gaps = 0;
-    for (const auto& candle : ctx_.candle_mgr().candles()) {
+    for (const auto& candle : candles().candles()) {
         // Prefer OHLC data from historical OI query
         auto ohlc_it = oi_ohlc_cache_.find(candle.timestamp_ms);
         if (ohlc_it != oi_ohlc_cache_.end()) {
@@ -4631,8 +4890,8 @@ void ChartWidget::update_oi_indicator() {
     auto* ind = indicator_mgr_.get_indicator_of_type<Indicators::OIIndicator>();
     if (!ind) return;
 
-    if (ctx_.candle_mgr().has_building_candle()) {
-        const auto& bc = ctx_.candle_mgr().building_candle();
+    if (candles().has_building_candle()) {
+        const auto& bc = candles().building_candle();
         if (latest_oi_usd_ > 0) {
             ind->set_building_oi(bc.timestamp_ms, latest_oi_usd_);
         }
@@ -4649,8 +4908,8 @@ void ChartWidget::add_vpin_indicator() {
     // Populate from whatever the SeriesCache already holds (live accrual /
     // replay seed); the update loop backfills via get_historical_vpin.
     if (ctx_.series) {
-        ind->set_points(ctx_.series_mgr().vpin(pair_.symbol));
-        vpin_populated_revision_ = ctx_.series_mgr().vpin_revision(pair_.symbol);
+        ind->set_points(ctx_.series_mgr().vpin(Terminal::pair_key(pair_.exchange, pair_.symbol)));
+        vpin_populated_revision_ = ctx_.series_mgr().vpin_revision(Terminal::pair_key(pair_.exchange, pair_.symbol));
     }
     indicator_mgr_.add_indicator(std::move(ind));
 }
@@ -4677,14 +4936,14 @@ void ChartWidget::update_vpin_indicator() {
     // This also covers scroll-back: candle backfill moves the target left
     // and the same loop keeps chunking. end_ms of the initial request is 0
     // (server end = now; replay sessions clamp to the playback head).
-    if (ctx_.candle_mgr().is_initial_load_complete() && !ctx_.candle_mgr().empty()) {
-        const int64_t target_ms = ctx_.candle_mgr().candles().front().timestamp_ms;
+    if (candles().is_initial_load_complete() && !candles().empty()) {
+        const int64_t target_ms = candles().candles().front().timestamp_ms;
         if (!vpin_history_requested_) {
             vpin_history_requested_ = true;
             vpin_hist_last_req_ = std::chrono::steady_clock::now();
             ctx_.stream_mgr().request_historical_vpin(pair_, target_ms, 0, 5000);
         } else if (!vpin_hist_exhausted_) {
-            const int64_t oldest_ms = ctx_.series_mgr().vpin_oldest_ts(pair_.symbol);
+            const int64_t oldest_ms = ctx_.series_mgr().vpin_oldest_ts(Terminal::pair_key(pair_.exchange, pair_.symbol));
             if (oldest_ms > 0 && oldest_ms > target_ms + 3600'000) {  // >1h uncovered
                 const auto now = std::chrono::steady_clock::now();
                 if (now - vpin_hist_last_req_ > std::chrono::seconds(2)) {
@@ -4705,9 +4964,9 @@ void ChartWidget::update_vpin_indicator() {
     }
 
     // Repopulate the render cache only when the series actually changed.
-    const uint64_t rev = ctx_.series_mgr().vpin_revision(pair_.symbol);
+    const uint64_t rev = ctx_.series_mgr().vpin_revision(Terminal::pair_key(pair_.exchange, pair_.symbol));
     if (rev != vpin_populated_revision_) {
-        ind->set_points(ctx_.series_mgr().vpin(pair_.symbol));
+        ind->set_points(ctx_.series_mgr().vpin(Terminal::pair_key(pair_.exchange, pair_.symbol)));
         vpin_populated_revision_ = rev;
     }
 }
@@ -4716,7 +4975,7 @@ void ChartWidget::add_rsi_indicator(int period) {
     if (indicator_mgr_.has_indicator_of_type<Indicators::RSIIndicator>()) return;
 
     auto rsi_ind = std::make_unique<Indicators::RSIIndicator>(period);
-    for (const auto& candle : ctx_.candle_mgr().candles()) {
+    for (const auto& candle : candles().candles()) {
         rsi_ind->add_candle(candle.timestamp_ms, candle.close);
     }
     rsi_ind->update();
@@ -4727,8 +4986,8 @@ void ChartWidget::add_macd_indicator(int fast, int slow, int signal) {
     if (indicator_mgr_.has_indicator_of_type<Indicators::MACDIndicator>()) return;
 
     auto macd_ind = std::make_unique<Indicators::MACDIndicator>(fast, slow, signal);
-    macd_ind->set_timeframe(ctx_.candle_mgr().timeframe_seconds());
-    for (const auto& candle : ctx_.candle_mgr().candles()) {
+    macd_ind->set_timeframe(candles().timeframe_seconds());
+    for (const auto& candle : candles().candles()) {
         macd_ind->add_candle(candle.timestamp_ms, candle.close);
     }
     macd_ind->update();
@@ -4802,7 +5061,7 @@ void ChartWidget::generate_time_ticks(double visible_x_min, double visible_x_max
         first_tick_s = aligned;
         while (first_tick_s * 1000.0 < visible_x_min) first_tick_s += interval_s;
     } else {
-        tf_sec = ctx_.candle_mgr().timeframe_seconds();
+        tf_sec = candles().timeframe_seconds();
         const double visible_span = visible_x_max - visible_x_min;
         const double visible_candles = visible_span / (static_cast<double>(tf_sec) * 1000.0);
         interval_s = calculate_tick_interval(visible_candles);
@@ -4885,7 +5144,7 @@ void ChartWidget::generate_time_ticks(double visible_x_min, double visible_x_max
 }
 
 int64_t ChartWidget::calculate_tick_interval(double visible_candles) const {
-    const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
+    const int64_t tf_sec = candles().timeframe_seconds();
     const double visible_span_seconds = visible_candles * static_cast<double>(tf_sec);
     // static constexpr - the old std::vector heap-allocated EVERY FRAME.
     static constexpr int64_t nice_intervals[] = {
@@ -4967,7 +5226,7 @@ int64_t ChartWidget::align_to_interval(int64_t timestamp_s, int64_t interval_sec
 
 int64_t ChartWidget::depth_timeframe_seconds() const {
     return ShaderHeatmapRenderer::candle_depth_seconds(
-        ctx_.candle_mgr().timeframe_seconds(), last_visible_range_.X.Size());
+        candles().timeframe_seconds(), last_visible_range_.X.Size());
 }
 
 void ChartWidget::request_heatmap_data() {
@@ -4997,7 +5256,7 @@ void ChartWidget::request_heatmap_data() {
         anchor_ms = std::min(anchor_ms, static_cast<int64_t>(last_visible_range_.X.Max));
     // Bound decoded observations, while broad views select a coarser cadence.
     const int64_t lookback_ms = std::min({
-        ctx_.candle_mgr().timeframe_seconds() * 1000LL * 500,
+        candles().timeframe_seconds() * 1000LL * 500,
         tf_sec * 1000LL * 2000,
         5LL * 24 * 60 * 60 * 1000
     });
@@ -5012,7 +5271,7 @@ void ChartWidget::request_heatmap_data() {
 }
 
 void ChartWidget::update_heatmap() {
-    if (!heatmap_enabled_ || ctx_.candle_mgr().empty()) return;
+    if (!heatmap_enabled_ || candles().empty()) return;
 
     const ImPlotRect limits = last_visible_range_;
     if (limits.X.Size() <= 0) return;
@@ -5047,7 +5306,7 @@ void ChartWidget::update_heatmap() {
     const int64_t dynamic_threshold = std::max(threshold_ms, vis_span / 5);
 
     // Max lookback per timeframe to keep memory bounded.
-    const int64_t tf_ms_ob = ctx_.candle_mgr().timeframe_seconds() * 1000LL;
+    const int64_t tf_ms_ob = candles().timeframe_seconds() * 1000LL;
     const int64_t max_lookback_ob = (tf_ms_ob <= 60000)
         ? 3LL * 24 * 60 * 60 * 1000    // 3 days for 1m
         : 10LL * 24 * 60 * 60 * 1000;  // 10 days for 5m+
@@ -5120,7 +5379,7 @@ void ChartWidget::update_live_heatmap_from_orderbook() {
             std::chrono::system_clock::now().time_since_epoch()
         ).count();
         const auto visible_right = static_cast<int64_t>(last_visible_range_.X.Max);
-        const int64_t tf_ms = ctx_.candle_mgr().timeframe_seconds() * 1000LL;
+        const int64_t tf_ms = candles().timeframe_seconds() * 1000LL;
         // If the right edge of viewport is more than 5 candles behind "now", skip
         if (now_ms - visible_right > tf_ms * 5) return;
     }
@@ -5227,15 +5486,15 @@ void ChartWidget::render_heatmap_tooltip() {
 }
 
 void ChartWidget::calculate_heatmap_price_range(double& min_price, double& max_price) {
-    if (ctx_.candle_mgr().empty()) {
-        min_price = ctx_.candle_mgr().last_close_price() * 0.90;
-        max_price = ctx_.candle_mgr().last_close_price() * 1.10;
+    if (candles().empty()) {
+        min_price = candles().last_close_price() * 0.90;
+        max_price = candles().last_close_price() * 1.10;
         return;
     }
 
     double data_min = std::numeric_limits<double>::max();
     double data_max = std::numeric_limits<double>::lowest();
-    for (const auto& candle : ctx_.candle_mgr().candles()) {
+    for (const auto& candle : candles().candles()) {
         data_min = std::min(data_min, candle.low);
         data_max = std::max(data_max, candle.high);
     }
@@ -5555,7 +5814,7 @@ void ChartWidget::render_liq_timeline() {
     auto* reconstructor = ctx_.liq_heatmap_mgr().get_timeline_reconstructor(pair_);
     if (!reconstructor || !reconstructor->has_data()) return;
 
-    const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
+    const int64_t tf_sec = candles().timeframe_seconds();
     const int64_t candle_ms = tf_sec * 1000;
 
     // Adaptive tick-per-row: auto-adjust bucket_multiplier so the visible
@@ -5837,111 +6096,14 @@ void ChartWidget::render_liq_observed() {
 // Timestamped Hyperliquid wallet samples. All leverage tiers; source gaps remain
 // empty. This is a partial census, and reported levels can move with collateral.
 void ChartWidget::render_liq_census() {
-    // Render only snapshots known at this playhead. Historical columns hold at
-    // most one minute; the latest report remains visible to this playhead only.
-    const bool replay = ctx_.candle_mgr().replay_start_time_ms() > 0;
-    const int64_t asof = replay ? ctx_.replay_mgr().interpolated_time_ms()
-        : static_cast<int64_t>(emscripten_date_now());
-    const auto* history = ctx_.liq_heatmap_mgr().get_census_history(liq_census_pair_);
-    const auto* latest = history ? history->at(asof) : nullptr;
-    auto* draw = ImPlot::GetPlotDrawList();
-    const auto pos = ImPlot::GetPlotPos();
-    const auto size = ImPlot::GetPlotSize();
-    const auto limits = ImPlot::GetPlotLimits();
-    if (history) {
-        ImPlot::PushPlotClipRect();
-        for (const auto& [ts, frame] : history->frames()) {
-            const int64_t end = history->display_end(ts, asof);
-            if (ts > asof || ts > limits.X.Max || end < limits.X.Min) continue;
-            if (frame.census_status == "unavailable") continue;
-            const bool current = latest == &frame;
-            const bool stale = current && asof - ts > census_history::kFreshMs;
-            if (end <= ts) continue;
-            const double half = frame.mark_price * frame.band_width_pct / 200.0;
-            if (half <= 0) continue;
-            for (const auto& band : frame.bands) {
-                if (band.price_mid + half < limits.Y.Min || band.price_mid - half > limits.Y.Max) continue;
-                for (int side = 0; side < 2; ++side) {
-                    const double usd = side == 0 ? band.est_long_usd : band.est_short_usd;
-                    if (usd <= 0) continue;
-                    double low = band.price_mid - half, high = band.price_mid + half;
-                    if (side == 0) high = band.price_mid; else low = band.price_mid;
-                    ImVec4 color = side == 0 ? Theme::Tokens::ICEBERG_VIOLET : Theme::Tokens::UP;
-                    // Fixed log scale across timestamps and markets; saturates at $10m.
-                    color.w = 0.12f + 0.68f * static_cast<float>(std::clamp(std::log1p(usd) / std::log1p(1e7), 0.0, 1.0));
-                    if (current) color.w = std::max(color.w, 190.0f / 255.0f);
-                    if (stale) color.w *= 0.65f;
-                    auto a = ImPlot::PlotToPixels(static_cast<double>(ts), high);
-                    auto b = ImPlot::PlotToPixels(static_cast<double>(end), low);
-                    if (current && b.y - a.y < 2.0f) {
-                        // Keep the long/short halves on opposite sides of the midpoint.
-                        if (side == 0) b.y = a.y + 2.0f;
-                        else a.y = b.y - 2.0f;
-                    }
-                    draw->AddRectFilled(a, b, ImGui::ColorConvertFloat4ToU32(color));
-                }
-            }
-        }
-        ImPlot::PopPlotClipRect();
-    }
-    char badge[128];
-    if (!latest) std::snprintf(badge, sizeof(badge), "HL: no recorded snapshot");
-    else if (latest->census_status == "unavailable" || latest->bands.empty())
-        std::snprintf(badge, sizeof(badge), "HL: sampled coverage unavailable");
-    else if (asof - latest->timestamp_ms > census_history::kFreshMs)
-        std::snprintf(badge, sizeof(badge), "HL: last reported rails held | %llds old", static_cast<long long>((asof-latest->timestamp_ms)/1000));
-    else if (latest->census_quality.version == 1 && latest->census_quality.coverage_denominator_usd <= 0)
-        std::snprintf(badge, sizeof(badge), "HL sampled | coverage denominator unknown");
-    else if (latest->census_observed_at_ms > 0)
-        std::snprintf(badge, sizeof(badge), "HL sampled %.1f%% | oldest wallet %.0fs", latest->flow_intensity*100,
-            (asof-latest->census_observed_at_ms)/1000.0);
-    else std::snprintf(badge, sizeof(badge), "HL sampled %.1f%% | wallet age unknown", latest->flow_intensity*100);
-    const auto text_size = ImGui::CalcTextSize(badge);
-    const ImVec2 badge_pos(pos.x + size.x - text_size.x - 8, pos.y + text_size.y + 10);
-    draw->AddRectFilled(ImVec2(badge_pos.x - 4, badge_pos.y - 2),
-        ImVec2(badge_pos.x + text_size.x + 4, badge_pos.y + text_size.y + 2), Theme::u32(Theme::Tokens::PANEL));
-    draw->AddText(badge_pos, Theme::u32(Theme::Tokens::TX2), badge);
-    if (history && ImPlot::IsPlotHovered()) {
-        const auto mouse = ImPlot::GetPlotMousePos();
-        const auto* frame = history->at(static_cast<int64_t>(mouse.x));
-        if (frame && frame->timestamp_ms <= asof && mouse.x <= asof &&
-            mouse.x < history->display_end(frame->timestamp_ms, asof)) {
-            double longs = 0, shorts = 0;
-            const double half = frame->mark_price * frame->band_width_pct / 200.0;
-            for (const auto& band : frame->bands)
-                if (std::abs(mouse.y - band.price_mid) <= half) { longs += band.est_long_usd; shorts += band.est_short_usd; }
-            if (longs > 0 || shorts > 0 || frame->census_status == "unavailable") {
-                Theme::begin_tooltip();
-                ImGui::TextUnformatted("Hyperliquid sampled positions | all leverage tiers");
-                if (frame == latest && asof - frame->timestamp_ms > census_history::kFreshMs)
-                    ImGui::Text("Last report held to playhead, %.0fs old; current positions may differ.", (asof-frame->timestamp_ms)/1000.0);
-                ImGui::Text("Long risk: $%.0f | Short risk: $%.0f", longs, shorts);
-                const auto& q = frame->census_quality;
-                if (q.version == 1) {
-                    if (q.coverage_denominator_usd > 0) {
-                        ImGui::Text("Coverage: $%.0f / $%.0f (%.2f%%; display capped at 100%%)",
-                            q.usable_notional_usd, q.coverage_denominator_usd, 100*q.usable_notional_usd/q.coverage_denominator_usd);
-                        ImGui::TextUnformatted("Denominator: twice HL one-side OI at mark.");
-                    } else ImGui::TextUnformatted("Coverage denominator unknown.");
-                    ImGui::Text("Fresh cached positions: %u | located: %u | unlocated: %u", q.sampled_positions, q.usable_positions, q.unlocated_positions);
-                    ImGui::Text("Unlocated: $%.0f | price-policy excluded: $%.0f", q.unlocated_notional_usd, q.far_filtered_notional_usd);
-                    ImGui::Text("Stale cache still resident: %u positions, $%.0f", q.stale_positions, q.stale_notional_usd);
-                    ImGui::TextUnformatted("Pruned wallets are absent from these counts.");
-                    if (q.usable_positions > 0)
-                        ImGui::Text("Wallet receipt age at snapshot: weighted %.1fs | position p95 %.1fs", q.weighted_wallet_age_ms/1000, q.p95_wallet_age_ms/1000.0);
-                    if (q.venue_received_at_ms > 0)
-                        ImGui::Text("Mark/OI response receipt: %.1fs before snapshot", (frame->timestamp_ms-q.venue_received_at_ms)/1000.0);
-                    else ImGui::TextUnformatted("Mark/OI receipt time unknown.");
-                } else ImGui::TextUnformatted("Legacy coverage provenance was not recorded.");
-                if (frame->census_status == "unavailable") ImGui::TextUnformatted("No usable sample; exchange exposure is unknown.");
-                if (frame->census_observed_at_ms > 0)
-                    ImGui::Text("Oldest wallet receipt: %.0fs before snapshot", (frame->timestamp_ms-frame->census_observed_at_ms)/1000.0);
-                else ImGui::TextUnformatted("Wallet observation age was not recorded.");
-                ImGui::TextUnformatted("Reported liquidation levels; collateral changes can move them.");
-                Theme::end_tooltip();
-            }
-        }
-    }
+    const int64_t asof = ctx_.candle_mgr().replay_start_time_ms() > 0
+        ? ctx_.replay_mgr().interpolated_time_ms() : static_cast<int64_t>(emscripten_date_now());
+    census_overlay::render(ctx_.liq_heatmap_mgr().get_census_history(liq_census_pair_), asof,
+        liq_census_show_history_, liq_census_min_usd_, liq_census_pair_.symbol.c_str(),
+        pair_.exchange != "hl", fmt_.price_fmt,
+        [](int64_t ts, char* buffer, size_t size) {
+            DisplayTimeZone::instance().format(ts, TimeZoneFormat::DateTimeSeconds, buffer, size);
+        });
 }
 
 // Liquidation Profile - the price-marginal of STANDING fuel (WS1 Option A, 2026-07-03; replaces the
@@ -5987,7 +6149,7 @@ void ChartWidget::render_liq_profile() {
     // current candle is trading through is being consumed NOW, so it no longer stands.
     double carve_glo = 0.0, carve_ghi = -1.0;
     {
-        auto& cm = ctx_.candle_mgr();
+        auto& cm = candles();
         if (cm.has_building_candle()) {
             const auto& b = cm.building_candle();
             if (b.high >= b.low && b.low > 0.0) {
@@ -6261,12 +6423,12 @@ void ChartWidget::render_tpo(double visible_x_min, double visible_x_max) {
     auto& tpo = ctx_.tpo_mgr();
 
     // Build sessions from current candle data
-    const auto& timestamps = ctx_.candle_mgr().timestamps();
-    const auto& highs = ctx_.candle_mgr().highs();
-    const auto& lows = ctx_.candle_mgr().lows();
+    const auto& timestamps = candles().timestamps();
+    const auto& highs = candles().highs();
+    const auto& lows = candles().lows();
     if (timestamps.empty()) return;
 
-    const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
+    const int64_t tf_sec = candles().timeframe_seconds();
     double tick_per_row = tpo.ticks_per_row_setting > 0
         ? tpo.ticks_per_row_setting * tick_size_ : 0.0;
 
@@ -6606,10 +6768,10 @@ static void draw_fp_imbalance(ImDrawList* draw, const FootprintManager& manager,
 
 void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_x_max) {
     auto& fp_mgr = ctx_.footprint_mgr();
-    const auto& timestamps = ctx_.candle_mgr().timestamps();
-    if (timestamps.empty() && !ctx_.candle_mgr().has_building_candle()) return;
+    const auto& timestamps = candles().timestamps();
+    if (timestamps.empty() && !candles().has_building_candle()) return;
 
-    const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
+    const int64_t tf_sec = candles().timeframe_seconds();
     if (tf_sec < 60) {
         ImPlot::GetPlotDrawList()->AddText(ImPlot::GetPlotPos(),
             ImGui::GetColorU32(Theme::Tokens::TX2), "Footprints require 1m or higher");
@@ -6651,10 +6813,10 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
     ImDrawList* draw_list = ImPlot::GetPlotDrawList();
     ImPlot::PushPlotClipRect();
 
-    const auto& opens = ctx_.candle_mgr().opens();
-    const auto& closes = ctx_.candle_mgr().closes();
-    const auto& lows = ctx_.candle_mgr().lows();
-    const auto& highs = ctx_.candle_mgr().highs();
+    const auto& opens = candles().opens();
+    const auto& closes = candles().closes();
+    const auto& lows = candles().lows();
+    const auto& highs = candles().highs();
 
     // Font setup (only used when show_text)
     float font_scale = 1.0f;
@@ -6676,8 +6838,8 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
         }
     }
 
-    const auto& building = ctx_.candle_mgr().building_candle();
-    const bool include_building = ctx_.candle_mgr().has_building_candle() &&
+    const auto& building = candles().building_candle();
+    const bool include_building = candles().has_building_candle() &&
         (timestamps.empty() || building.timestamp_ms > timestamps.back());
     const size_t candle_count = timestamps.size() + (include_building ? 1 : 0);
     for (size_t i = start_idx; i < candle_count; ++i) {
@@ -6956,10 +7118,10 @@ void ChartWidget::render_footprint_overlay(double visible_x_min, double visible_
 
 void ChartWidget::render_footprint_profile(double visible_x_min, double visible_x_max) {
     auto& fp_mgr = ctx_.footprint_mgr();
-    const auto& timestamps = ctx_.candle_mgr().timestamps();
-    if (timestamps.empty() && !ctx_.candle_mgr().has_building_candle()) return;
+    const auto& timestamps = candles().timestamps();
+    if (timestamps.empty() && !candles().has_building_candle()) return;
 
-    const int64_t tf_sec = ctx_.candle_mgr().timeframe_seconds();
+    const int64_t tf_sec = candles().timeframe_seconds();
     if (tf_sec < 60) {
         ImPlot::GetPlotDrawList()->AddText(ImPlot::GetPlotPos(),
             ImGui::GetColorU32(Theme::Tokens::TX2), "Footprints require 1m or higher");
@@ -6995,10 +7157,10 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
     ImDrawList* draw_list = ImPlot::GetPlotDrawList();
     ImPlot::PushPlotClipRect();
 
-    const auto& opens = ctx_.candle_mgr().opens();
-    const auto& closes = ctx_.candle_mgr().closes();
-    const auto& lows = ctx_.candle_mgr().lows();
-    const auto& highs = ctx_.candle_mgr().highs();
+    const auto& opens = candles().opens();
+    const auto& closes = candles().closes();
+    const auto& lows = candles().lows();
+    const auto& highs = candles().highs();
 
     ImFont* font = ImGui::GetFont();
     float font_scale = 1.0f;
@@ -7018,8 +7180,8 @@ void ChartWidget::render_footprint_profile(double visible_x_min, double visible_
         }
     }
 
-    const auto& building = ctx_.candle_mgr().building_candle();
-    const bool include_building = ctx_.candle_mgr().has_building_candle() &&
+    const auto& building = candles().building_candle();
+    const bool include_building = candles().has_building_candle() &&
         (timestamps.empty() || building.timestamp_ms > timestamps.back());
     const size_t candle_count = timestamps.size() + (include_building ? 1 : 0);
     for (size_t i = start_idx; i < candle_count; ++i) {

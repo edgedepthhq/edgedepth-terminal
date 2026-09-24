@@ -186,6 +186,15 @@ int main() {
                   "outcome-first url is empty without a snapped move");
     }
 
+    {
+        const MoveSnap selected = snap_move(t_2258_41, t_2258_41 + 50 * 60000LL, 100.0, 106.0, 108.0, 99.0);
+        expect_eq(investigation_url("LSK/USDT", selected),
+                  "https://edgedepth.com/research/investigate?symbol=lskusdt&exchange=binancef"
+                  "&at=2026-09-01T22:58:00Z&end=2026-09-01T23:48:00Z&entry=terminal",
+                  "selected move keeps exact start, end and venue, independent of snapped magnitude");
+        expect_eq(investigation_url("LSK/USDT", selected, "bybit"), "", "never substitutes a venue");
+        expect_eq(investigation_url("LSK/USDT", MoveSnap{}), "", "missing range refuses");
+    }
     if (failures > 0) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

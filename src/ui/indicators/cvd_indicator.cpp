@@ -41,6 +41,7 @@ void CVDIndicator::clear() {
     bars_.clear();
     cached_candles_.clear();
     has_building_ = false;
+    history_unavailable_ = building_unavailable_ = false;
     cache_dirty_ = true;
 }
 
@@ -50,6 +51,7 @@ void CVDIndicator::update() {
 
 void CVDIndicator::rebuild_cache() {
     cache_dirty_ = false;
+    if (history_unavailable_ || building_unavailable_) { cached_candles_.clear(); return; }
     const size_t n = bars_.size() + (has_building_ ? 1 : 0);
     cached_candles_.resize(n);
 
@@ -112,6 +114,13 @@ void CVDIndicator::get_y_limits(double x_min, double x_max,
 }
 
 void CVDIndicator::render_content(double x_min, double x_max) {
+    if (history_unavailable_ || building_unavailable_) {
+        const auto pos = ImPlot::GetPlotPos();
+        ImPlot::GetPlotDrawList()->AddText(ImVec2(pos.x + 8, pos.y + 8),
+            ImGui::GetColorU32(ImGuiCol_TextDisabled),
+            "CVD unavailable: missing buy/sell trade history");
+        return;
+    }
     if (cached_candles_.size() < 2) return;
 
     ImDrawList* draw_list = ImPlot::GetPlotDrawList();

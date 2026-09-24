@@ -27,6 +27,34 @@ enum class UiIcon : uint8_t {
     Unlock,
     Gear,
     Close,
+    // Floating-menu glyphs (Theme::menu_item): one per action family so a
+    // row reads at a glance before its label does.
+    None,           // empty icon slot; the label keeps its column
+    Plus,
+    Candles,        // a chart of this market
+    Globe,          // a chart of another market
+    Book,           // orderbook
+    Ladder,         // depth of market
+    Tape,           // trades
+    Bars,           // market statistics
+    Terminal,       // debug log
+    Wallet,         // paper trading
+    Star,           // watchlist
+    Library,        // replay library
+    Bell,           // price alert
+    Anchor,         // anchored VWAP
+    Ruler,          // measure
+    Search,         // find moments like this
+    Move,           // investigate this move
+    Play,           // replay from here
+    PlayWith,       // replay with a second market
+    Range,          // replay the selected range
+    Copy,
+    Stop,
+    Pulse,          // indicators
+    Check,          // selected / on
+    ChevronDown,    // an open menu group
+    Refresh,        // recalibrate
 };
 
 void draw_tool_icon(ImDrawList* dl, Tool t, ImVec2 c, float s, ImU32 col,

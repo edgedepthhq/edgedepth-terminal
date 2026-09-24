@@ -29,6 +29,9 @@ public:
 
     void seed() { if (!valid_) segment_start_ = true; valid_ = true; first_delta_ = true; }
     void interrupt() { valid_ = false; }
+    // Observations resume after a deliberate pause in recording (replay priming
+    // traverses depth the chart must not show as history at the held clock).
+    void mark_segment() { segment_start_ = true; }
     bool valid() const { return valid_; }
     bool ready(int64_t clock_ms) const {
         const auto end = std::upper_bound(samples_.begin(), samples_.end(), clock_ms,
@@ -179,7 +182,7 @@ public:
     double minimum() const { return minimum_; }
     bool settled() const { return settled_; }
     void update(const std::deque<Terminal::Trade>& trades, int64_t clock_ms) {
-        if (clock_ms < clock_ms_) { minimum_ = 0; settled_ = false; }
+        if (clock_ms < clock_ms_) { minimum_ = 0; settled_ = false; started_ms_ = 0; }
         if (settled_) { clock_ms_ = clock_ms; return; }
         if (minimum_ > 0 && clock_ms - clock_ms_ < 5000) return;
         std::vector<double> values;
@@ -194,7 +197,8 @@ public:
             const size_t index = (values.size() - 1) * 3 / 4;
             std::nth_element(values.begin(), values.begin() + index, values.end());
             minimum_ = values[index];
-            settled_ = values.size() >= 32;
+            if (!started_ms_) started_ms_ = clock_ms;
+            settled_ = values.size() >= 32 || clock_ms - started_ms_ >= 5000;
         }
         clock_ms_ = clock_ms;
     }
@@ -202,4 +206,5 @@ private:
     double minimum_ = 0;
     int64_t clock_ms_ = 0;
     bool settled_ = false;
+    int64_t started_ms_ = 0;
 };

@@ -8,6 +8,7 @@
 #include "education/transport_emit.h"
 #include "core/app_context.h"
 #include "core/recorder_glue.h"
+#include "core/url_router.h"
 #include "replayer/replay_manager.h"
 
 #include "imgui.h"
@@ -174,9 +175,11 @@ void StudioRuntime::update(const AppContext& ctx) {
         return;
     }
 
-    std::string sym = doc.value("symbol", "");
-    std::transform(sym.begin(), sym.end(), sym.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
+    // The symbol's case is the venue's (Binance/Bybit lowercase, Hyperliquid
+    // native). The session venue was fixed at boot (ReplayManager::exchange),
+    // and a different symbol or venue is a fresh canvas, never an in-place swap.
+    const std::string sym =
+        normalize_symbol_case(ctx.replay_mgr().exchange(), doc.value("symbol", ""));
     const int64_t startMs = doc.value("startMs", int64_t{0});
     const int64_t endMs   = doc.value("endMs",   int64_t{0});
     // Optional playback anchor inside the window (the ?t= deep link). Carried
@@ -185,6 +188,18 @@ void StudioRuntime::update(const AppContext& ctx) {
     // twice plus the box's 1s consumer-exit wait.
     int64_t anchorMs = doc.value("anchorMs", int64_t{0});
     if (anchorMs > 0 && (anchorMs <= startMs || anchorMs > endMs)) anchorMs = 0;
+    // Compare markets (the ?with= list): same venue, played on the same clock
+    // as `sym`, which stays the primary. Cased like the primary; repeats and
+    // the primary itself are dropped here so the request is already clean.
+    std::vector<std::string> symbols{sym};
+    if (doc.contains("with") && doc["with"].is_array()) {
+        for (const auto& w : doc["with"]) {
+            if (!w.is_string()) continue;
+            const std::string cs = normalize_symbol_case(ctx.replay_mgr().exchange(), w.get<std::string>());
+            if (cs.empty() || std::find(symbols.begin(), symbols.end(), cs) != symbols.end()) continue;
+            symbols.push_back(cs);
+        }
+    }
 
     if (sym.empty() || startMs <= 0 || endMs <= startMs) {
         return;
@@ -193,14 +208,15 @@ void StudioRuntime::update(const AppContext& ctx) {
     // Dedup: re-picking the SAME window shouldn't re-request a replay (the picker
     // can re-emit on a no-op confirm, and React re-pushes on a cadence until the
     // state emit confirms it). Only act when the window actually changes.
-    const std::string key = sym + "|" + std::to_string(startMs) + "|" + std::to_string(endMs)
-                          + "|" + std::to_string(anchorMs);
+    std::string key = sym + "|" + std::to_string(startMs) + "|" + std::to_string(endMs)
+                    + "|" + std::to_string(anchorMs);
+    for (size_t i = 1; i < symbols.size(); ++i) key += "|" + symbols[i];
     if (key == applied_key_) return;
     applied_key_ = key;
 
     // Same entry point the lesson player uses; free scrub (no gate) is simply the
     // absence of LessonRuntime driving the playhead in studio mode.
-    ctx.replay_mgr().request_replay(std::vector<std::string>{sym}, startMs, endMs, 1.0f, 300, anchorMs);
+    ctx.replay_mgr().request_replay(symbols, startMs, endMs, 1.0f, 300, anchorMs);
     // Stash for emit_state (so it can report the window during buffering, before
     // SessionInfo is populated).
     src_symbol_   = sym;
@@ -237,9 +253,10 @@ void StudioRuntime::drain_export_start(const AppContext& ctx) {
     }
 
     const Lesson& lesson = lr.lesson();
-    std::string sym = lesson.source.symbol;
-    std::transform(sym.begin(), sym.end(), sym.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
+    // Same venue case rule as set_source, so the mismatch check below compares
+    // like with like.
+    const std::string sym =
+        normalize_symbol_case(ctx.replay_mgr().exchange(), lesson.source.symbol);
 
     // The React shell keys the canvas mount on the lesson's symbol and pushes
     // the lesson window as the studio source BEFORE enabling Export, so a
@@ -437,8 +454,8 @@ void StudioRuntime::render_capture_overlay(const AppContext& ctx) {
     if (size.x < 40.0f || size.y < 40.0f) return;
 
     const bool band = (capture_mode_ == 2);
-    const ImU32 accent = band ? IM_COL32(255, 191, 0, 235) : IM_COL32(34, 197, 219, 235);
-    const ImU32 fill   = band ? IM_COL32(255, 191, 0, 34)  : IM_COL32(34, 197, 219, 36);
+    const ImU32 accent = band ? IM_COL32(255, 191, 0, 235) : IM_COL32(77, 219, 172, 235);
+    const ImU32 fill   = band ? IM_COL32(255, 191, 0, 34)  : IM_COL32(77, 219, 172, 36);
 
     // Transparent input-catcher pinned over the plot rect: claims the mouse so the
     // chart doesn't pan/zoom under the capture gesture. Submitted late in the frame
@@ -567,6 +584,16 @@ void StudioRuntime::emit_state(const AppContext& ctx) {
     hasher.mix(static_cast<uint64_t>(static_cast<int>(speed * 100.0f)));
     hasher.mix(static_cast<uint64_t>(export_phase_) + 100u);
     hasher.mix(card_up ? 1u : 0u);
+    // Compare read: the strip's discrete facts (who moved first, the lag) are
+    // part of the signature so a change reaches React even while paused.
+    const bool compare_on = rm.lead_lag_active();
+    const leadlag::Result& ll = rm.lead_lag();
+    if (compare_on) {
+        hasher.mix(static_cast<uint64_t>(ll.both_moved ? 1 : 0) + 200u);
+        hasher.mix(static_cast<uint64_t>(ll.first_move_lead_ms + (1LL << 40)));
+        hasher.mix(static_cast<uint64_t>(ll.lag.ok ? ll.lag.lag_buckets + 1000 : 0));
+        for (const auto& leg : ll.legs) hasher.mix(static_cast<uint64_t>(leg.first_move_ts));
+    }
 
     // Cadence override while exporting: the footer's elapsed/size readout must
     // keep ticking even when the lesson pauses on a card (the capture keeps
@@ -608,6 +635,32 @@ void StudioRuntime::emit_state(const AppContext& ctx) {
     st["exportBytes"] = exporting ? ClipRecorder::bytes() : 0.0;
     st["exportAudio"] = ClipRecorder::export_has_audio();
     st["cardUp"]      = card_up;
+    // Compare replay (two or more markets on one clock): the lead/lag read.
+    // Additive; a single-market session sends no `compare` key at all.
+    if (compare_on) {
+        json cmp;
+        cmp["anchorMs"]     = ll.anchor_ms;
+        cmp["thresholdBps"] = ll.threshold_bps;
+        json legs = json::array();
+        for (const auto& leg : ll.legs) {
+            json l;
+            l["symbol"]      = leg.symbol;
+            l["anchorPx"]    = leg.anchor_px;
+            l["lastPx"]      = leg.last_px;
+            l["changeBps"]   = leg.change_bps();
+            l["firstMoveMs"] = leg.first_move_ts;   // 0 = not yet
+            l["dir"]         = leg.first_move_dir;
+            legs.push_back(std::move(l));
+        }
+        cmp["legs"] = std::move(legs);
+        cmp["bothMoved"]       = ll.both_moved;
+        cmp["firstMoveLeadMs"] = ll.first_move_lead_ms;   // >0: primary first
+        cmp["lagOk"]           = ll.lag.ok;
+        cmp["lagMs"]           = ll.lag.lag_ms();          // >0: primary leads
+        cmp["lagRho"]          = ll.lag.rho;
+        cmp["lagOverlap"]      = ll.lag.overlap;
+        st["compare"] = std::move(cmp);
+    }
 
     transport::dispatch_state("edgedepth:studio", "__EDGEDEPTH_STUDIO_STATE__", st.dump());
 #else

@@ -31,6 +31,12 @@ namespace Indicators {
 
         // Update building (live) candle
         void set_building_candle(int64_t time, double vbuy, double vsell);
+        void set_history_unavailable(bool unavailable) { history_unavailable_ = unavailable; cache_dirty_ = true; }
+        void set_building_unavailable(bool unavailable) {
+            if (building_unavailable_ != unavailable) cache_dirty_ = true;
+            building_unavailable_ = unavailable;
+            if (unavailable) has_building_ = false;
+        }
 
         void set_timeframe(int64_t seconds) { timeframe_seconds_ = seconds; }
         size_t bar_count() const { return bars_.size(); }
@@ -82,6 +88,8 @@ namespace Indicators {
         int64_t timeframe_seconds_ = 300;
 
         // Building candle state
+        bool history_unavailable_ = false;
+        bool building_unavailable_ = false;
         bool has_building_ = false;
         int64_t building_time_ = 0;
         double building_delta_ = 0;

@@ -1,13 +1,22 @@
 #pragma once
+#include "core/liquidity_response.h"
+#ifdef EDGEDEPTH_EXPOSURE_V2_DEV
+#include "core/exposure_history.h"
+#include "core/exposure_summary_history.h"
+#include "rendering/exposure_summary_overlay.h"
+#include "rendering/exposure_overlay.h"
+#endif
 #include "core/candle_bubble_history.h"
 #include "core/flow_positioning.h"
 #include "core/reference_context.h"
 #include "ui/realtime_dom_frame.h"
+#include "ui/realtime_dom_ladder.h"
 #include "ui/realtime_navigation.h"
 #include "core/trade_at_price.h"
 #include "core/realtime_history.h"
 #include "core/realtime_archive.h"
 #include "rendering/realtime_trade_view.h"
+#include "rendering/mixed_bubbles.h"
 
 #include <implot.h>
 #include "ui/widget.h"
@@ -20,9 +29,11 @@
 #include <array>
 #include <utility>
 class ReplayManager;
+struct DataContext;
 
 #include "indicators/indicator_manager.h"
 #include "indicators/volume_indicator.h"
+#include "indicators/absorption_indicator.h"
 #include "indicators/cvd_indicator.h"
 #include "indicators/rsi_indicator.h"
 #include "indicators/macd_indicator.h"
@@ -102,10 +113,49 @@ public:
     // PriceFormatter::provisional_for_price), never on a guessed tick.
     void refresh_instrument() override;
 
+    // instance 1 is the primary chart: it reads the app-level CandleManager
+    // and keeps the "###chart_<ex>_<sym>" identity saved layouts dock by.
+    // instance >= 2 is a SECONDARY chart for a pair that already has one: it
+    // owns a CandleManager of its own (own timeframe, own follow-live latch,
+    // own trade ring, so its own RealtimeArchive) and takes the identity
+    // "###chart_<ex>_<sym>_<instance>", so a real-time depth view and a
+    // candle chart of one market can sit side by side.
+    //
+    // compare = true builds a COMPARE chart: a replay widget for a session
+    // market other than the primary (DataContext::symbols[1..]). It owns no
+    // manager; its candles are the replay context's manager for the pair,
+    // resolved on every read (the context is retired a frame after the
+    // replay ends, and this widget with it). Time-linked to the primary.
     ChartWidget(const Terminal::Pair& pair,
                 const AppContext& ctx,
-                double tick_size);
+                double tick_size,
+                int instance = 1,
+                bool compare = false);
     ~ChartWidget() override;
+
+    // The candle source this chart draws. Every candle read in the chart
+    // sources goes through here. The one deliberate exception is
+    // replay_start_time_ms(): that is app state (which context is live), so it
+    // is still read from ctx_.candle_mgr(), which a replay swaps.
+    //
+    // Resolution: an owned manager (a secondary chart, or a live chart of a
+    // pair other than the app-level manager's), else the replay context's
+    // manager for this pair (a compare chart), else the app-level manager.
+    // A compare chart whose context is already gone falls back to the
+    // app-level manager for the one frame before the sweep erases it.
+    [[nodiscard]] CandleManager& candles() const;
+    [[nodiscard]] int  chart_instance() const { return chart_instance_; }
+    [[nodiscard]] bool is_secondary()  const { return owned_candles_ != nullptr; }
+    [[nodiscard]] bool is_compare()    const { return compare_; }
+
+    // ─── Time link ──────────────────────────────────────────────────────
+    // Linked charts share ONE time axis: pan/zoom on any of them moves all,
+    // the hovered chart's crosshair time is mirrored on the others, and a
+    // timeframe change on one is adopted by the rest. Used by the compare
+    // replay (two markets, one clock) where reading vertical alignment is
+    // the whole point. Off by default; main.cpp links the session's charts.
+    void set_time_linked(bool on) { time_linked_ = on; }
+    [[nodiscard]] bool time_linked() const { return time_linked_; }
 
     void render() override;
     void update() override;
@@ -119,20 +169,18 @@ public:
     // Current chart timeframe in seconds - live source of truth is the
     // CandleManager (the title's tf field lags a frame). Lets the topbar TF
     // segment both highlight the active TF and drive timeframe changes.
-    int64_t timeframe_seconds() const { return ctx_.candle_mgr().timeframe_seconds(); }
+    int64_t timeframe_seconds() const { return candles().timeframe_seconds(); }
 
     // Real-time view (RT). Applies regardless of chart type: the chart follows
-    // the live edge (follow-live streaming) and, for the Line, draws the live-
-    // edge dot. Toggled from the Real-time pill beside the timeframe bar (see
-    // app_shell render_tf_control).
+    // the live edge (follow-live streaming) and draws its own observed-depth /
+    // trade view (render_realtime). Toggled from the Real-time pill beside the
+    // timeframe bar (see app_shell render_tf_control).
     bool rt_mode() const { return rt_mode_; }
     // Views with no indicator subplots. Real-time draws observed depth on a
     // two-minute axis where timeframe series have nothing to say; Renko uses
     // a brick-index axis the time-aligned pane cannot follow. The pane's
     // indicators are kept, so returning to candles restores them.
     bool subplots_suppressed() const { return rt_mode_ || chart_type_ == ChartType::Renko; }
-    void set_rt_dom_linked(bool linked) { rt_dom_linked_ = linked; }
-    const RealtimeDOMFrame& realtime_dom_frame() const { return rt_dom_frame_; }
     void set_rt_mode(bool v);
     void toggle_rt_mode() { set_rt_mode(!rt_mode_); }
     // True when turning real-time on would open the upsell instead: a Free
@@ -151,6 +199,7 @@ public:
     void set_liq_field_use_texture(bool v) { liq_field_.knobs().use_texture = v; }
 
     void add_volume_indicator();
+    void add_absorption_indicator();
     void add_cvd_indicator();
     void add_rsi_indicator(int period = 14);
     void add_macd_indicator(int fast = 12, int slow = 26, int signal = 9);
@@ -263,13 +312,36 @@ private:
     // ─── External Dependencies (not owned) ───────────────────────────────
     Terminal::Pair pair_;
     const AppContext& ctx_;
+    // Secondary charts only (see the constructor). Declared right after ctx_ so
+    // it outlives every member that may still point at it during teardown
+    // (rt_archive_ is keyed by this manager, liq_field_ reads it). Its
+    // destructor unsubscribes through the StreamManager it subscribed to.
+    std::unique_ptr<CandleManager> owned_candles_;
+    // The replay context owned_candles_ is registered with (a secondary chart
+    // opened during a replay), so the destructor can leave its seek fan-out.
+    DataContext* replay_candles_ctx_ = nullptr;
+    int chart_instance_ = 1;
+    bool compare_ = false;
+    bool time_linked_ = false;
+    int  link_id_ = 0;              // this chart's identity in the link group
+    int  link_tf_seen_frame_ = -1;  // last TF broadcast this chart adopted
+    // Apply the group's axis before BeginPlot's X setup (follower) and publish
+    // this chart's axis + hover after the plot (owner). Candle path only.
+    void time_link_apply(double& x_min, double& x_max, bool& force_always);
+    void time_link_publish();
+    void time_link_draw_mirror();
+    void time_link_adopt_timeframe();
 
     // ─── Chart Identity ──────────────────────────────────────────────────
-    // title_ = "Chart <ex> <sym> <tf>###chart_<ex>_<sym>". The visible prefix
-    // carries the live timeframe; the part after "###" is the TF-independent
-    // docking identity (must match LayoutManager::setup_default_layout), so the
-    // chart stays docked when the TF changes. title_tf_seconds_ tracks the TF the
-    // title was last built for, so render() can refresh it lazily.
+    // title_ = "Chart <ex> <sym> <tf>###chart_<ex>_<sym>" for the primary. The
+    // visible prefix carries the live timeframe; the part after "###" is the
+    // TF-independent docking identity (must match
+    // LayoutManager::setup_default_layout), so the chart stays docked when the
+    // TF changes. A secondary chart appends "_<instance>" to the identity (and
+    // " (<instance>)" to the visible label) so two charts of one pair never
+    // resolve to one ImGui window. title_tf_seconds_ tracks the TF the title
+    // was last built for, so render() can refresh it lazily.
+    void rebuild_title();
     std::string title_;
     std::string timeframe_label_;
     int64_t title_tf_seconds_ = -1;
@@ -286,6 +358,10 @@ private:
     // See ChartType above. Stored as the enum; the popup rows / tick-cache key
     // round-trip through static_cast<int> where an int is genuinely needed.
     ChartType chart_type_ = ChartType::Candles;
+    // The type the chart showed before real-time mode replaced it with Line /
+    // 1s candles; leaving real-time (pill, timeframe click or a type pick)
+    // restores it, and it is what the workspace persists while real-time is on.
+    ChartType rt_prev_chart_type_ = ChartType::Candles;
 
     // ─── Renko (ChartType::Renko) ─────────────────────────────────────────
     // Price-driven bricks on a brick-index X-axis (not time). The builder is a
@@ -332,19 +408,32 @@ private:
     bool rt_candles_ = false, rt_bubbles_ = true, rt_book_valid_ = false;
     bool rt_paused_ = false, rt_trade_line_ = false;
     bool rt_extend_depth_ = true;
+    // Real-time depth cells. Separate from heatmap_enabled_ (the candle-chart
+    // depth heatmap) so entering/leaving real-time mode keeps each view's choice.
+    bool rt_depth_enabled_ = true;
     bool rt_auto_price_ = true;
+    // The depth ladder attached to the right of the real-time plot, drawn from
+    // rt_dom_frame_ after the plot publishes it. rt_dom_linked_ is this frame's
+    // "ladder on screen": the price scale then keeps its rows readable.
+    bool rt_dom_shown_ = true;
     bool rt_dom_linked_ = false;
+    RealtimeDomLadder rt_dom_ladder_;
     RealtimePriceWindow rt_price_window_;
     bool rt_auto_fit_history_ = true;
     RealtimeAutoFit rt_auto_fit_;
     int rt_effective_multiplier_ = 5;
     Terminal::BookTicker rt_quote_{};
+    // When each side of rt_quote_ last changed price: the live step is drawn
+    // there, pinned in time, so it scrolls with the history instead of
+    // freezing on screen while tickers keep arriving at an unchanged price.
+    int64_t rt_quote_bid_since_ms_ = 0, rt_quote_ask_since_ms_ = 0;
     std::deque<RealtimeDepthHistory::SamplePtr> rt_samples_;
     std::deque<Terminal::Trade> rt_paused_trades_;
     std::shared_ptr<RealtimeArchive> rt_archive_;
     std::deque<RealtimeDepthHistory::SamplePtr> rt_archive_samples_;
     std::deque<Terminal::Trade> rt_archive_trades_;
-    RealtimeTradeView rt_trade_view_;
+    RealtimeTradeView rt_trade_view_;    // side-grouped compaction for the archive tail
+    MixedBubbles::View candle_bubble_view_;  // per-bar mixed markers on candle charts
     bool realtime_live_edge() const;
     bool rt_history_view_ = false;
     uint64_t rt_archive_generation_ = 0;
@@ -537,12 +626,12 @@ private:
     double  candle_bubble_auto_floor_ = 0;       // last warm auto floor; holds through a re-warm
     std::deque<Terminal::Trade> candle_prints_;  // retained large prints, time-ordered
     int64_t candle_prints_seen_ms_ = 0;          // newest trade already scanned
-    int64_t candle_prints_seen_id_ = 0;          // ... and its agg_trade_id (same-ms ties)
+    size_t candle_prints_seen_count_ = 0;        // ... and how many prints at that ms were scanned
     static constexpr double  kCandleBubbleMult    = 8.0;
     static constexpr int64_t kCandleBubbleWarmMs  = 2LL * 60 * 1000;
     static constexpr int64_t kCandlePrintsKeepMs  = 24LL * 3600 * 1000;
     static constexpr size_t  kCandlePrintsMax     = 4000;
-    static constexpr int     kCandleBubbleMaxDraw = 1500;
+    // Draw cap: MixedBubbles::View::capacity (largest markers kept).
     double candle_bubble_floor() const;   // current quote-value floor (0 = not yet known)
     void   collect_candle_prints();       // per frame: fold new large prints out of the trade ring
     void   render_candle_bubbles();       // drawn over the candles, inside the plot clip
@@ -557,6 +646,8 @@ private:
     // leveraged tail, ~1-10% of OI notional) and must never read as a complete liq map.
     // The LIQ LEV chips filter this layer by REAL leverage tier (est_Nx = actual
     // position leverage) - same control as the modelled layer, venue-aware meaning.
+    bool liq_census_show_history_ = false;
+    float liq_census_min_usd_ = 1000.0f;
     int liq_history_requested_ = 0;
     bool liq_census_enabled_ = false;      // ctor: defaults ON for HL-native pairs
     bool liq_census_subscribed_ = false;
@@ -598,6 +689,29 @@ private:
     void render_controls();
     void render_chart();
     void render_indicators();
+#ifdef EDGEDEPTH_EXPOSURE_V2_DEV
+    void update_exposure_v2();
+    void render_exposure_v2_settings();
+    void render_exposure_v2(int64_t clock);
+    bool exposure_enabled_=false;
+    bool exposure_fit_bands_=false; // Off: the price axis follows candles; bands 7% away are counted, not chased.
+    int exposure_detail_=0; // Automatic, exact, averaged.
+    bool exposure_averages_=false;
+    exposure::SummaryHistory exposure_summary_;
+    char exposure_scenario_[96]="";
+    int64_t exposure_clock_=0,exposure_view_to_=0;
+    exposure::History exposure_history_;
+    exposure::Display exposure_display_;
+#endif
+    bool liquidity_response_enabled_=false;
+    bool liquidity_response_evidence_open_=false;
+    liquidity_response::History liquidity_response_history_;
+    std::vector<liquidity_response::MarkerGroup> liquidity_response_markers_;
+    uint64_t liquidity_response_marker_revision_=~uint64_t(0);
+    int64_t liquidity_response_marker_tf_=0;
+    void update_liquidity_response();
+    void render_liquidity_response();
+    void render_liquidity_response_settings();
     void update_flow_positioning();
     void render_flow_positioning();
     flow_positioning::History flow_history_;
@@ -617,6 +731,10 @@ private:
                       const std::vector<double>& src_lows,
                       const std::vector<double>& src_closes,
                       const BuildingOHLC& bld);
+    // The chart-type switch proper (footprint/TPO/Renko side effects).
+    // set_chart_type wraps it with the real-time exit; set_rt_mode(false) calls
+    // it directly to put the pre-real-time type back.
+    void apply_chart_type(ChartType type);
     // Close-price polyline (ChartType::Line). Uses the recent-tick ring buffer
     // where available and falls back to candle closes for older regions.
     void plot_line(double visible_x_min, double visible_x_max);

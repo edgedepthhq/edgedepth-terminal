@@ -5,7 +5,7 @@
 // Locked range / preset / speed / symbol / layer pill, a TIER_* server error, the
 // /events padlock, and a lesson lock ALL call UpsellModal::open(...) - a single,
 // consistent conversion surface instead of scattered ad-hoc nudges. Primary CTA is
-// "Explore Pro plans" -> /pricing (Entitlements::open_pricing). AUTH_REQUIRED
+// "Explore Pro plans" -> /pricing in a new tab (Entitlements::open_pricing). AUTH_REQUIRED
 // / GRANT_REQUIRED route to a login variant instead (Entitlements::open_login).
 //
 // Every explicit locked action opens this dialog, including repeated actions.
@@ -24,7 +24,7 @@ public:
     // Auth is the login variant (not logged in / no grant).
     enum class Trigger : uint8_t {
         Generic = 0, Range, Preset, Speed, Symbol, Layer,
-        ServerTier, Events, Lesson, Daily, Auth, Research, _Count
+        ServerTier, Events, Lesson, Daily, Auth, Research, Timeframe, _Count
     };
 
     static UpsellModal& instance();
@@ -64,7 +64,11 @@ public:
 private:
     UpsellModal() = default;
     void render_modal_body();
+    void render_copy(float width, bool with_benefits);  // headline, billing, CTAs
+    void render_benefits();            // what Pro includes
+    void render_preview(float width);  // the recorded clip for this gate, if any
     void render_toast();
+    void stop_preview();
     void dismiss();  // shared "Maybe later"/Escape path (runs the redirect, if armed)
 
     Trigger     trigger_ = Trigger::Generic;
@@ -72,6 +76,11 @@ private:
     std::string layer_;                // stable analytics slug (empty = absent)
     std::string dismiss_redirect_;   // full path ("/terminal/<sym>"); empty = just close
     bool        login_variant_ = false;
+    // Recorded clip shown beside the copy (public/media/terminal/<name>.webm
+    // or .mp4 on the web host), chosen per gate; nullptr = text-only dialog.
+    const char* preview_ = nullptr;
+    unsigned    preview_tex_ = 0;      // GL texture the video frames upload into
+    bool        preview_playing_ = false;
 
     int      dismissed_frame_ = -1;   // do not pass the closing Escape to replay
     bool     want_open_ = false;      // latched by open(), consumed by render()

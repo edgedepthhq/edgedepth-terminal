@@ -18,6 +18,8 @@
 #include "backends/imgui_impl_opengl3.h"
 
 #include <emscripten/websocket.h>
+#include <algorithm>
+#include <cmath>
 #include <vector>
 #include <array>
 #include <imgui_impl_sdl3.h>
@@ -221,6 +223,25 @@ static void on_ws_message(const uint8_t* data, size_t len, WsLane lane) {
                 reinterpret_cast<const char*>(data) + len);
             std::string type = parsed.value("type", "");
 
+#ifdef EDGEDEPTH_EXPOSURE_V2_DEV
+            if (type == "exposure_v2" || type == "exposure_v2_summary") {
+                const bool replay=g_app.replay_mgr && g_app.replay_mgr->is_active();
+                if ((lane==WsLane::Replay && replay && g_app.replay_mgr->active_socket()==g_app.replay_ws_client.get()) ||
+                    (lane==WsLane::Live && (!replay || g_app.replay_mgr->active_socket()==g_app.ws_client.get())))
+                {
+                    if (type=="exposure_v2_summary") exposure::SummaryHistory::receive(parsed,replay);
+                    else exposure::History::receive(parsed,replay);
+                }
+                return;
+            }
+#endif
+            if (type == "liquidity_response") {
+                const bool replay = g_app.replay_mgr && g_app.replay_mgr->is_active();
+                if ((lane == WsLane::Replay && replay && g_app.replay_mgr->active_socket() == g_app.replay_ws_client.get()) ||
+                    (lane == WsLane::Live && (!replay || g_app.replay_mgr->active_socket() == g_app.ws_client.get())))
+                    liquidity_response::History::receive(parsed);
+                return;
+            }
             if (type == "flow_positioning") {
                 const bool replay = g_app.replay_mgr && g_app.replay_mgr->is_active();
                 if ((lane == WsLane::Replay && replay && g_app.replay_mgr->active_socket() == g_app.replay_ws_client.get()) ||
@@ -354,8 +375,7 @@ static void on_ws_message(const uint8_t* data, size_t len, WsLane lane) {
             if (ts > 0) {
                 auto* rctx = g_app.replay_mgr->replay_context();
                 if (rctx && rctx->orderbooks && !g_app.replay_mgr->info().symbols.empty()) {
-                    Terminal::Pair pair{"binancef", g_app.replay_mgr->info().symbols[0]};
-                    hist->snapshot_orderbook(ts, *rctx->orderbooks, pair);
+                    hist->snapshot_orderbook(ts, *rctx->orderbooks, g_app.replay_mgr->primary_pair());
                 }
             }
         }
@@ -367,7 +387,46 @@ static void on_ws_message(const uint8_t* data, size_t len, WsLane lane) {
     }
 }
 
+// After a planned hub restart the live feed skipped the outage: charts miss
+// a period (or hold a partial one on each edge). Re-fetch the newest candles
+// of every open chart and merge them in place - once right away for what the
+// new hub has built since it came up, and once more a few minutes later,
+// after the server has rebuilt the outage minutes from exchange klines
+// (consumer_recovery_candles in redeploy.sh, ~2-3 min after ready).
+static double g_refetch_at_ms[2] = {0, 0};
+static double g_refetch_outage_ms = 0;
+
+static void refetch_recent_candles(double outage_ms) {
+    for (auto& w : g_app.widgets) {
+        if (!w->is_open || w->type() != WidgetType::Chart) continue;
+        auto* chart = static_cast<ChartWidget*>(w.get());
+        const double tf_ms = static_cast<double>(chart->timeframe_seconds()) * 1000.0;
+        // Sized in candles, so the cap must be too: the old 40 covered 40
+        // minutes of a 1m chart but only 40 seconds of a 1s one.
+        const size_t count = std::clamp(static_cast<size_t>(outage_ms / std::max(tf_ms, 1.0)) + 3,
+                                        static_cast<size_t>(3), CandleManager::INITIAL_PRELOAD_CANDLES);
+        chart->candles().request_recent(count);
+    }
+}
+
+static void tick_restart_refetch() {
+    if (!g_app.ws_client || !g_app.ws_client->is_connected()) return;
+    const double now = emscripten_get_now();
+    for (double& at : g_refetch_at_ms) {
+        if (at > 0 && now >= at) {
+            at = 0;
+            refetch_recent_candles(g_refetch_outage_ms);
+        }
+    }
+    if (g_refetch_at_ms[0] == 0 && g_refetch_at_ms[1] == 0) g_refetch_outage_ms = 0;
+}
+
 static void on_ws_status(const std::string& status) {
+    liquidity_response::History::invalidate_all("Transport changed; waiting for observations");
+#ifdef EDGEDEPTH_EXPOSURE_V2_DEV
+            exposure::History::invalidate_all("V2 transport changed; reload required");
+            exposure::SummaryHistory::invalidate_all("V2 transport changed; reload required");
+#endif
     if (status == "Reconnecting") {
         if (g_app.ob_mgr) g_app.ob_mgr->set_realtime_transport_open(false);
         g_app.stream_mgr->update_websocket_handle(0);
@@ -376,6 +435,12 @@ static void on_ws_status(const std::string& status) {
     if (status == "Connected") {
         if (g_app.ob_mgr) g_app.ob_mgr->set_realtime_transport_open(true);
         g_app.stream_mgr->update_websocket_handle(g_app.ws_client->get_handle());
+        if (g_app.ws_client->take_reconnected_after_restart()) {
+            const double now = emscripten_get_now();
+            g_refetch_outage_ms = g_app.ws_client->last_outage_ms();
+            g_refetch_at_ms[0] = now + 2000;
+            g_refetch_at_ms[1] = now + 240000;
+        }
 
         // Embedded lesson/studio mode: the socket is still needed (replay frames
         // ride this same WS via the Replayer actor), but the LIVE auto-subscribes
@@ -411,6 +476,15 @@ static void on_ws_status(const std::string& status) {
             0
         };
         g_app.stream_mgr->send_subscribe(ticker24h_hl_key);
+
+        // Bybit 24h ticker - ticker24h.bybit.global, aggregated by the hub's Bybit
+        // consumer from the exchange's own tickers stream (~10 s cadence, ~1KB/s).
+        StreamKey ticker24h_bybit_key{
+            Terminal::Pair{"bybit", "global"},
+            Terminal::Stream::Ticker24h,
+            0
+        };
+        g_app.stream_mgr->send_subscribe(ticker24h_bybit_key);
     }
 }
 
@@ -517,6 +591,11 @@ WebSocketClient* archive_lane_socket() {
 // auto-subscribes, or a replay connection would start paying for ticker24h and
 // paper-trading traffic on a socket that serves neither.
 static void on_replay_ws_status(const std::string& status) {
+    liquidity_response::History::invalidate_all("Replay transport changed; waiting for observations");
+#ifdef EDGEDEPTH_EXPOSURE_V2_DEV
+            exposure::History::invalidate_all("V2 replay transport changed; reload required");
+            exposure::SummaryHistory::invalidate_all("V2 replay transport changed; reload required");
+#endif
     if (status == "Reconnecting" && g_app.replay_mgr)
         g_app.replay_mgr->on_transport_interrupted(g_app.replay_ws_client.get());
     if (status == "Connected") {
@@ -817,9 +896,8 @@ void maybe_start_lesson_replay() {
     const auto& src = edu::LessonRuntime::instance().lesson().source;
     if (src.symbol.empty() || src.startMs <= 0 || src.endMs <= src.startMs) return;
 
-    std::string sym = src.symbol;
-    std::transform(sym.begin(), sym.end(), sym.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
+    // Case per the session venue (fixed at boot; lessons are binancef today).
+    const std::string sym = normalize_symbol_case(g_app.replay_mgr->exchange(), src.symbol);
     // Historical pages fail closed. Stop live delivery before the session POST,
     // including the Creating and Joining states where no replay context exists.
     pause_live_for_historical_replay();
@@ -1050,12 +1128,12 @@ void render_lesson_loading_overlay() {
     const float r = 22.0f;
     const float a0 = t * 3.2f;
     const float a1 = a0 + 4.2f;  // ~240° sweep
-    const ImU32 col = IM_COL32(34, 197, 219, 255);  // cyan brand
+    const ImU32 col = IM_COL32(77, 219, 172, 255);  // brand mint (Tokens::LOGO)
     fg->PathClear();
     fg->PathArcTo(c, r, a0, a1, 48);
     fg->PathStroke(col, 0, 3.0f);
     // Faint full ring behind it.
-    fg->AddCircle(c, r, IM_COL32(34, 197, 219, 40), 48, 3.0f);
+    fg->AddCircle(c, r, IM_COL32(77, 219, 172, 40), 48, 3.0f);
 
     const char* msg = "Loading replay. Priming order book and candles...";
     const ImVec2 ts = ImGui::CalcTextSize(msg);
@@ -1064,7 +1142,8 @@ void render_lesson_loading_overlay() {
 }
 
 // Historical event and lesson pages never fall back to live data. This modal
-// remains until navigation or reload and captures canvas input while visible.
+// remains until a deliberate seek from the chrome retries elsewhere (see
+// ReplayManager::seek), navigation or reload, and captures canvas input while visible.
 void render_historical_replay_error_overlay() {
     const auto& boot = EducationBoot::instance();
     if ((!boot.is_event() && !boot.is_lesson()) || !g_app.replay_mgr) return;
@@ -1086,7 +1165,7 @@ void render_historical_replay_error_overlay() {
         const char* title = "Historical replay unavailable";
         const auto& error = g_app.replay_mgr->info().error_message;
         const char* detail = error.empty()
-            ? "The recorded replay could not be loaded. Return to the event page for its price chart and evidence."
+            ? "The recorded replay could not be loaded at this position. Scrub to another time to retry, or return to the event page for its price chart and evidence."
             : error.c_str();
         const ImVec2 title_size = ImGui::CalcTextSize(title);
         const float detail_width = std::min(560.0f, std::max(120.0f, vp->Size.x - 48.0f));
@@ -1119,6 +1198,27 @@ void update_and_render_widgets() {
         if (const size_t backlog = g_app.data_thread->carry_backlog(); backlog > 0) {
             g_profiler.add_count("DispBacklog", static_cast<long>(backlog));
         }
+        // The queue is bounded (DispatchQueue::kMaxPending): a window hidden
+        // long enough drops its oldest trades and candle updates. Repair the
+        // charts the same way a planned hub restart does, with a recent-candle
+        // refetch reaching back to where the window stopped draining; RT trade
+        // archives keep the gap. The second pass picks up the newest dropped
+        // seconds, which sub-minute history only serves once the server's
+        // trade capture (10 s buckets) has reached its database.
+        std::uint64_t dropped = 0;
+        double gap_start_ms = 0.0;
+        if (g_app.data_thread->dispatch_queue().take_drops(dropped, gap_start_ms)) {
+#ifdef EDGEDEPTH_EXPOSURE_V2_DEV
+            exposure::History::invalidate_all("V2 dispatch gap; reload required");
+            exposure::SummaryHistory::invalidate_all("V2 dispatch gap; reload required");
+#endif
+            g_profiler.add_count("DispDropped", static_cast<long>(dropped));
+            const double span_ms = std::max(0.0, DispatchQueue::steady_ms() - gap_start_ms);
+            g_refetch_outage_ms = std::max(g_refetch_outage_ms, span_ms);
+            const double now = emscripten_get_now();
+            g_refetch_at_ms[0] = now + 2000;
+            if (g_refetch_at_ms[1] == 0) g_refetch_at_ms[1] = now + 30000;
+        }
     }
     // Swap the ACTIVE orderbook manager's buffers (write→read).
     // During replay, app_ctx.orderbooks points to the replay OB manager.
@@ -1140,47 +1240,7 @@ void update_and_render_widgets() {
     // subscriptions and is_open are untouched - is_open=false would ERASE it.)
     const bool rec_focus_widgets = ClipRecorder::focus_active() ||
                                    edu::RecorderRuntime::instance().active();
-    // Resolve ownership before chart layout so its price scale can reserve
-    // readable rows for the same DOM that will consume the published frame.
-    for (const auto& widget : g_app.widgets)
-        if (widget->type() == WidgetType::Chart)
-            static_cast<ChartWidget*>(widget.get())->set_rt_dom_linked(false);
-    for (const auto& widget : g_app.widgets) {
-        if (widget->type() == WidgetType::DOM) {
-            auto* dom = static_cast<DOMWidget*>(widget.get());
-            dom->link_realtime(nullptr);
-            for (const auto& candidate : g_app.widgets) {
-                if (!candidate->is_open || candidate->type() != WidgetType::Chart) continue;
-                auto* chart = static_cast<ChartWidget*>(candidate.get());
-                if (chart->rt_mode() && chart->pair().exchange == dom->pair().exchange &&
-                    chart->pair().symbol == dom->pair().symbol) {
-                    dom->link_realtime(&chart->realtime_dom_frame());
-                    if (dom->is_open && dom->links_realtime()) chart->set_rt_dom_linked(true);
-                    break;
-                }
-            }
-        }
-    }
-    // Price transforms are only final after ImPlot renders. Charts go first,
-    // then matching DOMs consume that same frame, regardless of widget order.
-    for (int pass = 0; pass < 3; ++pass) for (const auto& widget: g_app.widgets) {
-        const int widget_pass = widget->type() == WidgetType::Chart ? 0 :
-            widget->type() == WidgetType::DOM ? 1 : 2;
-        if (widget_pass != pass) continue;
-        if (widget->type() == WidgetType::Trades) {
-            const auto* tape = static_cast<const TradesWidget*>(widget.get());
-            bool covered = false;
-            for (const auto& candidate : g_app.widgets) {
-                if (!candidate->is_open || candidate->type() != WidgetType::DOM) continue;
-                const auto* dom = static_cast<const DOMWidget*>(candidate.get());
-                if (!dom->links_realtime() || dom->pair().exchange != tape->pair().exchange ||
-                    dom->pair().symbol != tape->pair().symbol) continue;
-                if (LayoutManager::vertical_siblings(*dom, *tape)) covered = true;
-            }
-            // Like clip-focus layout, skip submission only. Subscriptions and
-            // remembered docking survive; independent mode restores the tape.
-            if (covered && !tape->explicitly_opened) continue;
-        }
+    for (const auto& widget: g_app.widgets) {
         if (rec_focus_widgets && widget->type() == WidgetType::Watchlist) continue;
         // Per-widget render timing - labels by widget type so the once/sec
         // console profile shows exactly where frame time goes.
@@ -1230,7 +1290,7 @@ void update_and_render_widgets() {
         draw->PushClipRect(rect.Min, rect.Max, true);
         const auto texture = LogoManager::instance().exchange(pair->exchange);
         if (texture) draw->AddImage(texture, pos, ImVec2(pos.x + size, pos.y + size));
-        else draw_logo_monogram(draw, pair->exchange == "hl" ? "HL" : "B", pos, size);
+        else draw_logo_monogram(draw, pair->exchange == "hl" ? "HL" : pair->exchange == "bybit" ? "BY" : "B", pos, size);
         draw->PopClipRect();
         if (ImGui::IsMouseHoveringRect(pos, ImVec2(pos.x + size, pos.y + size)))
             Theme::tooltip("%s", widget_venue_label(pair->exchange));
@@ -1321,9 +1381,124 @@ static void apply_embedded_viewport(int css_w, int css_h, double dpr) {
 #endif
 
 
+#ifdef __EMSCRIPTEN__
+// With more than one terminal window open, present every refresh only where
+// it can be seen: the focused window, or one the pointer is over or that took
+// input in the last second. Any other window presents every Nth refresh, N
+// from the measured refresh rate, so it lands near 60 Hz. Measured on a 180 Hz + 155 Hz X11 desktop (2026-09-17): two
+// full-rate terminals split across the monitors stalled each other in Firefox
+// to 133/114 FPS with 20-46 ms P99 spikes and 1-2 ms of CPU per frame; the
+// same pair with the second window at every 3rd refresh held 180 and 59.
+// ?vsync=N pins the interval for measurement and disables the automatic rule.
+namespace {
+struct PresentationCadence {
+    int fixed = 0;                 // ?vsync=N; 0 = automatic
+    int current = 1;               // interval SDL was last given
+    int full_rate_frames = 0;      // consecutive frames presented at interval 1
+    double refresh_hz = 0.0;       // from the P50 interval of a full-rate window
+    double last_poll = 0.0;
+    double last_input = 0.0;
+    bool pointer_over = false;     // canvas mouseenter/mousemove vs mouseleave, read each poll
+} g_cadence;
+
+void note_presentation_input() { g_cadence.last_input = ImGui::GetTime(); }
+
+// Every terminal document holds the same shared Web Lock the web notice uses
+// (edgedepth:terminal-tab:v1); the browser releases it when the document
+// goes away, so counting distinct holders is an honest "other terminal
+// windows" signal with nothing stored. Polled every 3 s into a JS global;
+// browsers without locks report zero and keep the full rate.
+void start_window_census() {
+    EM_ASM({
+        Module.__edgedepthOtherWindows = 0;
+        // Pointer presence from the canvas's own events: SDL reports mouse
+        // focus at boot whether or not the pointer is anywhere near the
+        // window, so its enter/leave pair cannot be trusted for this.
+        Module.__edgedepthPointerOver = 0;
+        var canvas = Module.canvas;
+        if (canvas) {
+            var over = function() { Module.__edgedepthPointerOver = 1; };
+            canvas.addEventListener('mouseenter', over);
+            canvas.addEventListener('mousemove', over);
+            canvas.addEventListener('mouseleave', function() { Module.__edgedepthPointerOver = 0; });
+        }
+        if (!navigator.locks) return;
+        var name = 'edgedepth:terminal-tab:v1';
+        var count = function() {
+            navigator.locks.query().then(function(snapshot) {
+                var ids = {};
+                (snapshot.held || []).forEach(function(lock) {
+                    if (lock.name === name) ids[lock.clientId] = 1;
+                });
+                Module.__edgedepthOtherWindows = Math.max(0, Object.keys(ids).length - 1);
+            }).catch(function() {});
+        };
+        navigator.locks.request(name, { mode: 'shared' }, function() {
+            count();
+            setInterval(count, 3000);
+            return new Promise(function() {});  // held for the document's lifetime
+        }).catch(function() {});
+    });
+}
+
+int other_terminal_windows() {
+    return EM_ASM_INT({ return Module.__edgedepthOtherWindows | 0; });
+}
+
+bool pointer_over_canvas() {
+    return EM_ASM_INT({ return Module.__edgedepthPointerOver | 0; }) != 0;
+}
+
+void tick_presentation_cadence() {
+    if (g_cadence.fixed > 0) return;
+    // The refresh rate is the median full-rate interval over a whole tracker
+    // window: the minimum is fooled by rAF jitter (Firefox reported intervals
+    // down to 4 ms on a 180 Hz panel), dropped frames only lengthen the P50.
+    if (g_cadence.current == 1) {
+        if (++g_cadence.full_rate_frames >= static_cast<int>(FrameTimeTracker::HISTORY_SIZE)) {
+            g_cadence.full_rate_frames = 0;
+            const auto stats = g_frame_tracker.compute();
+            if (stats.p50 > 0.0) g_cadence.refresh_hz = 1000.0 / stats.p50;
+        }
+    } else {
+        g_cadence.full_rate_frames = 0;
+    }
+    const double t = ImGui::GetTime();
+    if (t - g_cadence.last_poll < 0.1) return;  // JS boundary, 10 Hz like the other polls
+    g_cadence.last_poll = t;
+    const bool focused = EM_ASM_INT({ return document.hasFocus() ? 1 : 0; }) != 0;
+    g_cadence.pointer_over = pointer_over_canvas();
+    const bool active = focused || g_cadence.pointer_over || t - g_cadence.last_input < 1.0;
+    // A lone window keeps every refresh even while idle: the reduced cadence
+    // exists to stop terminal windows contending with each other, not to
+    // change what a single window looks like on a high-refresh display.
+    const int others = other_terminal_windows();
+    int target = 1;
+    if (!active && g_cadence.refresh_hz > 0.0 && others > 0) {
+        target = std::clamp(static_cast<int>(std::lround(g_cadence.refresh_hz / 60.0)), 1, 4);
+    }
+    if (target != g_cadence.current) {
+        g_cadence.current = target;
+        SDL_GL_SetSwapInterval(target);
+    }
+    if (PerformanceDiagnostics::enabled()) {
+        char note[160];
+        std::snprintf(note, sizeof(note),
+                      "Cadence: %s%s%s, %d other window%s, refresh %.0f Hz, every %d",
+                      focused ? "focused" : "unfocused",
+                      g_cadence.pointer_over ? ", pointer" : "",
+                      t - g_cadence.last_input < 1.0 ? ", input" : "",
+                      others, others == 1 ? "" : "s", g_cadence.refresh_hz, target);
+        PerformanceDiagnostics::set_cadence_note(note);
+    }
+}
+}  // namespace
+#endif
+
 void main_loop() {
     if (g_app.ws_client) g_app.ws_client->tick();
     if (g_app.replay_ws_client) g_app.replay_ws_client->tick();
+    tick_restart_refetch();
     static std::chrono::steady_clock::time_point last_frame{};
     static bool has_previous_frame = false;
     const auto now = std::chrono::steady_clock::now();
@@ -1340,6 +1515,7 @@ void main_loop() {
     has_previous_frame = true;
 
 #ifdef __EMSCRIPTEN__
+    tick_presentation_cadence();
     // Viewport/DPR sync. Crosses the JS↔WASM boundary, so we throttle.
     if (EducationBoot::instance().is_embedded()) {
         // Embedded host: the canvas is a flex-box child, not the window. Consume a
@@ -1408,6 +1584,18 @@ void main_loop() {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         ImGui_ImplSDL3_ProcessEvent(&event);
+#ifdef __EMSCRIPTEN__
+        switch (event.type) {
+            case SDL_EVENT_MOUSE_MOTION:
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            case SDL_EVENT_MOUSE_WHEEL:
+            case SDL_EVENT_KEY_DOWN:
+            case SDL_EVENT_TEXT_INPUT:
+                note_presentation_input();
+                break;
+            default: break;
+        }
+#endif
         // if (event.type == SDL_EVENT_QUIT) {
         //     g_app.done = true;
         // }
@@ -1623,9 +1811,10 @@ void main_loop() {
         edu::RecorderRuntime::instance().render_overlay(g_app.app_ctx);
     }
     if (!rec_focus && PerformanceDiagnostics::enabled()) {
-        const QueueBacklogSnapshot queues = g_app.data_thread
+        QueueBacklogSnapshot queues = g_app.data_thread
             ? g_app.data_thread->queue_metrics()
             : QueueBacklogSnapshot{};
+        if (g_app.data_thread) queues.dropped_dispatches = g_app.data_thread->dispatch_queue().dropped_total();
         PerformanceDiagnostics::render(g_profiler, g_frame_tracker, queues);
     }
     // render_debug();
@@ -1648,6 +1837,16 @@ void main_loop() {
     g_profiler.begin("GL Draw");
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     g_profiler.end("GL Draw");
+    // Submission shape for ?perf=1: each draw command is a scissor plus a
+    // glDrawElements through the browser's GPU process, and each list is two
+    // buffer uploads. Compare these before blaming the GPU for a slow frame.
+    if (const ImDrawData* dd = ImGui::GetDrawData(); dd && PerformanceDiagnostics::enabled()) {
+        long commands = 0;
+        for (int i = 0; i < dd->CmdListsCount; ++i) commands += dd->CmdLists[i]->CmdBuffer.Size;
+        g_profiler.add_count("GL Draw", commands);
+        g_profiler.add_count("GLCmdLists", dd->CmdListsCount);
+        g_profiler.add_count("GLVertices", dd->TotalVtxCount);
+    }
     g_profiler.begin("SwapWindow");
     SDL_GL_SwapWindow(g_app.window);
     g_profiler.end("SwapWindow");
@@ -1785,7 +1984,13 @@ int main(int, char**) {
     // different symbol = a fresh canvas mount, driven by the studio shell).
     if (EducationBoot::instance().is_studio() &&
         !EducationBoot::instance().studio_symbol().empty()) {
-        g_initial_route.symbol = EducationBoot::instance().studio_symbol();
+        // The venue rides the same global (research replay viewer). An older
+        // host that sends none leaves the route's venue in place, which for
+        // a /terminal?replay= page is whatever ?exchange= said or binancef.
+        const std::string& studio_ex = EducationBoot::instance().studio_exchange();
+        if (is_known_exchange(studio_ex)) g_initial_route.exchange = studio_ex;
+        g_initial_route.symbol = normalize_symbol_case(
+            g_initial_route.exchange, EducationBoot::instance().studio_symbol());
     }
     // Event (archive replay) mode: boot the BARE terminal but for the event's
     // symbol, so widgets + dock layout build for the right symbol from frame one
@@ -1875,6 +2080,10 @@ int main(int, char**) {
         connect_replay_websocket();
     }
     g_app.replay_mgr = std::make_unique<ReplayManager>(replay_lane_socket(), archive_lane_socket());
+    // Every session this canvas creates plays the boot route's venue (the
+    // canvas is single-pair, a session is single-venue). Set before any entry
+    // point can POST: the lesson/studio starts below run off callbacks.
+    g_app.replay_mgr->set_exchange(g_initial_route.exchange);
     if (EducationBoot::instance().is_event() || EducationBoot::instance().is_lesson()) {
         // Arm the persistent pause before the socket-open callback can replay
         // subscriptions and before a lesson document finishes loading.
@@ -1884,6 +2093,10 @@ int main(int, char**) {
     // Wire context-swap callback: when replay starts, swap AppContext pointers
     // to replay managers. When replay stops, swap back to live managers.
     g_app.replay_mgr->set_context_swap_callback([](DataContext* replay_ctx) {
+#ifdef EDGEDEPTH_EXPOSURE_V2_DEV
+            exposure::History::invalidate_all("V2 replay context changed; reload required");
+            exposure::SummaryHistory::invalidate_all("V2 replay context changed; reload required");
+#endif
         if (replay_ctx) {
             // Stop live data from the backend
             g_app.stream_mgr->pause_live_subscriptions();
@@ -1903,6 +2116,22 @@ int main(int, char**) {
             g_app.app_ctx.footprint    = replay_ctx->footprint;
             g_app.app_ctx.series       = replay_ctx->series;
             g_app.app_ctx.analytics    = replay_ctx->analytics;
+
+            // Secondary charts do not cross a context swap: a live one's
+            // manager is subscribed to the LIVE StreamManager and would keep
+            // building live candles beside the replay, and one opened in a
+            // previous replay belongs to the context being retired. Close
+            // them; the end-of-frame sweep erases them and the manager's
+            // destructor unsubscribes through the manager it subscribed to.
+            // The primary chart is untouched. A second chart opened from
+            // "+ widget" during the replay builds its own manager in the new
+            // context (ChartWidget constructor).
+            for (auto& w : g_app.widgets) {
+                if (w && w->type() == WidgetType::Chart &&
+                    static_cast<ChartWidget*>(w.get())->is_secondary()) {
+                    w->is_open = false;
+                }
+            }
 
             // Liq heatmap data is now delivered by the Replayer's DB drip-feed
             // (fetchLiqHeatmapTimeline in replay_seeds.go), NOT by a client-side
@@ -1950,9 +2179,19 @@ int main(int, char**) {
 
             // Create replay widgets subscribed to the replay StreamManager.
             if (!replay_ctx->symbols.empty()) {
-                Terminal::Pair replay_pair{"binancef", replay_ctx->symbols[0]};
+                // The session venue, never a literal: frames route by the wire
+                // pair, and a Bybit session's chart keyed on binancef sees none.
+                const Terminal::Pair replay_pair = replay_ctx->primary_pair();
                 auto fmt = SymbolRegistry::instance().get_formatter(replay_pair.exchange, replay_pair.symbol);
                 double dom_tick = SymbolRegistry::instance().tick_or_zero(replay_pair.exchange, replay_pair.symbol);
+                // Compare markets (symbols[1..]) stack under the primary. A
+                // change in the compare set is a layout change: the dock tree
+                // has no nodes for the new charts, so it is rebuilt like a
+                // pair change. ImGui prunes empty dock nodes, so the nodes can
+                // only be built once the charts exist, i.e. here.
+                std::vector<std::string> compare(replay_ctx->symbols.begin() + 1,
+                                                 replay_ctx->symbols.end());
+                const bool compare_changed = compare != LayoutManager::compare_symbols();
 
                 // The chart has to BELONG to the replay pair, not merely exist.
                 // The old guard asked "is any chart open", which is symbol-blind,
@@ -1968,7 +2207,7 @@ int main(int, char**) {
                 //
                 // Ask the layout what pair it was BUILT for.
                 if (!LayoutManager::layout_matches(replay_pair.exchange,
-                                                   replay_pair.symbol)) {
+                                                   replay_pair.symbol) || compare_changed) {
                     // Retire charts built for another pair. This DESTROYS them
                     // (erase_if(!is_open) at the end of the frame) rather than
                     // hiding them, which is what is wanted here: they are being
@@ -1983,11 +2222,31 @@ int main(int, char**) {
                         }
                         w->is_open = false;
                     }
+                    LayoutManager::set_compare_symbols(compare);
                     LayoutManager::reset_layout_for(replay_pair.exchange, replay_pair.symbol);
                     auto chart_w = std::make_unique<ChartWidget>(
                         replay_pair, g_app.app_ctx, dom_tick);
                     chart_w->is_replay_widget = true;
                     g_app.widgets.push_back(std::move(chart_w));
+                }
+                // One compare chart per extra market: a replay widget that
+                // reads the context's own manager for its pair (no live
+                // subscription, no history request of its own) and shares the
+                // primary's time axis. The primary is linked too while the
+                // session has company, and unlinked again on exit below.
+                for (const auto& sym : compare) {
+                    const Terminal::Pair cpair{replay_pair.exchange, sym};
+                    const double ctick = SymbolRegistry::instance().tick_or_zero(cpair.exchange, cpair.symbol);
+                    auto cw = std::make_unique<ChartWidget>(cpair, g_app.app_ctx, ctick, 1, /*compare=*/true);
+                    cw->is_replay_widget = true;
+                    g_app.widgets.push_back(std::move(cw));
+                }
+                for (auto& w : g_app.widgets) {
+                    if (!w || w->type() != WidgetType::Chart) continue;
+                    auto* chart = static_cast<ChartWidget*>(w.get());
+                    if (chart->pair().exchange == replay_pair.exchange &&
+                        chart->pair().symbol == replay_pair.symbol)
+                        chart->set_time_linked(!compare.empty());
                 }
 
                 auto trades_w = std::make_unique<TradesWidget>(replay_pair, g_app.app_ctx, fmt);
@@ -2014,6 +2273,23 @@ int main(int, char**) {
                                           w->type() == WidgetType::Chart;
                     w->is_open = false;  // Will be erased by cleanup loop
                 }
+            }
+            // A compare layout has no place in the live terminal: drop the
+            // stacked split and re-key the dock for the live pair, and unlink
+            // the surviving primary chart's time axis.
+            if (!LayoutManager::compare_symbols().empty()) {
+                LayoutManager::set_compare_symbols({});
+                g_live_flow_rebuild.want_chart = true;
+                for (auto& w : g_app.widgets) {
+                    if (!w || w->type() != WidgetType::Chart) continue;
+                    auto* chart = static_cast<ChartWidget*>(w.get());
+                    chart->set_time_linked(false);
+                    if (!w->is_replay_widget) {
+                        g_live_flow_rebuild.pair = chart->pair();
+                        w->is_open = false;  // rebuilt below, keyed on the live pair
+                    }
+                }
+                closed_replay_chart = true;
             }
             g_live_flow_rebuild.armed = g_live_flow_rebuild.want_dom ||
                                         g_live_flow_rebuild.want_trades ||
@@ -2046,6 +2322,11 @@ int main(int, char**) {
 
     // Wire rewind callback: when << is pressed, clear widget data
     g_app.replay_mgr->set_rewind_callback([](int64_t cutoff_ms) {
+        liquidity_response::History::invalidate_all("Replay rewound; waiting for observations");
+#ifdef EDGEDEPTH_EXPOSURE_V2_DEV
+            exposure::History::invalidate_all("V2 rewind; reload required");
+            exposure::SummaryHistory::invalidate_all("V2 rewind; reload required");
+#endif
         for (auto& w : g_app.widgets) {
             if (w && w->is_replay_widget) {
                 w->on_rewind(cutoff_ms);
@@ -2079,8 +2360,26 @@ int main(int, char**) {
     SymbolRegistry::instance().fetch_metadata([]() {
     });
 
-SDL_GL_MakeCurrent(g_app.window, g_app.gl_context);
-    SDL_GL_SetSwapInterval(0); // Enable vsync
+    SDL_GL_MakeCurrent(g_app.window, g_app.gl_context);
+    // Present once per display refresh. On Emscripten SDL maps interval 1 to a
+    // requestAnimationFrame main loop and interval 0 to setTimeout(0), which
+    // redraws as fast as the CPU and GPU allow (the old 180 FPS counter). Frames
+    // above the monitor rate are never shown; they only burn CPU and GPU time,
+    // and every terminal window shares the browser's single GPU process, so two
+    // uncapped windows halved each other. rAF gives each window its own
+    // monitor's cadence and stops entirely while a tab is hidden.
+    int swap_interval = 1;
+#ifdef __EMSCRIPTEN__
+    // ?vsync=N (1..4, dev only) pins every Nth refresh; see PresentationCadence.
+    g_cadence.fixed = EM_ASM_INT({
+        var v = parseInt(new URLSearchParams(window.location.search).get('vsync') || '0', 10);
+        return (v >= 1 && v <= 4) ? v : 0;
+    });
+    if (g_cadence.fixed > 0) swap_interval = g_cadence.fixed;
+    g_cadence.current = swap_interval;
+    start_window_census();
+#endif
+    SDL_GL_SetSwapInterval(swap_interval);
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImPlot::CreateContext();

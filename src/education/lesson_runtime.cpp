@@ -535,7 +535,7 @@ void LessonRuntime::render_overlay(const AppContext& ctx) {
     fg->AddRectFilled(ImVec2(v0.x, by0), ImVec2(bx0, by1), dim);
     fg->AddRectFilled(ImVec2(bx1, by0), ImVec2(v1.x, by1), dim);
 
-    const ImU32 ring = is_track ? IM_COL32(255, 191, 0, 230) : IM_COL32(34, 197, 219, 235);
+    const ImU32 ring = is_track ? IM_COL32(255, 191, 0, 230) : IM_COL32(77, 219, 172, 235);
     fg->AddRect(ImVec2(bx0, by0), ImVec2(bx1, by1), ring, 3.0f, 0, 1.6f);
 
     if (is_track) {
@@ -622,7 +622,7 @@ void LessonRuntime::render_overlay(const AppContext& ctx) {
             }
             // NO button, NO separator - pure content in the recording.
         } else {
-            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(34, 197, 219, 255));
+            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(77, 219, 172, 255));
             ImGui::TextUnformatted((std::to_string(step.n) + "  " +
                                     (step.kicker.empty() ? (quiz ? "PREDICT" : "STEP") : step.kicker)).c_str());
             ImGui::PopStyleColor();

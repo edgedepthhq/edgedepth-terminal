@@ -39,6 +39,7 @@ void OrderbookWidget::update() {
 
 void OrderbookWidget::render() {
     if (!is_open) return;
+    place_new_window();
     if (!ImGui::Begin(title_.c_str(), &is_open, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;

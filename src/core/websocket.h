@@ -21,6 +21,17 @@ public:
     double last_frame_age_ms() const;
     bool is_connected() const { return is_connected_; }
 
+    // Planned restart: the hub closes with 1001 "restart <eta s>" before a
+    // redeploy. While it is pending we retry every 2 s instead of backing off,
+    // and the shell shows the early-access banner with a countdown.
+    bool planned_restart_active() const;
+    double planned_restart_remaining_ms() const;
+    // One-shot: true on the first call after a socket reopened following a
+    // planned restart; last_outage_ms() is how long that gap was.
+    bool take_reconnected_after_restart();
+    double last_outage_ms() const { return last_outage_ms_; }
+    double reconnected_age_ms() const;
+
     bool send_text(const std::string& message) const;
     bool send_binary(const std::uint8_t* data, size_t length) const;
 
@@ -44,6 +55,11 @@ private:
     double opened_at_ms_ = 0;
     double last_frame_ms_ = -1;
     unsigned retry_count_ = 0;
+    double planned_restart_since_ms_ = 0;
+    double planned_restart_until_ms_ = 0;
+    double reconnected_at_ms_ = 0;
+    double last_outage_ms_ = 0;
+    bool reconnected_after_restart_ = false;
     EMSCRIPTEN_WEBSOCKET_T socket_;
     bool is_connected_;
     MessageCallback message_callback_;

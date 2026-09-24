@@ -52,20 +52,21 @@ namespace {
 void flow_time(int64_t epoch,char* out,size_t size) {
     DisplayTimeZone::instance().format(epoch,TimeZoneFormat::FullInspection,out,size);
 }
+int flow_percent(double v,char* out,int size,void*) { return snprintf(out,size,"%+.2f%%",v); }
 void flow_split(double left,double right,const char* label) {
     const auto pos=ImGui::GetCursorScreenPos();
     const float width=ImGui::GetContentRegionAvail().x;
-    const float radius=43.0f;
-    const ImVec2 center(pos.x+width*.5f,pos.y+54.0f);
-    ImGui::Dummy(ImVec2(width,108));
+    const float radius=29.0f;
+    const ImVec2 center(pos.x+width*.5f,pos.y+36.0f);
+    ImGui::Dummy(ImVec2(width,72));
     auto* draw=ImGui::GetWindowDrawList();
     const double total=left+right;
-    draw->AddCircle(center,radius,Theme::u32(Theme::Tokens::BD1),64,12.0f);
+    draw->AddCircle(center,radius,Theme::u32(Theme::Tokens::BD1),64,9.0f);
     if(total>0){
         constexpr float pi=3.14159265358979323846f;
         const float start=-pi*.5f,split=start+2*pi*float(left/total);
-        if(left>0){draw->PathArcTo(center,radius,start,split,64);draw->PathStroke(Theme::get_buy_color_u32(210),0,12.0f);}
-        if(right>0){draw->PathArcTo(center,radius,split,start+2*pi,64);draw->PathStroke(Theme::get_sell_color_u32(210),0,12.0f);}
+        if(left>0){draw->PathArcTo(center,radius,start,split,64);draw->PathStroke(Theme::get_buy_color_u32(210),0,9.0f);}
+        if(right>0){draw->PathArcTo(center,radius,split,start+2*pi,64);draw->PathStroke(Theme::get_sell_color_u32(210),0,9.0f);}
     }
     char value[32]{};
     if(total>0)snprintf(value,sizeof(value),"%.1f%%",100*left/total);
@@ -82,28 +83,37 @@ void ChartWidget::render_flow_positioning() {
     const auto& a=flow_history_.assessment;
     const bool ready=flow_history_.ready && e.from==flow_from_ && e.to==flow_to_;
     const double x0=stored_x_min_,x1=stored_x_max_;
-    double maximum=1,oi_min=0,oi_max=1;
+    double maximum=1,liq_max=1,oi_min=0,oi_max=0;
     if(ready){
         for(const auto& b:e.bars)maximum=std::max({maximum,b.buy,b.sell});
-        bool first=true;for(const auto& o:e.oi)if(o.contracts>0){if(first){oi_min=oi_max=o.contracts;first=false;}else{oi_min=std::min(oi_min,o.contracts);oi_max=std::max(oi_max,o.contracts);}}
-        const double pad=std::max(1.0,(oi_max-oi_min)*.15);oi_min-=pad;oi_max+=pad;
+        for(const auto& l:e.liquidations)liq_max=std::max(liq_max,l.usd);
+        for(const auto& o:e.oi)if(o.contracts>0&&a.oi_start>0){const double pct=(o.contracts/a.oi_start-1)*100;oi_min=std::min(oi_min,pct);oi_max=std::max(oi_max,pct);}
+        const double pad=std::max(.01,(oi_max-oi_min)*.15);oi_min-=pad;oi_max+=pad;
     }
     // At most 240 paired columns. Each column remains one original complete
     // minute; no display downsampling rewrites quantities or OI observations.
     const bool show_oi=ready && a.raw_count>0;
-    for(int lane=0;lane<(show_oi?2:1);++lane){
+    for(int lane=0;lane<3;++lane){
+        if((lane==1&&!show_oi)||(lane==2&&(!ready||!e.liquidations_available)))continue;
+        const bool last_lane=lane==2||((!ready||!e.liquidations_available)&&(lane==1||!show_oi));
+        const double ymin=lane==1?oi_min:0, ymax=lane==0?maximum*1.3:lane==1?oi_max:liq_max*1.3;
         if(lane==0){
             ImGui::TextUnformatted("Traded quantity / minute");
             ImGui::SameLine(0,12);ImGui::TextColored(get_buy_color(), "Buy");
             ImGui::SameLine(0,12);ImGui::TextColored(get_sell_color(), "Sell");
-        } else ImGui::TextDisabled("Open interest / contracts at original sample times");
-        if(ImPlot::BeginPlot(lane==0?"##FlowAggression":"##FlowOI",ImVec2(-1,lane==0?100: 70),ImPlotFlags_NoTitle|ImPlotFlags_NoLegend|ImPlotFlags_NoMouseText|ImPlotFlags_NoMenus)){
-            ImPlot::SetupAxis(ImAxis_X1,nullptr,ImPlotAxisFlags_Lock|(lane==0&&show_oi?ImPlotAxisFlags_NoTickLabels:0));
+        } else if(lane==1){
+            ImGui::Text("OI %s %+.2f%%",a.usable_oi?(a.oi_pct>0?"rising":a.oi_pct<0?"falling":"unchanged"):"partial endpoint change",a.oi_pct);
+            ImGui::SameLine();ImGui::TextDisabled("| %s",a.recovered_count?(a.recovered_count==a.raw_count?"Recovered":"Mixed raw/recovered"):"Raw recorded");
+        } else ImGui::TextDisabled("Reported liquidations / USD per minute (partial feed)");
+        if(ImPlot::BeginPlot(lane==0?"##FlowAggression":lane==1?"##FlowOI":"##FlowLiquidations",ImVec2(-1,lane==0?55:lane==1?65:45),ImPlotFlags_NoTitle|ImPlotFlags_NoLegend|ImPlotFlags_NoMouseText|ImPlotFlags_NoMenus)){
+            ImPlot::SetupAxis(ImAxis_X1,nullptr,ImPlotAxisFlags_Lock|(!last_lane?ImPlotAxisFlags_NoTickLabels:0));
             ImPlot::SetupAxis(ImAxis_Y1,nullptr,ImPlotAxisFlags_Opposite|ImPlotAxisFlags_Lock|((lane==1&&(!ready||a.raw_count==0))?ImPlotAxisFlags_NoTickLabels|ImPlotAxisFlags_NoGridLines:0));
             ImPlot::SetupAxisLimits(ImAxis_X1,x0,x1,ImGuiCond_Always);
-            ImPlot::SetupAxisLimits(ImAxis_Y1,lane==0?0:oi_min,lane==0?maximum*1.3:oi_max,ImGuiCond_Always);
-            if(lane==1||!show_oi) setup_time_axis_ticks(x0,x1);
-            ImPlot::SetupAxisFormat(ImAxis_Y1,Indicators::format_oi_axis);
+            ImPlot::SetupAxisLimits(ImAxis_Y1,ymin,ymax,ImGuiCond_Always);
+            if(last_lane) setup_time_axis_ticks(x0,x1);
+            ImPlot::SetupAxisFormat(ImAxis_Y1,lane==1?flow_percent:Indicators::format_oi_axis);
+            const double count_ticks[2]={0,lane==0?maximum:liq_max};
+            if(lane!=1)ImPlot::SetupAxisTicks(ImAxis_Y1,count_ticks,2);
             ImPlot::SetupFinish();
             ImPlot::PushPlotClipRect();
             auto* dl=ImPlot::GetPlotDrawList();
@@ -125,12 +135,20 @@ void ChartWidget::render_flow_positioning() {
                     dl->AddRectFilled(ImVec2(middle.x+std::min(1.0f,(right.x-middle.x)*.15f),right.y),ImVec2(right.x,middle.y),get_sell_color_u32(210));
                 }
             }
+            if(ready&&lane==2){
+                for(const auto& l:e.liquidations){
+                    const auto top=ImPlot::PlotToPixels(double(l.time)+(l.buy?-22000:1000),l.usd);
+                    const auto bottom=ImPlot::PlotToPixels(double(l.time)+(l.buy?-1000:22000),0);
+                    dl->AddRectFilled(top,bottom,l.buy?get_buy_color_u32(210):get_sell_color_u32(210));
+                }
+            }
             if(ready&&lane==1){
+                dl->AddLine(ImPlot::PlotToPixels(x0,0),ImPlot::PlotToPixels(x1,0),u32(Tokens::BD1),1);
                 const flow_positioning::OI* previous=nullptr;
                 for(const auto& o:e.oi){
                     if(o.contracts<=0){previous=nullptr;continue;}
-                    const auto p=ImPlot::PlotToPixels(double(o.time),o.contracts);
-                    if(previous&&o.time-previous->time<=30000)dl->AddLine(ImPlot::PlotToPixels(double(previous->time),previous->contracts),p,u32(Tokens::TX2),1);
+                    const auto p=ImPlot::PlotToPixels(double(o.time),(o.contracts/a.oi_start-1)*100);
+                    if(previous&&o.time-previous->time<=30000)dl->AddLine(ImPlot::PlotToPixels(double(previous->time),(previous->contracts/a.oi_start-1)*100),p,u32(Tokens::TX2),1);
                     dl->AddCircleFilled(p,2,u32(Tokens::TX1));previous=&o;
                 }
             }
@@ -140,9 +158,9 @@ void ChartWidget::render_flow_positioning() {
                 crosshair_state_.is_active=true;crosshair_state_.indicator_hovered=true;crosshair_state_.chart_hovered=false;
                 crosshair_state_.plot_pos=ImPlot::GetPlotMousePos();
                 crosshair_state_.hovered_plot_min=plot_pos;crosshair_state_.hovered_plot_max=crosshair_state_.last_plot_max;
-                crosshair_state_.hovered_y_min=lane==0?0:oi_min;
-                crosshair_state_.hovered_y_max=lane==0?maximum*1.3:oi_max;
-                crosshair_state_.indicator_y_formatter=Indicators::format_oi_axis;
+                crosshair_state_.hovered_y_min=ymin;
+                crosshair_state_.hovered_y_max=ymax;
+                crosshair_state_.indicator_y_formatter=lane==1?flow_percent:Indicators::format_oi_axis;
             }
             ImPlot::PopPlotClipRect();ImPlot::EndPlot();
         }
@@ -151,63 +169,59 @@ void ChartWidget::render_flow_positioning() {
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,ImVec2(8,5));
     char start[128]{},end[128]{};flow_time(flow_from_,start,sizeof(start));flow_time(flow_to_,end,sizeof(end));
     const bool selected=replay_selection_.start_ms!=replay_selection_.end_ms;
-    ImGui::TextWrapped("%s | %s to %s | %lld complete min",selected?"Selected move":"Latest evidence",start,end,
+    char short_start[64]{},short_end[64]{};
+    DisplayTimeZone::instance().format(flow_from_,TimeZoneFormat::DateTimeMinutes,short_start,sizeof(short_start));
+    DisplayTimeZone::instance().format(flow_to_,TimeZoneFormat::DateTimeMinutes,short_end,sizeof(short_end));
+    ImGui::TextWrapped("%s | %s to %s | %lld min",selected?"Selected":"Latest",short_start,short_end,
         static_cast<long long>(std::max<int64_t>(0,flow_to_-flow_from_)/60000));
     if(selected){if(ImGui::SmallButton("Latest 5 minutes")){replay_selection_.start_ms=replay_selection_.end_ms=0;}}
 
     if(!ready){ImGui::TextWrapped("%s",flow_history_.status.c_str());ImGui::TextWrapped("Shift-drag 1 minute to 4 hours on the price chart. Only complete minutes are assessed.");}
     else {
-        ImGui::Separator();
         const double total=a.buy+a.sell;
-        if(a.complete_bars&&total>0)ImGui::TextWrapped("Price %s %.2f%%; aggressive buys were %.1f%% of traded quantity.",
-            a.price_pct>0?"rose":a.price_pct<0?"fell":"changed",std::abs(a.price_pct),100*a.buy/total);
-        if(!a.complete_bars)ImGui::TextWrapped("%s",a.explanation);
-        if(!a.usable_oi)ImGui::TextWrapped("%s",a.hypothesis);
-        if(ImGui::BeginTable("##FlowMetrics",3,ImGuiTableFlags_SizingStretchSame|ImGuiTableFlags_BordersInnerV)){
-            ImGui::TableNextColumn();ImGui::TextDisabled("PRICE");
-            if(a.complete_bars)ImGui::Text("%+.2f%%",a.price_pct);else ImGui::TextUnformatted("Incomplete");
-            ImGui::TableNextColumn();ImGui::TextDisabled("AGGRESSOR BUY SHARE");
-            if(a.complete_bars&&total>0)ImGui::Text("%.1f%%",100*a.buy/total);else ImGui::TextUnformatted("Unavailable");
-            ImGui::TableNextColumn();ImGui::TextDisabled("OPEN INTEREST");
-            if(a.usable_oi)ImGui::Text("%+.4f%%",a.oi_pct);else ImGui::TextUnformatted(a.raw_count?"Incomplete":"Unavailable");
-            if(a.raw_count){char first[32]{},last[32]{};Indicators::format_oi_axis(a.oi_start,first,sizeof(first),nullptr);Indicators::format_oi_axis(a.oi_end,last,sizeof(last),nullptr);ImGui::TextWrapped("%s to %s contracts",first,last);}
-
+        if(a.complete_bars)ImGui::Text("Price %+.2f%%",a.price_pct);
+        else ImGui::TextUnformatted("Price / aggression: incomplete minutes");
+        if(!a.usable_oi){ImGui::SameLine();ImGui::TextUnformatted(a.raw_count?"| OI partial":"| OI unavailable");}
+        char buy[32],sell[32],liq[32];
+        Indicators::format_oi_axis(a.buy,buy,sizeof(buy),nullptr);Indicators::format_oi_axis(a.sell,sell,sizeof(sell),nullptr);
+        Indicators::format_oi_axis(a.forced_buy+a.forced_sell,liq,sizeof(liq),nullptr);
+        if(ImGui::BeginTable("##FlowSplits",2,ImGuiTableFlags_SizingStretchSame)){
+            ImGui::TableNextColumn();
+            flow_split(a.buy,a.sell,"Aggressive buy share");
+            if(total>0)ImGui::TextWrapped("Buy %s / Sell %s (%.1f%%) base units",buy,sell,100*a.sell/total);
+            ImGui::TableNextColumn();
+            if(e.liquidations_available){
+                flow_split(a.forced_buy,a.forced_sell,"Short-liquidation share");
+                ImGui::TextWrapped("$%s reported | partial feed",liq);
+            } else ImGui::TextWrapped("Liquidations: %s",flow_positioning::error_message(e.liquidations_status));
             ImGui::EndTable();
         }
-        char buy[32],sell[32],forced_buy[32],forced_sell[32];
-        Indicators::format_oi_axis(a.buy,buy,sizeof(buy),nullptr);
-        Indicators::format_oi_axis(a.sell,sell,sizeof(sell),nullptr);
-        Indicators::format_oi_axis(a.forced_buy,forced_buy,sizeof(forced_buy),nullptr);
-        Indicators::format_oi_axis(a.forced_sell,forced_sell,sizeof(forced_sell),nullptr);
-        const bool split_table=ImGui::BeginTable("##FlowSplits",ImGui::GetContentRegionAvail().x>=620?2:1,ImGuiTableFlags_SizingStretchSame);
-        if(split_table)ImGui::TableNextColumn();
-        ImGui::TextUnformatted("Who crossed the spread?");
-        flow_split(a.buy,a.sell,"Aggressive buy share");
-        if(total>0){
-            ImGui::TextWrapped("Aggressive buys: %.1f%% (%s base-asset units)",100*a.buy/total,buy);
-            ImGui::TextWrapped("Aggressive sells: %.1f%% (%s base-asset units)",100*a.sell/total,sell);
-        }
-        ImGui::TextWrapped("Quantity, not trader count. Every trade has a buyer and seller; the aggressor takes available liquidity.%s",a.complete_bars?"":" Partial recorded minutes.");
-        if(split_table)ImGui::TableNextColumn();
-        ImGui::TextUnformatted("Reported liquidations");
-        if(e.liquidations_available){
-            flow_split(a.forced_buy,a.forced_sell,"Short-liquidation share of reported USD");
-            ImGui::TextWrapped("Forced buys / short liquidations $%s (%lld reports)",forced_buy,static_cast<long long>(a.forced_buy_count));
-            ImGui::TextWrapped("Forced sells / long liquidations $%s (%lld reports)",forced_sell,static_cast<long long>(a.forced_sell_count));
-            ImGui::TextWrapped("Reported USD only; partial feed coverage. No reports does not mean no liquidations.");
-        } else ImGui::TextWrapped("Reported liquidations: %s",flow_positioning::error_message(e.liquidations_status));
-        if(split_table)ImGui::EndTable();
-        if(a.raw_count){
-            if(a.raw_count>=2)ImGui::TextWrapped("Change between observed endpoints: %+.6f contracts (%+.4f%%).",a.oi_end-a.oi_start,a.oi_pct);
-        }
-        ImGui::TextWrapped("Coverage: %zu/%lld minutes; %zu/%zu raw OI samples; largest raw-sample gap %.1fs.",e.bars.size(),static_cast<long long>((e.to-e.from)/60000),a.raw_count,e.oi.size(),a.max_gap/1000.0);
         if(e.bars_status!="available")ImGui::TextWrapped("Price/aggression: %s",flow_positioning::error_message(e.bars_status));
         if(e.oi_status!="available")ImGui::TextWrapped("OI: %s",flow_positioning::error_message(e.oi_status));
-        ImGui::TextWrapped("Hover to compare the same minute. Latest stays latest while you pan; Shift-drag selects a move.");
-        if(ImGui::SmallButton("Inspect final minute conditions"))ui::ResearchMomentPanel::instance().open(pair_.symbol,flow_to_-60000);
-        if(ImGui::IsItemHovered())Theme::tooltip("Opens research conditions at the final complete minute of this exact interval. Finding similar moments proposes a study; it does not prove an edge.");
-        if(ImGui::SmallButton("Inspect evidence"))ImGui::OpenPopup("Flow evidence");
+        if(ImGui::SmallButton("Details"))ImGui::OpenPopup("Flow evidence");
         ImGui::SameLine();
+        if(ImGui::SmallButton("Investigate final minute"))ui::ResearchMomentPanel::instance().open(pair_.symbol,flow_to_-60000);
+        if(ImGui::IsItemHovered())Theme::tooltip("Inspect conditions at the final complete minute. Find moments proposes a study of those conditions, not the entire selected episode.");
+        ImGui::SetNextWindowSize(ImVec2(std::min(580.0f,ImGui::GetIO().DisplaySize.x-40.0f),std::min(540.0f,ImGui::GetIO().DisplaySize.y-100.0f)),ImGuiCond_Always);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(14,12));
+        ImGui::PushStyleColor(ImGuiCol_PopupBg,Tokens::PANEL);
+        if(ImGui::BeginPopup("Flow evidence")){
+            ImGui::Text("%s / %s",pair_.exchange.c_str(),pair_.symbol.c_str());
+            ImGui::TextWrapped("%s",a.explanation);
+            ImGui::TextWrapped("Exact interval: %s to %s (end exclusive)",start,end);
+            ImGui::Text("Buy %.6f / Sell %.6f quantity",a.buy,a.sell);
+            ImGui::Text("Reported forced buys $%.2f / sells $%.2f",a.forced_buy,a.forced_sell);
+            ImGui::Text("OI %zu/%zu valid samples (%zu recovered); largest gap %.1fs",a.raw_count,e.oi.size(),a.recovered_count,a.max_gap/1000.0);
+            if(a.raw_count)ImGui::Text("First %.6f / last %.6f contracts",a.oi_start,a.oi_end);
+            ImGui::TextWrapped("%s",a.hypothesis);
+            ImGui::TextWrapped("Retrospective stored evidence. Original availability is unverified. Liquidation reports cover only part of forced activity.");
+            ImGui::Text("Minute bars %zu / %lld",e.bars.size(),static_cast<long long>((e.to-e.from)/60000));
+            if(a.raw_count){char first[128]{},last[128]{};flow_time(a.first_oi,first,sizeof(first));flow_time(a.last_oi,last,sizeof(last));ImGui::TextWrapped("First OI: %s",first);ImGui::TextWrapped("Last OI: %s",last);ImGui::Text("Last sample to selected end: %.3fs",(e.to-a.last_oi)/1000.0);}
+
+            ImGui::TextWrapped("OI points retain original poll times. Recovered quantities divide the same stored row USD value by its stored mark. Raw NULL and recovery operands remain in the export; no state refresh or interpolation is used.");
+            ImGui::TextWrapped("No universal OI materiality threshold is applied. Read the exact size and sample coverage; a small signed change alone is not evidence of covering or unwinding.");
+            ImGui::TextWrapped("Saved assessment includes these source rows and exact boundaries. It is a local JSON file, not a published Studio assessment.");
+            ImGui::TextWrapped("Aggression is a share of traded quantity, not traders. Each trade has a buyer and seller; its aggressor takes available liquidity.");
         if(ImGui::SmallButton("Save assessment")){
             auto document=flow_history_.source;
             document["version"]="terminal_flow_assessment.v1";
@@ -217,29 +231,12 @@ void ChartWidget::render_flow_positioning() {
             document["display_time_zone"]=DisplayTimeZone::instance().zone_name();
             document["quantity_unit"]="base_asset";document["oi_unit"]="contracts";document["liquidation_unit"]="USD";
             document["limitations"]="Retrospective stored evidence; original availability unverified. Observed liquidations are incomplete. Contract changes do not identify individual openings/closings. OI intervals are not price cells.";
-            document["sources"]={"candles","open_interest.open_interest_contracts","liquidation_events"};
+            document["sources"]={"candles","open_interest (raw contracts or labeled same-row USD/mark recovery)","liquidation_events"};
+            document["oi_change_pct"]=a.usable_oi?nlohmann::json(a.oi_pct):nlohmann::json(nullptr);
+            document["recovered_oi_samples"]=a.recovered_count;
             flow_export_failed_=!flow_export_assessment(document.dump(2).c_str());
         }
         if(flow_export_failed_)ImGui::TextWrapped("Assessment download failed. Try again.");
-        ImGui::SetNextWindowSize(ImVec2(std::min(580.0f,ImGui::GetIO().DisplaySize.x-40.0f),0),ImGuiCond_Always);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(14,12));
-        ImGui::PushStyleColor(ImGuiCol_PopupBg,Tokens::PANEL);
-        if(ImGui::BeginPopup("Flow evidence")){
-            ImGui::Text("%s / %s",pair_.exchange.c_str(),pair_.symbol.c_str());
-            ImGui::TextWrapped("%s",a.explanation);
-            ImGui::TextWrapped("Exact interval: %s to %s (end exclusive)",start,end);
-            ImGui::Text("Buy %.6f / Sell %.6f quantity",a.buy,a.sell);
-            ImGui::Text("Reported forced buys $%.2f / sells $%.2f",a.forced_buy,a.forced_sell);
-            ImGui::Text("Raw OI %zu/%zu samples; largest gap %.1fs",a.raw_count,e.oi.size(),a.max_gap/1000.0);
-            if(a.raw_count)ImGui::Text("First %.6f / last %.6f contracts",a.oi_start,a.oi_end);
-            ImGui::TextWrapped("%s",a.hypothesis);
-            ImGui::TextWrapped("Retrospective stored evidence. Original availability is unverified. Liquidation reports cover only part of forced activity.");
-            ImGui::Text("Minute bars %zu / %lld",e.bars.size(),static_cast<long long>((e.to-e.from)/60000));
-            if(a.raw_count){char first[128]{},last[128]{};flow_time(a.first_oi,first,sizeof(first));flow_time(a.last_oi,last,sizeof(last));ImGui::TextWrapped("First raw OI: %s",first);ImGui::TextWrapped("Last raw OI: %s",last);ImGui::Text("Last sample to selected end: %.3fs",(e.to-a.last_oi)/1000.0);}
-
-            ImGui::TextWrapped("OI points are sampled observations, not trade-level opening/closing labels. Missing raw values are never replaced with USD notional or state refresh times.");
-            ImGui::TextWrapped("No universal OI materiality threshold is applied. Read the exact size and sample coverage; a small signed change alone is not evidence of covering or unwinding.");
-            ImGui::TextWrapped("Saved assessment includes these source rows and exact boundaries. It is a local JSON file, not a published Studio assessment.");
             ImGui::EndPopup();
         }
         ImGui::PopStyleColor();
@@ -260,9 +257,9 @@ void ChartWidget::render_flow_positioning() {
             for(const auto& o:e.oi)if(o.time>=minute&&o.time<minute+60000){++polls;if(o.contracts>0){if(!first)first=&o;if(last)gap=std::max(gap,o.time-last->time);last=&o;++raw;}}
             if(first&&last){
                 char first_time[128]{},last_time[128]{};flow_time(first->time,first_time,sizeof(first_time));flow_time(last->time,last_time,sizeof(last_time));
-                ImGui::TextWrapped("OI %.6f at %s",first->contracts,first_time);ImGui::TextWrapped("OI %.6f at %s",last->contracts,last_time);
-                ImGui::Text("%zu/%zu raw samples; largest internal gap %.1fs",raw,polls,gap/1000.0);
-            } else ImGui::Text("Raw OI unavailable (%zu recorded poll timestamps)",polls);
+                ImGui::TextWrapped("OI %.6f at %s",first->contracts,first_time);ImGui::TextDisabled("%s",first->recovered?"Recovered from stored USD/mark":"Raw recorded");ImGui::TextWrapped("OI %.6f at %s",last->contracts,last_time);ImGui::TextDisabled("%s",last->recovered?"Recovered from stored USD/mark":"Raw recorded");
+                ImGui::Text("%zu/%zu valid samples; largest internal gap %.1fs",raw,polls,gap/1000.0);
+            } else ImGui::Text("OI unavailable (%zu recorded poll timestamps)",polls);
             double buys=0,sells=0;int64_t buy_reports=0,sell_reports=0;
             for(const auto& l:e.liquidations)if(l.time==minute){(l.buy?buys:sells)+=l.usd;(l.buy?buy_reports:sell_reports)+=l.count;}
             if(e.liquidations_available){ImGui::Text("Forced buys $%.2f (%lld) / sells $%.2f (%lld)",buys,static_cast<long long>(buy_reports),sells,static_cast<long long>(sell_reports));ImGui::TextDisabled("Reported liquidations only; partial coverage");}

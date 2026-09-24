@@ -28,6 +28,18 @@ EM_JS(int, workspace_write, (const char* text), {
     try { localStorage.setItem('edgedepth.workspaces.v1', UTF8ToString(text)); return 1; }
     catch (_) { return 0; }
 });
+// This tab's own layout. sessionStorage is per tab, survives a reload and a
+// detach into another window, and is copied by "duplicate tab", so two
+// terminal windows keep their own layouts while the shared library's
+// "current" stays the default a brand-new window opens with.
+EM_JS(char*, workspace_read_tab, (), {
+    try { const value = sessionStorage.getItem('edgedepth.workspace.tab.v1') || '';
+          if (value.length > 4194304) return 0;
+          return stringToNewUTF8(value); } catch (_) { return 0; }
+});
+EM_JS(void, workspace_write_tab, (const char* text), {
+    try { sessionStorage.setItem('edgedepth.workspace.tab.v1', UTF8ToString(text)); } catch (_) {}
+});
 EM_JS(void, workspace_export, (const char* text), {
     const url = URL.createObjectURL(new Blob([UTF8ToString(text)], {type:'application/json'}));
     const a = document.createElement('a'); a.href = url; a.download = 'edgedepth-workspace.json';
@@ -55,9 +67,11 @@ bool ready = false, enabled_now = false, was_enabled = false;
 bool save_requested = false, export_requested = false;
 int capture_after_frame = 0;
 double last_capture = -1;
+double last_library_write = -1;  // shared library autosave, spaced out to limit cross-window churn
 char name[49] = {};
 std::string notice;
 std::string last_written;
+bool library_changed_elsewhere = false;  // another window wrote the shared library
 const char* key(WidgetType type) {
     switch(type) {
     case WidgetType::Chart:return "chart"; case WidgetType::DOM:return "dom";
@@ -72,6 +86,14 @@ Json capture() {
     std::set<std::string> seen;
     for (const auto& w : *panels) {
         if (!w || !w->is_open || w->is_replay_widget) continue;
+        // Secondary charts are session-only for now: valid_document() holds
+        // one panel per type (workspace_document.h), so saving a second
+        // "chart" row would fail the whole capture and stall autosave while
+        // the second chart is open. Skip it so the primary keeps saving.
+        // TODO(workspace): persist secondary charts (instance, timeframe,
+        // rt_mode) once the document contract admits repeated chart rows.
+        if (w->type() == WidgetType::Chart &&
+            static_cast<const ChartWidget*>(w.get())->is_secondary()) continue;
         const auto* type = key(w->type()); if (!type) continue;
         if (!seen.insert(type).second) {
             notice = "Use one panel of each type before saving a workspace."; return {};
@@ -80,6 +102,28 @@ Json capture() {
     }
     return valid_document(doc) ? doc : Json{};
 }
+// Named workspaces are shared between windows, so take them from storage
+// rather than from this window's memory before every write that follows a
+// write elsewhere; otherwise an autosave here would drop a copy saved there.
+void load_named(const Json& stored) {
+    library["named"] = Json::object();
+    if (!stored.is_object() || !stored.contains("named") || !stored["named"].is_object() ||
+        stored["named"].size() > max_named) return;
+    for (const auto& item : stored["named"].items())
+        if (item.key().size() <= 48 && valid_document(item.value())) library["named"][item.key()] = item.value();
+}
+#ifdef __EMSCRIPTEN__
+void resync_named_if_changed() {
+    if (!library_changed_elsewhere) return;
+    library_changed_elsewhere = false;
+    char* raw = workspace_read();
+    if (raw && *raw) {
+        auto stored = parse_bounded(raw, 4194304);
+        if (stored.is_object() && stored.contains("version") && stored["version"] == 1) load_named(stored);
+    }
+    std::free(raw);
+}
+#endif
 bool persist() {
     const std::string bytes = library.dump();
     if (bytes.size() > 4194304) {
@@ -169,11 +213,19 @@ void flush() {
     auto next = capture();
     if (next.is_null() || next.dump().size() > max_bytes) return;
     current = std::move(next); library["current"] = current; persist();
+#ifdef __EMSCRIPTEN__
+    workspace_write_tab(current.dump().c_str());
+#endif
 }
 void tick(std::vector<std::unique_ptr<Widget>>& widgets, const AppContext& ctx,
           const Terminal::Pair& pair, bool enabled) {
     panels = &widgets; context = &ctx; active_pair = pair;
     enabled_now = enabled;
+#ifdef __EMSCRIPTEN__
+    // Before this frame's save, delete or autosave, not inside persist():
+    // a resync there would discard the copy being saved right now.
+    resync_named_if_changed();
+#endif
     if (!enabled) { was_enabled = false; return; }
     if (!ready) {
         ready = true;
@@ -183,9 +235,7 @@ void tick(std::vector<std::unique_ptr<Widget>>& widgets, const AppContext& ctx,
             auto stored = parse_bounded(raw,4194304); std::free(raw);
             if (stored.is_object() && stored.contains("version") && stored["version"] == 1 &&
                 stored.contains("named") && stored["named"].is_object() && stored["named"].size() <= max_named) {
-                library["named"] = Json::object();
-                for (const auto& item : stored["named"].items())
-                    if (item.key().size() <= 48 && valid_document(item.value())) library["named"][item.key()] = item.value();
+                load_named(stored);
                 if (stored.contains("current") && valid_document(stored["current"])) {
                     pending = stored["current"];
                     if (!stored.contains("layout_revision") || stored["layout_revision"] != 2) {
@@ -199,6 +249,17 @@ void tick(std::vector<std::unique_ptr<Widget>>& widgets, const AppContext& ctx,
                 }
             } else if (!stored.is_null()) notice = "Saved workspace could not be read. Defaults are available.";
         } else std::free(raw);
+        // This tab's own last layout wins over the shared default, so a
+        // second window keeps its layout across a reload while the first
+        // window keeps autosaving its own. Only this build writes the tab
+        // document, so it never needs the layout-revision repair above.
+        if (char* tab = workspace_read_tab()) {
+            if (*tab) {
+                auto doc = parse_document(tab);
+                if (!doc.is_null()) pending = std::move(doc);
+            }
+            std::free(tab);
+        }
         // A first session, or one whose saved layout could not be used, starts
         // from the same preset Reset Layout produces, so the Candles default
         // (volume and CVD subplots) applies without a saved workspace.
@@ -206,6 +267,9 @@ void tick(std::vector<std::unique_ptr<Widget>>& widgets, const AppContext& ctx,
         EM_ASM({
             window.addEventListener('pagehide', () => _workspace_flush());
             document.addEventListener('visibilitychange', () => { if (document.hidden) _workspace_flush(); });
+            window.addEventListener('storage', (event) => {
+                if (event.key === 'edgedepth.workspaces.v1') _workspace_storage_changed();
+            });
         });
 #endif
     } else if (!was_enabled && !current.is_null()) pending = current;
@@ -224,7 +288,18 @@ void tick(std::vector<std::unique_ptr<Widget>>& widgets, const AppContext& ctx,
         if (next.is_null() || next.dump().size() > max_bytes) {
             save_requested = export_requested = false; return;
         }
-        current = std::move(next); library["current"] = current; persist();
+        current = std::move(next); library["current"] = current;
+        // The tab document carries this window's layout every second; the
+        // shared library's "current" is only the default for a new window,
+        // and every write to it wakes every other terminal window (storage
+        // event, named resync), so space those out. Explicit saves, pagehide
+        // and hidden-tab flushes still write immediately.
+        if (save_requested || last_library_write < 0 || ImGui::GetTime() - last_library_write >= 10.0) {
+            persist(); last_library_write = ImGui::GetTime();
+        }
+#ifdef __EMSCRIPTEN__
+        workspace_write_tab(current.dump().c_str());
+#endif
         if (save_requested && !current.is_null()) {
             library["named"][name] = current;
             if (persist()) notice = "Workspace saved in this browser.";
@@ -293,5 +368,6 @@ void import_text(const char* text) {
 extern "C" {
 EMSCRIPTEN_KEEPALIVE void workspace_flush() { workspace::flush(); }
 EMSCRIPTEN_KEEPALIVE void workspace_import_text(const char* text) { workspace::import_text(text); }
+EMSCRIPTEN_KEEPALIVE void workspace_storage_changed() { workspace::library_changed_elsewhere = true; }
 }
 #endif

@@ -97,12 +97,27 @@ struct SymbolMetadata {
     double step_size   = 1.0;
     double min_notional = 5.0;
     bool   is_active   = true;
+    // false for dated contracts (Bybit "DATED_FUTURES", Binance quarterlies):
+    // they settle instead of paying funding, and trade apart from the perp.
+    bool   perpetual   = true;
     PriceFormatter fmt;
 
-    // Display name derived from base/quote: "BTC/USDT"
+    // Display name derived from base/quote: "BTC/USDT". A dated contract keeps
+    // its native expiry tail ("BTC/USDT 25DEC26") so it is never mistaken for
+    // the perp of the same pair.
     std::string display_name() const {
         if (base_asset.empty()) return symbol;
-        return base_asset + "/" + quote_asset;
+        std::string name = base_asset + "/" + quote_asset;
+        if (!perpetual) {
+            const auto sep = symbol.find_first_of("-_");
+            if (sep != std::string::npos && sep + 1 < symbol.size()) {
+                std::string tail = symbol.substr(sep + 1);
+                std::transform(tail.begin(), tail.end(), tail.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+                name += " " + tail;
+            }
+        }
+        return name;
     }
 };
 

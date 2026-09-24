@@ -16,6 +16,7 @@
 // chrome/labels in Hanken (Fonts::ui/label). Design bundle:
 // watchlist_stats_DOM_redesign/edgedepth-stats-panel-v2/stats-panel.SPEC.md
 // ═══════════════════════════════════════════════════════════════════════════════
+#include "core/stat_freshness.h"
 #include "ui/widget.h"
 #include "types/types.h"
 #include "stream_handler.h"
@@ -55,6 +56,7 @@ private:
     const AppContext& ctx_;
     PriceFormatter    fmt_;
     Terminal::Stat    current_stat_{};
+    StatFreshness::Field stat_field(int64_t clock_ms, int64_t stale_after_ms) const;
     Terminal::Stat    prev_stat_{};
     double            tps_ = 0.0;          // trades/sec (best-effort from stat deltas)
     bool              have_prev_ = false;

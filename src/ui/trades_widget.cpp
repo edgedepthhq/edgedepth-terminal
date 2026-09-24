@@ -258,6 +258,7 @@ void TradesWidget::render() {
     if (!is_open) return;
     // Use title_suffix_ for ImGui ID uniqueness (e.g. "##replay" during replay)
     std::string window_title = title_suffix_.empty() ? title_ : title_ + title_suffix_;
+    place_new_window();
     if (!ImGui::Begin(window_title.c_str(), &is_open, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;

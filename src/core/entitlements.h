@@ -92,6 +92,25 @@ inline constexpr std::array<const char*, 6> FREE_REPLAY_SYMBOLS = {
 // malformed host global; the server enforces the real window.
 inline constexpr int kMaxLookbackDaysSanity = 730;
 
+// First UTC day the archive holds an ORDER BOOK (2026-05-15T00:00:00Z). This is
+// DATA, not a tier: the record's first 304 days (the cryptohftdata backfill,
+// 2025-07-15 → 2026-05-14) carry trades, candles, liquidations, OI and funding
+// but no depth, and the replay engine cannot open without a book - it primes on
+// the orderbook stream and errors after 20s (replay_depth_unavailable). Until
+// 2026-09-18 nothing between the date picker and that timeout knew, so a
+// Research account could ask for Dec 2025 and watch the spinner, then an error.
+//
+// The backend now refuses such a window with DATA_WINDOW and publishes the
+// MEASURED floor on /replay/availability; the host injects it as
+// window.__EDGEDEPTH_BOOK_REPLAY_FROM_MS__ (TerminalEmbed) before the glue
+// loads, so this compiled value is only the fallback for standalone / native
+// builds; keep it equal to the hosted product's published book-replay floor. It feeds
+// replay_start_floor_ms(), so every entry point (date picker, "Replay from
+// here", range_replayable) refuses pre-book days with the date instead of
+// posting a doomed session.
+inline constexpr int64_t BOOK_REPLAY_FROM_MS = 1778803200000LL;  // 2026-05-15 UTC
+inline int64_t& book_replay_from_ms() { static int64_t v = BOOK_REPLAY_FROM_MS; return v; }
+
 // Current tier - read once at boot via detect(). Pro by default (dev/standalone).
 inline Tier& current() { static Tier t = Tier::Pro; return t; }
 inline bool  is_pro()  {
@@ -256,6 +275,26 @@ inline void detect() {
             free_window_dynamic() = false;
         }
     }
+
+    // Order-book replay floor (window.__EDGEDEPTH_BOOK_REPLAY_FROM_MS__): the
+    // backend's measured first book day, injected by the host for every tier.
+    // Same HEAPF64 marshal as the free window. Absent or absurd leaves the
+    // compiled fallback (BOOK_REPLAY_FROM_MS) rather than dropping the floor,
+    // because a missing floor means a replay that hangs, not a wider offer.
+    {
+        double bd = 0.0;
+        const int ok = EM_ASM_INT({
+            try {
+                var v = Number(window.__EDGEDEPTH_BOOK_REPLAY_FROM_MS__);
+                if (!(isFinite(v) && v > 0)) return 0;
+                HEAPF64[$0 >> 3] = v;
+                return 1;
+            } catch (err) { return 0; }
+        }, &bd);
+        if (ok && bd > 1.0e12 && bd < 4.0e12) {   // a plausible epoch-ms (2001..2096)
+            book_replay_from_ms() = static_cast<int64_t>(bd);
+        }
+    }
 #endif
 }
 
@@ -268,11 +307,39 @@ inline bool is_free() { return current() == Tier::Free; }
 inline bool is_authenticated() { return is_pro() || !user_email().empty(); }
 
 // ── Replay window for the current tier ───────────────────────────────────────
-// Earliest replayable START. Pro = now−90d by default. Free = the resolved free-window start
-// (backend archived-day when known, else the client's own today-2 calendar day).
+// Earliest replayable START: the LATER of the tier floor and the order-book
+// floor. Tier floor: Pro = now−90d by default (deeper on a signed claim); Free =
+// the resolved free-window start (backend archived-day when known, else the
+// client's own today-2 calendar day). Book floor: book_replay_from_ms(), the
+// first day the archive has a book - a Research claim reaches the whole record,
+// but the record has no depth before it and replay cannot open without one.
 inline int64_t replay_start_floor_ms(int64_t now_ms) {
-    if (is_pro()) return now_ms - pro_lookback_ms();
-    int64_t s, e; free_window_range(now_ms, s, e); return s;
+    int64_t tier_floor;
+    if (is_pro()) {
+        tier_floor = now_ms - pro_lookback_ms();
+    } else {
+        int64_t s, e; free_window_range(now_ms, s, e); tier_floor = s;
+    }
+    return std::max(tier_floor, book_replay_from_ms());
+}
+// Is this timestamp older than the recorded order book? True means NO tier can
+// replay it (a data lock, not a plan lock): the right-click menu and the picker
+// word it from book_replay_from_label() rather than offering an upgrade.
+inline bool before_book_record(int64_t ts_ms) { return ts_ms < book_replay_from_ms(); }
+// "15 May 2026" (UTC) for the book floor. ASCII only (no atlas glyphs).
+inline std::string book_replay_from_label() {
+    static const char* MON[] = {"Jan","Feb","Mar","Apr","May","Jun",
+                                "Jul","Aug","Sep","Oct","Nov","Dec"};
+    time_t t = static_cast<time_t>(book_replay_from_ms() / 1000);
+    struct tm tmv;
+#ifdef _WIN32
+    gmtime_s(&tmv, &t);
+#else
+    gmtime_r(&t, &tmv);
+#endif
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%d %s %d", tmv.tm_mday, MON[tmv.tm_mon], tmv.tm_year + 1900);
+    return std::string(buf);
 }
 // Latest replayable END. Pro = the live edge. Free = the resolved free-window end.
 inline int64_t replay_end_ceil_ms(int64_t now_ms) {
@@ -453,12 +520,19 @@ inline std::string pricing_href(const char* period) {
 
 // Review Free, Pro and Research before the user chooses a payment rail. The
 // selected interval arrives preselected, so the extra page adds context, not
-// repeated work.
+// repeated work. Pricing opens in a NEW tab so the terminal (live socket,
+// replay session, layout) is still there afterwards; a blocked popup falls
+// back to navigating this tab. The opener is cut after opening rather than
+// with 'noopener', which makes window.open return null and hides a block.
 inline void open_pricing(const char* period = "yearly") {
     const std::string href = pricing_href(period);
 #ifdef __EMSCRIPTEN__
     EM_ASM({
-        window.location.href = UTF8ToString($0);
+        var url = UTF8ToString($0);
+        var w = null;
+        try { w = window.open(url, '_blank'); } catch (e) {}
+        if (w) { try { w.opener = null; } catch (e) {} }
+        else { window.location.href = url; }
     }, href.c_str());
 #else
     (void)href;

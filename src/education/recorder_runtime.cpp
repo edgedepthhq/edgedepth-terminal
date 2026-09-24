@@ -465,9 +465,9 @@ void RecorderRuntime::render_overlay(const AppContext& ctx) {
         dl->AddRectFilled(ImVec2(v0.x, by1), v1, dim);
         dl->AddRectFilled(ImVec2(v0.x, by0), ImVec2(bx0, by1), dim);
         dl->AddRectFilled(ImVec2(bx1, by0), ImVec2(v1.x, by1), dim);
-        // Brand-accent ring (#35c9c4 - the one accent, tokens.css).
+        // Brand-accent ring (#4ddbac - the brand mint, tokens.css).
         dl->AddRect(ImVec2(bx0, by0), ImVec2(bx1, by1),
-                    IM_COL32(53, 201, 196,
+                    IM_COL32(77, 219, 172,
                              static_cast<int>(235.0f * lightbox_alpha_)),
                     3.0f, 0, 1.6f);
     }

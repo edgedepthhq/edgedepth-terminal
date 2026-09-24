@@ -458,6 +458,7 @@ void ReplayLibraryWidget::render_replace_confirmation() {
 void ReplayLibraryWidget::render() {
     if (!is_open) return;
 
+    place_new_window();  // before our own size, so it wins
     ImGui::SetNextWindowSize(ImVec2(610.0f, 560.0f), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 360.0f), ImVec2(FLT_MAX, FLT_MAX));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 10.0f));

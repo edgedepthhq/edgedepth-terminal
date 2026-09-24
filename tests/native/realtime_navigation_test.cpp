@@ -1,4 +1,5 @@
 #include "ui/realtime_navigation.h"
+#include "core/realtime_quotes.h"
 #include <cstdio>
 #include <cmath>
 int main() {
@@ -56,6 +57,18 @@ int main() {
               "resize keeps full observed range");
         fit.update(base, base + tick * 20, tick, minimum, 800, 16, 500);
         check(fit.grouping == first_group, "rewind clears future grouping and shrink timer");
+        // A deliberate zoom or pan contracts at once; the wait is for quiet markets.
+        fit.update(base, base + tick * 1000, tick, minimum, 800, 16, 10000);
+        const int wide_group = fit.grouping;
+        fit.navigate();
+        fit.update(base, base + tick * 20, tick, minimum, 800, 16, 10016);
+        check(fit.grouping == first_group && fit.grouping < wide_group,
+              "navigation refits the observed history without the five-second wait");
+        // The allowance covers the frames a zoom takes to land, then expires.
+        for (int frame = 0; frame < 12; ++frame)
+            fit.update(base, base + tick * 1000, tick, minimum, 800, 16, 10032 + frame);
+        fit.update(base, base + tick * 20, tick, minimum, 800, 16, 11000);
+        check(fit.grouping == wide_group, "the market going quiet still waits");
         const auto valid = fit.range;
         fit.update(NAN, base, tick, minimum, 800, 16, 600);
         check(fit.range.low == valid.low && fit.range.high == valid.high, "invalid observations leave range intact");
@@ -97,5 +110,28 @@ int main() {
     cached.resize(1200);
     append_realtime_depth_tail(cached, recent, 1201000, 1300000, 1000);
     check(cached.back()->timestamp_ms <= 1300000, "paused tail excludes future depth");
+    // The live BBO step is drawn where the price changed, not at the newest
+    // ticker: tickers at an unchanged price must not move it.
+    {
+        RealtimeQuotes quotes;
+        auto tick = [&](int64_t ts, double bid, double ask) {
+            Terminal::BookTicker q{}; q.timestamp_ms = ts; q.best_bid = bid; q.best_ask = ask;
+            q.best_bid_qty = 1; q.best_ask_qty = 1; quotes.append(q);
+        };
+        tick(1000, 100.0, 100.1);
+        tick(1040, 100.1, 100.2);   // both sides move
+        tick(1080, 100.1, 100.2);   // quantity-only tickers
+        tick(1120, 100.1, 100.2);
+        tick(1150, 100.1, 100.3);   // ask moves again
+        auto live = quotes.as_of(1200);
+        check(live.quote.timestamp_ms == 1150 && live.bid_since_ms == 1040 && live.ask_since_ms == 1150,
+              "live step time is the price change, not the newest ticker");
+        auto lagging = quotes.as_of(1130);
+        check(lagging.quote.timestamp_ms == 1120 && lagging.bid_since_ms == 1040 && lagging.ask_since_ms == 1040,
+              "a lagging clock walks the run inside the deque");
+        check(quotes.as_of(999).quote.timestamp_ms == 0 && quotes.as_of(1200 + 16000).quote.timestamp_ms == 0,
+              "no quote before the first or after fifteen stale seconds");
+        check(quotes.at(1200).best_ask == 100.3, "at() still answers the as-of quote");
+    }
     return failures ? 1 : 0;
 }

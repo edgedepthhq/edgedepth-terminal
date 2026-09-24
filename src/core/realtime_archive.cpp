@@ -78,10 +78,11 @@ void RealtimeArchive::reset(bool discard_existing) {
     if(!id_.empty())archive_clear(id_.c_str());
     char unique[64]={};archive_unique_id(unique);
     id_=pair_.exchange+":"+pair_.symbol+":"+unique;
+    bubbles_.reset();
     ++generation;batch_.clear();view_.clear();serial_=0;clock_=0;last_depth_ms_=0;first=last=0;bytes=total_bytes=0;
     valid_=lost_=loading=false;error.clear();dropped=0;sent_at_=0;
     book_generation_=books_.realtime_generation();
-    seed_.clear();deferred_seed_.reset();seen_ids_.clear();seeded_ids_.clear();seeded_ranges_.clear();startup_live_first_ms_=0;first_depth_ms_=0;
+    seed_.clear();deferred_seed_.reset();seen_ids_.clear();seeded_ids_.clear();seen_native_.clear();seeded_native_.clear();seeded_ranges_.clear();startup_live_first_ms_=0;first_depth_ms_=0;
     recovery_.clear();recovered_intervals_.clear();recovered_.clear();recovery_id_.clear();recovery_at_=0;
     startup_requested_=startup_pending_=false;identities_complete_=true;
     startup_first=startup_end=0;startup_max_levels_per_side=0;startup_status.clear();startup_at_=emscripten_get_now();
@@ -104,7 +105,6 @@ void RealtimeArchive::gap(int64_t clock) {
     else lost_=true;
 }
 void RealtimeArchive::append_trade(const Terminal::Trade& t) {
-    if(!error.empty())return;
     if (!startup_requested_ || startup_pending_)
         startup_live_first_ms_ = startup_live_first_ms_ ? std::min(startup_live_first_ms_, t.timestamp_ms) : t.timestamp_ms;
     if(t.agg_trade_id>0) {
@@ -116,7 +116,15 @@ void RealtimeArchive::append_trade(const Terminal::Trade& t) {
             if(seen_ids_.size()<32768)seen_ids_.insert(t.agg_trade_id);
             else identities_complete_=false;
         }
+    } else if(!t.native_trade_id.empty()) {
+        if(seeded_native_.contains(t.native_trade_id))return;
+        if(!startup_requested_ || startup_pending_) {
+            if(seen_native_.size()<32768)seen_native_.insert(t.native_trade_id);
+            else identities_complete_=false;
+        }
     } else identities_complete_=false;
+    bubbles_.append(t, clock_);
+    if(!error.empty())return;
     if(!make_room(6)){++dropped;return;}
     batch_.insert(batch_.end(),{2,double(t.timestamp_ms),6,t.price,t.qty,t.is_buy?1.0:0.0});
 }
@@ -131,6 +139,7 @@ void RealtimeArchive::update(int64_t clock) {
     // Replay status corrections can move the interpolated clock backward.
     // Explicit source clear/seek owns resets; queries enforce the as-of cutoff.
     clock_=clock;
+    bubbles_.advance(clock);
     poll(); if (!error.empty()) { batch_.clear(); return; }
     if(deferred_seed_ && (!seen_ids_.empty() || emscripten_get_now()-startup_at_>=2000)) {
         auto response=std::move(deferred_seed_);receive_seed(*response);
@@ -287,9 +296,12 @@ void RealtimeArchive::receive_seed(const nlohmann::json& m) {
            !t.contains("price") || !t["price"].is_number() || !t.contains("qty") || !t["qty"].is_number() ||
            !t.contains("buy") || !t["buy"].is_boolean()) {invalid();return;}
         const auto text=t["id"].get<std::string>();int64_t id=0;
+        if(text.empty()) {invalid();return;}
         const auto parsed=std::from_chars(text.data(),text.data()+text.size(),id);
-        if(parsed.ec!=std::errc() || parsed.ptr!=text.data()+text.size()) {invalid();return;}
-        auto* trade=response.add_trades();trade->set_agg_trade_id(id);trade->set_timestamp_ms(t["time"].get<int64_t>());
+        auto* trade=response.add_trades();
+        if(parsed.ec==std::errc() && parsed.ptr==text.data()+text.size())trade->set_agg_trade_id(id);
+        else trade->set_native_trade_id(text);
+        trade->set_timestamp_ms(t["time"].get<int64_t>());
         trade->set_price(t["price"].get<double>());trade->set_qty(t["qty"].get<double>());trade->set_is_buy(t["buy"].get<bool>());
     }
     receive_seed(response);
@@ -304,7 +316,7 @@ void RealtimeArchive::receive_seed(const pb::RealtimeHistory& m) {
     deferred_seed_.reset();
     startup_pending_=false;
     startup_status="Recent history unavailable; recording live";
-    const auto fail=[&](){seed_.clear();seen_ids_.clear();seeded_ids_.clear();seeded_ranges_.clear();startup_first=0;startup_max_levels_per_side=0;};
+    const auto fail=[&](){seed_.clear();seen_ids_.clear();seeded_ids_.clear();seen_native_.clear();seeded_native_.clear();seeded_ranges_.clear();startup_first=0;startup_max_levels_per_side=0;};
     if(m.end_ms()!=startup_end || m.records_size()>(startup_window_ms/500+1)*2055 ||
        size_t(m.trades_size())>startup_trade_limit || m.trade_bins_size()>1800) {fail();return;}
     seed_.clear();
@@ -332,12 +344,15 @@ void RealtimeArchive::receive_seed(const pb::RealtimeHistory& m) {
     // observation across an unobserved history/live interval.
     if(previous)seed_.insert(seed_.end(),{3,double(std::min(previous+500,startup_end)),3});
     int64_t trade_first=0;
-    if(identities_complete_ && !seen_ids_.empty()) for(const auto& t:m.trades()) {
+    if(identities_complete_ && (!seen_ids_.empty() || !seen_native_.empty())) for(const auto& t:m.trades()) {
         const int64_t id=t.agg_trade_id(),ts=t.timestamp_ms();
         const double price=t.price(),qty=t.qty();
-        if(id<=0 || ts<startup_end-startup_window_ms || ts>=startup_end ||
+        const bool native=id<=0 && !t.native_trade_id().empty();
+        if((id<=0 && !native) || ts<startup_end-startup_window_ms || ts>=startup_end ||
            !std::isfinite(price) || !std::isfinite(qty) || price<=0 || qty<=0) {fail();return;}
-        if(seen_ids_.contains(id) || !seeded_ids_.insert(id).second)continue;
+        if(native) {
+            if(seen_native_.contains(t.native_trade_id()) || !seeded_native_.insert(t.native_trade_id()).second)continue;
+        } else if(seen_ids_.contains(id) || !seeded_ids_.insert(id).second)continue;
         seed_.insert(seed_.end(),{2,double(ts),6,price,qty,t.is_buy()?1.0:0.0});
         if(!trade_first || ts<trade_first)trade_first=ts;
     }
@@ -367,9 +382,22 @@ void RealtimeArchive::receive_seed(const pb::RealtimeHistory& m) {
         else seeded_ranges_[ranges++]=r;
     }
     seeded_ranges_.resize(ranges);
-    seen_ids_.clear();
+    seen_ids_.clear();seen_native_.clear();
     if(!startup_first && trade_first)startup_first=trade_first;
     if(seed_.empty()) {startup_status="No recent history yet; recording live";return;}
+    // Feed only the fully validated, identity-joined seed. Later archive query
+    // summaries never rebuild or replace these exact-price publications.
+    for (size_t p = 0; p < seed_.size(); p += size_t(seed_[p + 2])) {
+        if (seed_[p] != 2 && seed_[p] != 4) continue;
+        Terminal::Trade t{};
+        t.timestamp_ms = int64_t(seed_[p + 1]); t.price = seed_[p + 3];
+        t.qty = seed_[p + 4]; t.is_buy = seed_[p + 5] != 0;
+        if (seed_[p] == 4) {
+            t.summary_low = seed_[p + 6]; t.summary_high = seed_[p + 7];
+            t.summary_count = uint64_t(seed_[p + 8]);
+        }
+        bubbles_.append(t, clock_);
+    }
     char status[192];
     snprintf(status,sizeof(status),"%.0fs depth / %.0fs trades (partial)%s",
         previous && startup_first ? double(previous-startup_first)/1000:0.0,trade_first?double(startup_end-trade_first)/1000:0.0, grouped?"; older trades grouped at 100ms":"");

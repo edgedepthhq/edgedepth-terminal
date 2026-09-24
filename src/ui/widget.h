@@ -108,6 +108,11 @@ public:
 
     bool is_open = true;
     bool is_replay_widget = false;  // Created during replay - auto-closed on exit
+    // Set by whoever adds the widget from a menu: open as a centred floating
+    // window sized to be seen. ImGui's default for a window it has never seen
+    // is a small auto-fit box at the top-left, which reads as "nothing
+    // happened". See place_new_window.
+    bool open_centered = false;
 
     // Append suffix to widget title (e.g. "##replay" for ImGui ID uniqueness)
     void set_title_suffix(const std::string& suffix) { title_suffix_ = suffix; }
@@ -142,9 +147,33 @@ protected:
     // Track visibility for optimization
     bool was_visible_last_frame_ = false;
     std::string title_suffix_;  // Optional suffix for ImGui ID uniqueness
+    // Call right before the widget's own ImGui::Begin. First frame only, and
+    // FirstUseEver: a window ImGui already places (a docked layout name, one
+    // the user moved earlier) keeps that placement and is just focused.
+    void place_new_window() {
+        if (!open_centered) return;
+        open_centered = false;
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        const ImVec2 ws = vp->WorkSize;
+        const bool chart = type() == WidgetType::Chart;
+        const ImVec2 size(
+            std::min(chart ? std::clamp(ws.x * 0.62f, 560.0f, 1280.0f) : std::clamp(ws.x * 0.26f, 340.0f, 460.0f),
+                     ws.x - 40.0f),
+            std::min(chart ? std::clamp(ws.y * 0.66f, 380.0f, 820.0f) : std::clamp(ws.y * 0.62f, 360.0f, 720.0f),
+                     ws.y - 40.0f));
+        // Consecutive adds step down-right so they do not stack exactly.
+        static int cascade = 0;
+        const float step = 28.0f * static_cast<float>(cascade++ % 4);
+        ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + ws.x * 0.5f + step, vp->WorkPos.y + ws.y * 0.5f + step),
+                                ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowFocus();
+    }
+
     // Helper for derived classes to use in render()
     bool begin_render(const char* title, ImGuiWindowFlags flags = 0) {
         if (!is_open) return false;
+        place_new_window();
         if (title_suffix_.empty()) {
             bool visible = ImGui::Begin(title, &is_open, flags);
             was_visible_last_frame_ = visible;

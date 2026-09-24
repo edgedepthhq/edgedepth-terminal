@@ -613,6 +613,7 @@ void PositionsPanel::render_by_type_tab() {
 void PositionsPanel::render() {
     if (!is_open) return;
 
+    place_new_window();  // before our own size, so it wins
     ImGui::SetNextWindowSize(ImVec2(900, 400), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Paper Trading###paper_trading", &is_open)) {
         ImGui::End();

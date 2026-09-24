@@ -12,7 +12,7 @@ void ChartWidget::update_reference_context() {
     const int64_t asof = replay.is_active() ? replay.interpolated_time_ms() :
         std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
-    const auto* cm_ptr = &ctx_.candle_mgr();
+    const auto* cm_ptr = &candles();
     const auto tf_now = cm_ptr->timeframe_seconds();
     if (reference_manager_ != cm_ptr || reference_tf_ != tf_now) {
         reference_manager_ = cm_ptr; reference_tf_ = tf_now; reference_update_time_ = -1;
@@ -20,7 +20,7 @@ void ChartWidget::update_reference_context() {
     // Rewind invalidates immediately; regular data corrections refresh at 4 Hz.
     if (seconds - reference_update_time_ < 0.25 && asof >= reference_asof_) return;
     reference_update_time_ = seconds; reference_asof_ = asof;
-    const auto& cm = ctx_.candle_mgr();
+    const auto& cm = candles();
     const auto tf = cm.timeframe_seconds() * 1000;
     const auto day = reference_context::day_start(asof);
     const auto week = reference_context::week_start(asof);

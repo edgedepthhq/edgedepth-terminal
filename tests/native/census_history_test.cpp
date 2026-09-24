@@ -1,4 +1,5 @@
 #include "core/census_history.h"
+#include "core/census_profile.h"
 #include <vector>
 #include <string>
 #include <limits>
@@ -25,6 +26,24 @@ struct CensusQuality {
 struct Frame {CensusQuality census_quality;int64_t timestamp_ms=1000,census_observed_at_ms=0;double mark_price=100,flow_intensity=.1,band_width_pct=.25;std::string census_status="sampled";std::vector<Band> bands{{}};};
 void check(bool ok){if(!ok){std::fputs("census history invariant failed\n",stderr);std::exit(1);}}
 int main(){
+ // Same stationary threshold with a 26% mark move must retain v2 bounds.
+ Frame g;g.census_quality.version=2;
+ auto r=census_profile::bounds(g,g.bands[0]);g.mark_price*=1.26;
+ auto moved=census_profile::bounds(g,g.bands[0]);check(r.low==moved.low&&r.high==moved.high);
+ g.census_quality.version=1;check(census_profile::bounds(g,g.bands[0]).low!=r.low);
+ g.census_quality.version=2;g.bands={{100,600,0},{100,600,0},{100,0,2400},{110,999,0},{120,5000,0}};
+ auto p=census_profile::build(g,90,115,1000);
+ check(p.count==2&&p.visible_usd==3600&&p.filtered_usd==999&&p.outside_usd==5000);
+ check(p.long_usd+p.short_usd==p.visible_usd+p.filtered_usd+p.outside_usd);
+ check(p.zones[0].usd==2400&&!p.zones[0].is_long&&p.zones[1].usd==1200);
+ check(census_profile::state<Frame>(nullptr,1000)==census_profile::State::missing);
+ check(census_profile::state(&g,999)==census_profile::State::missing);
+ check(census_profile::state(&g,1000)==census_profile::State::ready);
+ check(census_profile::state(&g,121001)==census_profile::State::stale);
+ g.bands.clear();g.census_status="unavailable";
+ check(census_profile::state(&g,1000)==census_profile::State::unavailable);
+ check(census_profile::opacity(13)<census_profile::opacity(1e6));
+
  census_history::History<Frame> qh; Frame qf;
  qf.timestamp_ms=400000; qf.census_observed_at_ms=390000;
  qf.census_quality.version=1; qf.census_quality.venue_received_at_ms=399000;
@@ -34,7 +53,9 @@ int main(){
  qf.census_quality.venue_received_at_ms=400001;check(!qh.insert(qf));qf.census_quality.venue_received_at_ms=399000;
  qf.census_quality.usable_notional_usd=11;check(!qh.insert(qf));qf.census_quality.usable_notional_usd=10;
  qf.census_quality.coverage_denominator_usd=0;check(!qh.insert(qf));qf.flow_intensity=0;check(qh.insert(qf));
- qf.census_quality.version=0;check(qh.insert(qf));check(qh.at(400000)->census_quality.version==1);
+ qf.census_quality.version=2;check(qh.insert(qf));
+ qf.census_quality.version=3;check(!qh.insert(qf));
+ qf.census_quality.version=1;check(qh.insert(qf));check(qh.at(400000)->census_quality.version==2);
  census_history::History<Frame> h;Frame f;check(h.insert(f));
  check(!h.at(999));check(h.at(1000)->timestamp_ms==1000);
  f.timestamp_ms=100000;check(h.insert(f));check(h.at(50000)->timestamp_ms==1000);

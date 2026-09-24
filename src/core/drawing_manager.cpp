@@ -1,6 +1,7 @@
 #include "core/drawing_manager.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 #include <nlohmann/json.hpp>
 
@@ -27,13 +28,18 @@ EM_JS(void, eddraw_write_blob, (const char* key, const char* val), {
 
 // pagehide/visibility flush so a tab close within the 1s debounce window
 // doesn't lose the last mutation (display_time_zone bootstrap pattern).
-EM_JS(void, eddraw_register_flush, (), {
+EM_JS(void, eddraw_register_flush, (const char* key), {
     if (Module.__eddraw_flush_registered) return;
     Module.__eddraw_flush_registered = true;
     const kick = () => { try { Module._edgedepth_drawings_flush(); } catch (e) {} };
     addEventListener('pagehide', kick);
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') kick();
+    });
+    // Another terminal window wrote this symbol's drawings: merge, never clobber.
+    const mine = UTF8ToString(key);
+    addEventListener('storage', (event) => {
+        if (event.key === mine) { try { Module._edgedepth_drawings_changed(); } catch (e) {} }
     });
 });
 #endif
@@ -50,7 +56,20 @@ EMSCRIPTEN_KEEPALIVE
 void edgedepth_drawings_flush() {
     if (g_drawing_mgr_instance) g_drawing_mgr_instance->flush();
 }
+EMSCRIPTEN_KEEPALIVE
+void edgedepth_drawings_changed() {
+    if (g_drawing_mgr_instance) g_drawing_mgr_instance->note_external_change();
 }
+}
+#endif
+
+#ifdef __EMSCRIPTEN__
+namespace {
+int64_t wall_clock_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+}
+}  // namespace
 #endif
 
 void DrawingManager::init(const std::string& exchange, const std::string& symbol) {
@@ -63,27 +82,31 @@ void DrawingManager::init(const std::string& exchange, const std::string& symbol
     g_drawing_mgr_instance = this;
 
 #ifdef __EMSCRIPTEN__
-    eddraw_register_flush();
+    eddraw_register_flush(storage_key_.c_str());
     if (char* raw = eddraw_read_blob(storage_key_.c_str())) {
         load_json(raw);
         free(raw);
     }
 #endif
+    remember_flushed(items_);
     loaded_ = true;
 }
 
-void DrawingManager::load_json(const char* raw) {
+DrawingManager::StoredBlob DrawingManager::parse_blob(const char* raw) {
+    StoredBlob out;
+    if (!raw) return out;
     // Exceptions are disabled in this build: non-throwing parse + is_discarded.
     const nlohmann::json j = nlohmann::json::parse(raw, nullptr, false);
-    if (j.is_discarded() || !j.is_object() || j.value("v", 0) != 1) return;
-    magnet_ = j.value("magnet", true);
-    hidden_all_ = j.value("hidden_all", false);
-    rail_collapsed_ = j.value("rail_collapsed", false);
+    if (j.is_discarded() || !j.is_object() || j.value("v", 0) != 1) return out;
+    out.ok = true;
+    out.magnet = j.value("magnet", true);
+    out.hidden_all = j.value("hidden_all", false);
+    out.rail_collapsed = j.value("rail_collapsed", false);
     const auto items = j.find("items");
-    if (items == j.end() || !items->is_array()) return;
+    if (items == j.end() || !items->is_array()) return out;
 
     for (const auto& ji : *items) {
-        if (items_.size() >= drawing::kMaxDrawings) break;
+        if (out.items.size() >= drawing::kMaxDrawings) break;
         if (!ji.is_object()) continue;
         const drawing::Tool tool =
             drawing::tool_from_key(ji.value("tool", std::string()));
@@ -95,6 +118,7 @@ void DrawingManager::load_json(const char* raw) {
         drawing::Drawing d;
         d.tool = tool;
         d.id = ji.value("id", 0ull);
+        d.modified_ms = ji.value("m", 0ll);
         const size_t cap = tool == drawing::Tool::Brush ? drawing::kMaxBrushPoints
                          : tool == drawing::Tool::Polyline
                              ? drawing::kMaxPolylinePoints
@@ -121,60 +145,92 @@ void DrawingManager::load_json(const char* raw) {
         d.stop = ji.value("stop", 0.0);
         d.target = ji.value("target", 0.0);
         d.chan_off = ji.value("chan_off", 0.0);
+        out.items.push_back(std::move(d));
+    }
+    return out;
+}
+
+void DrawingManager::load_json(const char* raw) {
+    StoredBlob blob = parse_blob(raw);
+    if (!blob.ok) return;
+    magnet_ = blob.magnet;
+    hidden_all_ = blob.hidden_all;
+    rail_collapsed_ = blob.rail_collapsed;
+    for (drawing::Drawing& d : blob.items) {
+        if (items_.size() >= drawing::kMaxDrawings) break;
         if (d.id == 0) d.id = ++next_id_;
         next_id_ = std::max(next_id_, d.id);
         items_.push_back(std::move(d));
     }
 }
 
-std::string DrawingManager::serialize() const {
-    nlohmann::json j;
-    j["v"] = 1;
-    j["magnet"] = magnet_;
-    j["hidden_all"] = hidden_all_;
-    j["rail_collapsed"] = rail_collapsed_;
-    nlohmann::json arr = nlohmann::json::array();
-    for (const drawing::Drawing& d : items_) {
-        const char* key = drawing::tool_key(d.tool);
-        if (key[0] == '\0') continue;  // Cursor/Measure are never stored
-        nlohmann::json ji;
-        ji["id"] = d.id;
-        ji["tool"] = key;
-        nlohmann::json ja = nlohmann::json::array();
-        for (const drawing::Anchor& a : d.anchors)
-            ja.push_back(nlohmann::json::array({a.t_ms, a.price}));
-        ji["anchors"] = std::move(ja);
-        ji["color"] = d.style.color;
-        ji["width"] = d.style.width;
-        ji["pattern"] = static_cast<int>(d.style.pattern);
-        if (d.style.fill) ji["fill"] = d.style.fill;
-        if (d.locked) ji["locked"] = true;
-        if (d.hidden) ji["hidden"] = true;
-        switch (d.tool) {
-            case drawing::Tool::Text:
-                ji["text"] = d.text;
-                ji["font_size"] = d.font_size;
-                break;
-            case drawing::Tool::Fib:
-                ji["fib_mask"] = d.fib_mask;
-                break;
-            case drawing::Tool::LongPosition:
-            case drawing::Tool::ShortPosition:
-                ji["stop"] = d.stop;
-                ji["target"] = d.target;
-                break;
-            case drawing::Tool::Channel:
-                ji["chan_off"] = d.chan_off;
-                break;
-            default:
-                break;
-        }
-        arr.push_back(std::move(ji));
+std::string DrawingManager::serialize_item(const drawing::Drawing& d, bool with_stamp) {
+    const char* key = drawing::tool_key(d.tool);
+    if (key[0] == '\0') return {};  // Cursor/Measure are never stored
+    nlohmann::json ji;
+    ji["id"] = d.id;
+    if (with_stamp) ji["m"] = d.modified_ms;
+    ji["tool"] = key;
+    nlohmann::json ja = nlohmann::json::array();
+    for (const drawing::Anchor& a : d.anchors)
+        ja.push_back(nlohmann::json::array({a.t_ms, a.price}));
+    ji["anchors"] = std::move(ja);
+    ji["color"] = d.style.color;
+    ji["width"] = d.style.width;
+    ji["pattern"] = static_cast<int>(d.style.pattern);
+    if (d.style.fill) ji["fill"] = d.style.fill;
+    if (d.locked) ji["locked"] = true;
+    if (d.hidden) ji["hidden"] = true;
+    switch (d.tool) {
+        case drawing::Tool::Text:
+            ji["text"] = d.text;
+            ji["font_size"] = d.font_size;
+            break;
+        case drawing::Tool::Fib:
+            ji["fib_mask"] = d.fib_mask;
+            break;
+        case drawing::Tool::LongPosition:
+        case drawing::Tool::ShortPosition:
+            ji["stop"] = d.stop;
+            ji["target"] = d.target;
+            break;
+        case drawing::Tool::Channel:
+            ji["chan_off"] = d.chan_off;
+            break;
+        default:
+            break;
     }
-    j["items"] = std::move(arr);
     // error_handler_t::replace: invalid UTF-8 in user text must not throw
     // (exceptions are disabled) or lose the whole blob.
-    return j.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    return ji.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+}
+
+std::string DrawingManager::serialize() const {
+    std::string out = "{\"v\":1,\"magnet\":";
+    out += magnet_ ? "true" : "false";
+    out += ",\"hidden_all\":";
+    out += hidden_all_ ? "true" : "false";
+    out += ",\"rail_collapsed\":";
+    out += rail_collapsed_ ? "true" : "false";
+    out += ",\"items\":[";
+    bool first = true;
+    for (const drawing::Drawing& d : items_) {
+        const std::string item = serialize_item(d, true);
+        if (item.empty()) continue;
+        if (!first) out += ',';
+        first = false;
+        out += item;
+    }
+    out += "]}";
+    return out;
+}
+
+void DrawingManager::remember_flushed(const std::vector<drawing::Drawing>& items) {
+    last_flushed_.clear();
+    for (const drawing::Drawing& d : items) {
+        std::string body = serialize_item(d, false);
+        if (!body.empty()) last_flushed_[d.id] = std::move(body);
+    }
 }
 
 drawing::Drawing* DrawingManager::find(uint64_t id) {
@@ -282,17 +338,113 @@ void DrawingManager::mark_dirty() {
 }
 
 void DrawingManager::tick() {
-    if (!dirty_ || !loaded_) return;
+    if (!loaded_) return;
+    if (pull_pending_) {
+        pull_pending_ = false;
+        // Local unflushed edits merge on the way out; otherwise take theirs.
+        if (dirty_) flush(); else pull();
+    }
+    if (!dirty_) return;
     const double since = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - dirty_at_).count();
     if (since >= kPersistDebounceSec) flush();
 }
 
+std::vector<drawing::Drawing> DrawingManager::merge_for_flush(
+    std::vector<drawing::Drawing> stored, std::vector<drawing::Drawing> mine,
+    const SyncedItems& synced, uint64_t editing_id, int64_t now) {
+    std::unordered_map<uint64_t, size_t> here;
+    for (size_t i = 0; i < mine.size(); ++i) {
+        drawing::Drawing& d = mine[i];
+        here[d.id] = i;
+        const auto prev = synced.find(d.id);
+        if (prev == synced.end() || prev->second != serialize_item(d, false))
+            d.modified_ms = now;
+    }
+    std::vector<drawing::Drawing> merged;
+    for (drawing::Drawing& theirs : stored) {
+        const auto at = here.find(theirs.id);
+        if (at == here.end()) {
+            // Not in this window: the other window added it, or this window
+            // deleted it since its last sync.
+            if (synced.count(theirs.id) == 0 && merged.size() < drawing::kMaxDrawings)
+                merged.push_back(std::move(theirs));
+            continue;
+        }
+        drawing::Drawing& ours = mine[at->second];
+        const bool take_theirs = theirs.modified_ms > ours.modified_ms && ours.id != editing_id;
+        merged.push_back(take_theirs ? std::move(theirs) : std::move(ours));
+        at->second = static_cast<size_t>(-1);
+    }
+    for (const auto& [id, index] : here)
+        if (index != static_cast<size_t>(-1) && merged.size() < drawing::kMaxDrawings)
+            merged.push_back(std::move(mine[index]));
+    // This window's order first (mine still holds ids in order), arrivals after.
+    std::vector<drawing::Drawing> ordered;
+    ordered.reserve(merged.size());
+    for (const drawing::Drawing& d : mine)
+        for (drawing::Drawing& m : merged)
+            if (m.id != 0 && m.id == d.id) { ordered.push_back(std::move(m)); m.id = 0; break; }
+    for (drawing::Drawing& m : merged)
+        if (m.id != 0) ordered.push_back(std::move(m));
+    return ordered;
+}
+
+std::vector<drawing::Drawing> DrawingManager::merge_for_pull(
+    std::vector<drawing::Drawing> stored, std::vector<drawing::Drawing> mine,
+    const SyncedItems& synced, uint64_t editing_id) {
+    std::unordered_map<uint64_t, size_t> theirs;
+    for (size_t i = 0; i < stored.size(); ++i) theirs[stored[i].id] = i;
+    std::vector<drawing::Drawing> next;
+    next.reserve(stored.size());
+    for (drawing::Drawing& d : mine) {
+        const auto it = theirs.find(d.id);
+        if (it == theirs.end()) {
+            if (synced.count(d.id) == 0 || d.id == editing_id) next.push_back(std::move(d));
+            continue;  // synced before and gone now: deleted elsewhere
+        }
+        drawing::Drawing& s = stored[it->second];
+        const bool take_theirs = s.modified_ms > d.modified_ms && d.id != editing_id;
+        next.push_back(take_theirs ? std::move(s) : std::move(d));
+        it->second = static_cast<size_t>(-1);
+    }
+    for (auto& [id, index] : theirs)
+        if (index != static_cast<size_t>(-1) && next.size() < drawing::kMaxDrawings)
+            next.push_back(std::move(stored[index]));
+    return next;
+}
+
+// Two terminal windows on one symbol share the blob, so a flush merges with
+// what is stored instead of replacing it; see merge_for_flush.
 void DrawingManager::flush() {
     if (!loaded_) return;
     dirty_ = false;
 #ifdef __EMSCRIPTEN__
+    std::vector<drawing::Drawing> stored;
+    if (char* raw = eddraw_read_blob(storage_key_.c_str())) {
+        stored = std::move(parse_blob(raw).items);
+        free(raw);
+    }
+    items_ = merge_for_flush(std::move(stored), std::move(items_), last_flushed_, modify_id_, wall_clock_ms());
+    for (const drawing::Drawing& d : items_) next_id_ = std::max(next_id_, d.id);
+    if (selected_ != 0 && !find(selected_)) selected_ = 0;
+    remember_flushed(items_);
     const std::string blob = serialize();
     eddraw_write_blob(storage_key_.c_str(), blob.c_str());
+#endif
+}
+
+// The other window wrote and this window has nothing unflushed; see merge_for_pull.
+void DrawingManager::pull() {
+#ifdef __EMSCRIPTEN__
+    char* raw = eddraw_read_blob(storage_key_.c_str());
+    if (!raw) return;
+    StoredBlob stored = parse_blob(raw);
+    free(raw);
+    if (!stored.ok) return;
+    items_ = merge_for_pull(std::move(stored.items), std::move(items_), last_flushed_, modify_id_);
+    for (const drawing::Drawing& d : items_) next_id_ = std::max(next_id_, d.id);
+    if (selected_ != 0 && !find(selected_)) selected_ = 0;
+    remember_flushed(items_);
 #endif
 }

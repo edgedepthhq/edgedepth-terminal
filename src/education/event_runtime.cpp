@@ -34,6 +34,13 @@ void EventRuntime::cmd_seek_progress(int milli_progress, bool deliberate) {
     pending_seek_            = true;
 }
 
+void EventRuntime::cmd_seek_ms(int hi, int lo, bool deliberate) {
+    pending_seek_ms_ = (static_cast<int64_t>(hi) << 32) |
+        static_cast<int64_t>(static_cast<uint32_t>(lo));
+    pending_seek_deliberate_ = deliberate;
+    pending_seek_ = false;
+}
+
 void EventRuntime::cmd_skip(int seconds) {
     pending_skip_seconds_ = seconds;
     pending_skip_         = true;
@@ -123,6 +130,12 @@ void EventRuntime::update(const AppContext& ctx) {
         }
     }
 
+    // Exact seek (epoch ms): seek() clamps to the session window.
+    if (pending_seek_ms_ > 0) {
+        const int64_t want = pending_seek_ms_;
+        pending_seek_ms_ = 0;
+        rm.seek(want, pending_seek_deliberate_);
+    }
     // Seek (own latch - don't clobber a queued pause/speed). Convert the window
     // fraction → target ms; seek() clamps. Prefer the backend's archive window once
     // it has arrived; before that, fall back to the web-provided window.
@@ -178,7 +191,9 @@ void EventRuntime::emit_state(const AppContext& ctx) {
     // the chrome's "Watch again" state (pack /demo: the native transport hides
     // on Stopped and v1 relied on a page reload).
     const bool ended   = rm.state() == ReplayManager::State::Stopped;
+    const bool errored = rm.state() == ReplayManager::State::Error;
     const float speed  = rm.info().speed;
+    const auto gap     = rm.depth_gap();
 
     // Discrete-field signature (clock/progress EXCLUDED - React interpolates).
     transport::SigHasher hasher;
@@ -187,6 +202,11 @@ void EventRuntime::emit_state(const AppContext& ctx) {
     hasher.mix(paused  ? 1u : 0u);
     hasher.mix(loading ? 1u : 0u);
     hasher.mix(ended   ? 1u : 0u);
+    hasher.mix(errored ? 1u : 0u);
+    hasher.mix(gap.interrupted ? 1u : 0u);
+    hasher.mix(gap.unverified ? 1u : 0u);
+    hasher.mix(static_cast<uint64_t>(gap.from_ms));
+    hasher.mix(static_cast<uint64_t>(gap.to_ms));
     hasher.mix(static_cast<uint64_t>(rm.pack_checkpoint_ms()));
     hasher.mix(static_cast<uint64_t>(static_cast<int>(speed * 100.0f)));
 
@@ -221,8 +241,15 @@ void EventRuntime::emit_state(const AppContext& ctx) {
     st["paused"]  = paused;
     st["loading"] = loading;
     st["ended"]   = ended;
+    st["errored"] = errored;
+    st["error"]   = errored ? rm.info().error_message : std::string();
     st["checkpointMs"] = rm.pack_checkpoint_ms();
     st["speed"]   = speed;
+    // Recorded-depth interruption the replay is playing through (or just did).
+    st["depthInterrupted"] = gap.interrupted;
+    st["depthUnverified"]  = gap.unverified;
+    st["depthGapFromMs"]   = gap.from_ms;
+    st["depthGapToMs"]     = gap.to_ms;
     {
         const int64_t span = std::max<int64_t>(1, end_ms - start_ms);
         const int64_t off  = std::clamp<int64_t>(now_ms - start_ms, 0, span);
@@ -255,6 +282,9 @@ EMSCRIPTEN_KEEPALIVE void _event_cmd_set_speed(int centi_speed) {
 }
 EMSCRIPTEN_KEEPALIVE void _event_cmd_seek(int milli_progress, int deliberate) {
     edu::EventRuntime::instance().cmd_seek_progress(milli_progress, deliberate != 0);
+}
+EMSCRIPTEN_KEEPALIVE void _event_cmd_seek_ms(int hi, int lo, int deliberate) {
+    edu::EventRuntime::instance().cmd_seek_ms(hi, lo, deliberate != 0);
 }
 EMSCRIPTEN_KEEPALIVE void _event_cmd_skip(int seconds) {
     edu::EventRuntime::instance().cmd_skip(seconds);

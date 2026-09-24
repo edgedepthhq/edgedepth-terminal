@@ -54,5 +54,14 @@ int main(){
     assert(std::string(assess(e).hypothesis).find("covering")==std::string::npos);
     e=complete();e.bars.erase(e.bars.begin());a=assess(e);assert(a.raw_count==13&&a.forced_buy==281303.14&&a.buy==11041955);
     for(const auto code:{"pro_required","outside_history_window","outside_replay_window","busy","timeout","missing_records","unsupported_source"})assert(std::string(error_message(code)).size()>15);
+    h.reset();request=h.request(pair,t0,t0+120000,true,300000);auto recovered=reply(request);
+    recovered["oi"]=nlohmann::json::array();
+    for(int i=0;i<=12;++i)recovered["oi"].push_back({{"time",t0+i*10000},{"contracts",nullptr},{"recovered_contracts",1000.0-i},{"source","stored_usd_mark"},{"stored_oi_usd",(1000.0-i)*2},{"stored_mark_price",2}});
+    History::receive(recovered);assert(h.ready&&h.assessment.usable_oi&&h.assessment.recovered_count==13);
+    assert(h.source["oi"][0]["contracts"].is_null()&&h.assessment.oi_pct<0);
+    h.reset();request=h.request(pair,t0,t0+120000,true,340000);recovered["request_id"]=request["data"]["request_id"];recovered["oi"][0]["source"]="guess";
+    History::receive(recovered);assert(!h.ready);
+    h.reset();request=h.request(pair,t0,t0+120000,true,380000);recovered["request_id"]=request["data"]["request_id"];recovered["oi"][0]["source"]="stored_usd_mark";recovered["oi"][0]["stored_mark_price"]=4;
+    History::receive(recovered);assert(!h.ready); // inconsistent operands refused
     std::cout<<"Flow evidence: alignment, raw OI, stale/missing, hypotheses, scope and stale callbacks pass\n";
 }

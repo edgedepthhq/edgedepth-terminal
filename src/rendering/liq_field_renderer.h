@@ -72,6 +72,12 @@ public:
 
     explicit LiqFieldRenderer(const AppContext& ctx) : ctx_(ctx) {}
 
+    // Candle source override. The Field is candle-derived, so a secondary
+    // chart (own CandleManager, own timeframe) must point the renderer at its
+    // manager or the Field would be built from the primary's candles. Null
+    // (the default) reads the app-level manager, which a replay swaps.
+    void set_candles(const CandleManager* candles) { candles_ = candles; invalidate(); }
+
     // Rebuild the cache if its inputs changed (closed-candle set, leverage
     // mask, timeframe). Cheap no-op when nothing changed. Safe to call more
     // than once per frame: both the Field and the Profile call it.
@@ -101,6 +107,10 @@ private:
     bool render_textured(int64_t tf_ms);
 
     const AppContext& ctx_;
+    const CandleManager* candles_ = nullptr;
+    [[nodiscard]] const CandleManager& candle_source() const {
+        return candles_ ? *candles_ : ctx_.candle_mgr();
+    }
     Knobs knobs_;
 
     // Cache: segments sorted ascending by price_lo so the renderer can binary

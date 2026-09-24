@@ -40,9 +40,14 @@ void EducationBoot::detect() {
             // different answers about re-anchoring a replay. The host page says
             // which it is instead of the client guessing.
             var chrome = String(cfg.chrome || "");
+            // The venue of the studio symbol (binancef | bybit | hl). Sent by
+            // the research replay viewer since 2026-09-19; absent from an older
+            // page, which only ever meant binancef.
+            var ex = String(cfg.exchange || "");
             if (!mode && !url) return 0;
-            // Four newline-separated fields: mode \n docUrl \n studioSymbol \n chrome
-            var s = mode + '\n' + url + '\n' + sym + '\n' + chrome;
+            // Five newline-separated fields:
+            //   mode \n docUrl \n studioSymbol \n chrome \n studioExchange
+            var s = mode + '\n' + url + '\n' + sym + '\n' + chrome + '\n' + ex;
             var len = lengthBytesUTF8(s);
             var buf = _malloc(len + 1);
             stringToUTF8(s, buf, len + 1);
@@ -56,13 +61,14 @@ void EducationBoot::detect() {
     if (raw) {
         std::string blob(raw);
         free(raw);
-        // Split on newlines into [mode, docUrl, studioSymbol, chrome]. A field
-        // the host did not send is simply absent, so an older page that still
-        // sends three fields parses exactly as it did before.
-        std::string fields[4];
+        // Split on newlines into [mode, docUrl, studioSymbol, chrome,
+        // studioExchange]. A field the host did not send is simply absent, so
+        // an older page that still sends three or four fields parses exactly
+        // as it did before.
+        std::string fields[5];
         {
             size_t start = 0;
-            for (int i = 0; i < 4 && start <= blob.size(); i++) {
+            for (int i = 0; i < 5 && start <= blob.size(); i++) {
                 const auto nl = blob.find('\n', start);
                 fields[i] = blob.substr(start, nl == std::string::npos ? std::string::npos
                                                                        : nl - start);
@@ -74,9 +80,14 @@ void EducationBoot::detect() {
         doc_url_ = fields[1];
         studio_symbol_ = fields[2];
         studio_chrome_ = fields[3];
-        // Normalize the studio symbol to lowercase (the rest of the client expects it).
-        std::transform(studio_symbol_.begin(), studio_symbol_.end(), studio_symbol_.begin(),
+        studio_exchange_ = fields[4];
+        std::transform(studio_exchange_.begin(), studio_exchange_.end(), studio_exchange_.begin(),
                        [](unsigned char c) { return std::tolower(c); });
+        // The symbol's case is the VENUE's business (Binance/Bybit lowercase,
+        // Hyperliquid native "BTC"), so it is applied by main.cpp with
+        // normalize_symbol_case once the venue is known, not folded here: the
+        // unconditional lowercase this used to do turned an HL replay into
+        // "btc", a symbol no table holds.
 
         if (mode == "studio") {
             mode_ = Mode::Studio;

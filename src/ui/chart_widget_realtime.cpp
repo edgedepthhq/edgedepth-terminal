@@ -11,6 +11,7 @@
 #include "ui/upsell_modal.h"
 #include "rendering/theme.h"
 #include <cmath>
+#include <cstdio>
 #include <emscripten.h>
 #include "stream_handler.h"
 #include <array>
@@ -30,12 +31,17 @@ void ChartWidget::set_rt_mode(bool on) {
             "Live real-time mode (observed depth, every trade as a bubble, the spread) is a Pro view. Large prints still show as bubbles on your candles.", "realtime_depth");
         return;
     }
-    if (!on && rt_mode_) {
-        heatmap_enabled_ = false;
-        liq_dense_field_ = true;
-    }
+    // heatmap_enabled_ (candle depth heatmap) is left alone in both directions:
+    // real-time depth has its own flag, so a round trip keeps the candle choice.
+    // The chart type is not: real-time draws Line / 1s candles, so the type the
+    // user had is captured on the rising edge and put back on exit (a re-arm
+    // while already on, e.g. a replay context swap, keeps the captured type).
+    if (on && !rt_mode_) rt_prev_chart_type_ = chart_type_;
+    const bool leaving = !on && rt_mode_;
+    if (leaving) liq_dense_field_ = true;
     rt_mode_ = on;
-    if (on && !rt_archive_) rt_archive_ = RealtimeArchive::acquire(ctx_.candle_mgr(), ctx_.ob_mgr(), pair_);
+    if (leaving) apply_chart_type(rt_prev_chart_type_);
+    if (on && !rt_archive_) rt_archive_ = RealtimeArchive::acquire(candles(), ctx_.ob_mgr(), pair_);
     // Keep recording across candle/RT switches. Chart closure or a context
     // change owns archive disposal and depth unsubscription.
     if (on) {
@@ -47,14 +53,13 @@ void ChartWidget::set_rt_mode(bool on) {
         rt_effective_multiplier_ = rt_bucket_multiplier_;
         rt_paused_ = false;
         rt_paused_liquidations_.clear();
-        heatmap_enabled_ = true;
         rt_span_ms_ = realtime_default_span_ms;
         rt_unhealthy_since_ms_ = 0;
         if (!rt_flow_) {
             rt_flow_ = std::make_unique<TradeAtPriceAccumulator>();
             rt_flow_->init(pair_, ctx_.stream_mgr(), tick_size_, true);
         }
-        ctx_.candle_mgr().set_follow_live(true);
+        candles().set_follow_live(true);
         if (!rt_subscribed_) {
             rt_stream_mgr_ = &ctx_.stream_mgr();
             rt_stream_mgr_->subscribe_direct({pair_, Terminal::Stream::Orderbook, 0}, this);
@@ -65,96 +70,150 @@ void ChartWidget::set_rt_mode(bool on) {
     }
 }
 
+// Every control and disclosure the panel had is still here; the prose moved
+// into hover tooltips, so the panel reads as controls first. Missing-data
+// states (capture overload, records not plotted, archive errors) stay visible
+// as one line each, and only when they apply.
 void ChartWidget::render_realtime_settings() {
+    auto tip = [](const char* text) {
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            Theme::begin_tooltip();
+            ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
+            ImGui::TextUnformatted(text);
+            ImGui::PopTextWrapPos();
+            Theme::end_tooltip();
+        }
+    };
+    auto return_live = [this]() {
+        rt_span_ms_ = realtime_default_span_ms; rt_auto_price_ = true;
+        rt_price_window_ = {}; rt_auto_fit_ = {};
+        candles().set_follow_live(true);
+    };
+
+    Theme::section_label("VIEW");
     if (!ctx_.replay_mgr().is_active() && ImGui::Checkbox("Pause display", &rt_paused_)) {
         if (rt_paused_) {
-            rt_paused_trades_ = ctx_.candle_mgr().realtime_trades().trades();
+            rt_paused_trades_ = candles().realtime_trades().trades();
             rt_paused_liquidations_ = ctx_.liq_heatmap_mgr().observed_events(pair_);
             if (rt_archive_) rt_archive_->cancel_view();
             rt_query_from_ = 0; // A cancelled request is not loaded coverage.
         }
         else { rt_paused_trades_.clear(); rt_paused_liquidations_.clear(); }
     }
-    ImGui::Checkbox("1s observed candles", &rt_candles_);
+    ImGui::Checkbox("1s candles", &rt_candles_);
+    tip("One-second candles built from observed trades, in place of the trade-price line.");
     ImGui::Checkbox("Trade-price line", &rt_trade_line_);
     chart_type_ = rt_candles_ ? ChartType::Candles : ChartType::Line;
+    ImGui::Checkbox("Depth ladder", &rt_dom_shown_);
+    tip("Order book ladder attached to the right of the chart: resting depth and traded volume on the chart's own price rows and clock.");
+    ImGui::Checkbox(rt_dom_linked_ ? "Follow price" : "Auto-fit price", &rt_auto_price_);
+    tip(rt_dom_linked_
+        ? rt_auto_fit_history_ ? "Fits observed price history with readable grouped rows. Drag or zoom the price axis to inspect manually; Follow price resumes fitting." : "Keeps the market in the central half of a readable price window. Drag vertically to stop following. Zoom out stops before numbers overlap; choose coarser fidelity for a wider price range."
+        : "Turn off to zoom or drag the price axis. Turn on to fit observed prices again.");
     if (ImGui::Checkbox("Auto-fit visible history", &rt_auto_fit_history_)) {
         rt_auto_fit_ = {}; rt_price_window_ = {}; rt_auto_price_ = true;
         rt_effective_multiplier_ = rt_bucket_multiplier_;
     }
-    if (ImGui::IsItemHovered()) Theme::tooltip("Fits observed trades and quotes in the visible time window. Automatically groups price rows to keep the linked DOM readable. Turn off for fixed-fidelity price following.");
-    ImGui::Checkbox(rt_dom_linked_ ? "Follow price" : "Auto-fit price", &rt_auto_price_);
-    if (ImGui::IsItemHovered()) Theme::tooltip(rt_dom_linked_
-        ? rt_auto_fit_history_ ? "Fits observed price history with readable grouped rows. Drag or zoom the price axis to inspect manually; Follow price resumes fitting." : "Keeps the market in the central half of a readable price window. Drag vertically to stop following. Zoom out stops before numbers overlap; choose coarser fidelity for a wider price range."
-        : "Turn off to zoom or drag the price axis. Turn on to fit observed prices again.");
-    if (ImGui::Button("Recent 30 seconds")) {
-        rt_span_ms_ = realtime_default_span_ms; rt_auto_price_ = true;
-        rt_price_window_ = {}; rt_auto_fit_ = {};
-        ctx_.candle_mgr().set_follow_live(true);
+    tip("Fits observed trades and quotes in the visible time window, grouping price rows to keep the depth ladder readable. Turn off for fixed-fidelity price following.");
+    if (ImGui::Button("Return live")) return_live();
+    tip("Back to the most recent 30 seconds, following price. Zoom out or drag left for older retained context; the view never changes recorded detail.");
+    if (rt_archive_) {
+        ImGui::SameLine();
+        if (ImGui::Button("Whole session")) { rt_span_ms_ = double(RealtimeArchive::target_ms) / 0.88; candles().set_follow_live(true); }
+        tip("Zoom out to everything retained this session.");
     }
-    ImGui::TextWrapped("Opens on 30 seconds. Zoom out or drag left for older retained context; changing the view does not change recorded detail.");
+
+    Theme::section_label("DEPTH");
+    ImGui::Checkbox("Extend current depth", &rt_extend_depth_);
+    tip("Projects the last synchronized sampled book into the right margin. This is a held current book, not future orders or recorded history.");
+    ImGui::TextDisabled("%s: %d native ticks per row",
+        rt_auto_fit_history_ && rt_dom_linked_ ? "Automatic grouping" : "Fixed grouping", rt_effective_multiplier_);
+    tip("Brightness is mean quantity per native tick; wider rows keep their totals in the DOM, and thin walls may fade on zoom-out. Time bins average received samples. Set the minimum fidelity in Layers > Depth settings.");
+
+    Theme::section_label("TRADES");
     ImGui::Checkbox("Trade bubbles", &rt_bubbles_);
-    ImGui::Checkbox("Observed liquidation diamonds", &liq_observed_enabled_);
-    ImGui::Checkbox("Liquidation activity strip", &rt_liq_strip_);
-    if (ImGui::Button("Liquidation focus")) {
-        liq_observed_enabled_ = rt_liq_strip_ = heatmap_enabled_ = rt_bubbles_ = true;
+    tip("Fixed 100ms groups at each exact price, with 100ms of delivery settling. The eight busiest prices per window are selected once and frozen for 30 minutes; zoom never regroups them. Changing size or filter redraws the layer.");
+    ImGui::Checkbox("Auto size", &rt_auto_bubbles_);
+    tip("Uses the 75th percentile of received trade values over the last 60 seconds. Settles after 32 records or five seconds, then stays fixed until Recalibrate; independent of zoom.");
+    if (rt_auto_bubbles_) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("min %.4g%s", rt_bubble_scale_.minimum(),
+            rt_bubble_scale_.settled() ? "" : " (warming up)");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Recalibrate")) rt_bubble_scale_ = {};
+    } else {
+        ImGui::SetNextItemWidth(130);
+        ImGui::InputFloat("Minimum value", &rt_min_notional_, 1000, 10000, "%.0f");
+        if (!std::isfinite(rt_min_notional_)) rt_min_notional_ = 10000;
+        rt_min_notional_ = std::max(1.0f, rt_min_notional_);
+        tip("Price x quantity in quote units, summed over one 100ms window at one exact price; the exchange may aggregate fills. Two-sided takers show the smaller side as an inner disc. Radius runs 3 to 12px; sizes above 16x the minimum share the cap.");
     }
-    ImGui::TextWrapped("Diamonds show reported liquidations. Depth, trades and the strip can each be toggled independently. Binance reports are censored; missing liquidations are not estimated.");
+    if (rt_archive_) {
+        const auto& b = rt_archive_->bubbles();
+        const unsigned long long skipped = b.approximate_records + b.late_records + b.overflow_records;
+        if (skipped) {
+            ImGui::TextDisabled("Not plotted as bubbles: %llu records", skipped);
+            char why[320];
+            snprintf(why, sizeof(why),
+                "%llu in multi-price history summaries, %llu late for already closed groups, %llu over the pending capture budget. Original records remain in session history when storage is available.",
+                (unsigned long long)b.approximate_records, (unsigned long long)b.late_records,
+                (unsigned long long)b.overflow_records);
+            tip(why);
+        }
+    }
+
+    Theme::section_label("LIQUIDATIONS");
+    ImGui::Checkbox("Reported liquidations", &liq_observed_enabled_);
+    tip("Diamonds at reported liquidations. Binance reports are censored; missing liquidations are not estimated.");
     if (liq_observed_enabled_) {
-        ImGui::SetNextItemWidth(150);
-        ImGui::InputFloat("Minimum liquidation notional", &liq_obs_min_usd_, 100, 1000, "%.0f");
+        ImGui::SetNextItemWidth(130);
+        ImGui::InputFloat("Minimum notional", &liq_obs_min_usd_, 100, 1000, "%.0f");
         if (!std::isfinite(liq_obs_min_usd_)) liq_obs_min_usd_ = 0;
         liq_obs_min_usd_ = std::clamp(liq_obs_min_usd_, 0.0f, 1e15f);
-        ImGui::TextWrapped("Marker filter only; the activity strip includes all retained reports in view.");
+        tip("Filters the diamonds only; the activity strip includes all retained reports in view.");
     }
-    ImGui::TextWrapped("Depth brightness: mean quantity per native tick. Wider rows keep their totals in the DOM; thin walls may fade on zoom-out. Time bins average received samples.");
-    ImGui::Checkbox("Extend current depth", &rt_extend_depth_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Projects the last synchronized sampled book into the right margin. This is a held current book, not future orders or recorded history. Turn off to leave the margin clear.");
-    ImGui::Checkbox("Auto market size", &rt_auto_bubbles_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Uses the 75th percentile of received trade values over the last 60 seconds. Settles after 32 records and stays fixed until Recalibrate bubble sizes; independent of zoom. One bubble per record, with no inferred fills.");
-    if (rt_auto_bubbles_) {
-        ImGui::Text("Auto minimum: %.4g quote%s", rt_bubble_scale_.minimum(),
-            rt_bubble_scale_.settled() ? " (fixed)" : " (warming up)");
-        if (ImGui::Button("Recalibrate bubble sizes")) rt_bubble_scale_ = {};
-    }
-    ImGui::BeginDisabled(rt_auto_bubbles_);
-    ImGui::SetNextItemWidth(150);
-    ImGui::InputFloat("Minimum trade value", &rt_min_notional_, 1000, 10000, "%.0f");
-    if (!std::isfinite(rt_min_notional_)) rt_min_notional_ = 10000;
-    rt_min_notional_ = std::max(1.0f, rt_min_notional_);
-    if (ImGui::IsItemHovered()) Theme::tooltip("Price x quantity in quote units. One bubble per received record; the exchange may aggregate fills. Radius starts at 3px and is capped at 12px. Sizes above 16 times the minimum share the cap.");
-    ImGui::EndDisabled();
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 350);
-    ImGui::TextUnformatted("Session history: 30-minute target, browser storage permitting");
-    if (rt_archive_) {
-        const auto& a = *rt_archive_;
-        ImGui::Text("Retained: %.1f minutes / %.2f MiB (origin %.2f / 256 MiB)",
-            double(std::max(int64_t(0), a.last-a.first))/60000, a.bytes/1048576, a.total_bytes/1048576);
+    ImGui::Checkbox("Activity strip", &rt_liq_strip_);
+
+    if (!rt_archive_) return;
+    const auto& a = *rt_archive_;
+    Theme::section_label("SESSION");
+    ImGui::TextDisabled("Recorded %.1f min \xc2\xb7 %.2f MiB",
+        double(std::max(int64_t(0), a.last - a.first)) / 60000, a.bytes / 1048576);
+    {
+        std::string detail = "Local session history, 30-minute target, browser storage permitting. "
+                             "Switching to candles keeps recording; closing the chart clears it. Storage may be evicted.";
+        char line[160];
+        snprintf(line, sizeof(line), "\nOrigin storage %.2f / 256 MiB.", a.total_bytes / 1048576);
+        detail += line;
         if (a.first) {
-            char first[64]={}, last[64]={};
+            char first[64] = {}, last[64] = {};
             DisplayTimeZone::instance().format(a.first, TimeZoneFormat::DateTimeSeconds, first, sizeof(first));
             DisplayTimeZone::instance().format(a.last, TimeZoneFormat::DateTimeSeconds, last, sizeof(last));
-            ImGui::Text("%s to %s", first, last);
+            snprintf(line, sizeof(line), "\n%s to %s", first, last);
+            detail += line;
         }
-        if (rt_history_view_) ImGui::Text("History: %.1fs depth bins; %zu markers from %zu trades",
-            double(rt_loaded_step_)/1000, rt_archive_trades_.size(), a.view_trade_count);
-        if(!a.startup_status.empty()) {
-            ImGui::TextWrapped("%s",a.startup_status.c_str());
-            ImGui::Text("Startup received up to %d price levels per side", a.startup_max_levels_per_side);
-            ImGui::TextWrapped("Startup depth: 500ms observations, up to 512 native levels per side on supported feeds. Busy-market prefixes group observed trades by side over 100ms, preserving quantity and price range; zoom cannot recover individual trades there. Older servers may provide less coverage. Current DOM uses live depth. Startup trades do not enter CVD or alerts.");
+        snprintf(line, sizeof(line), "\nBubble groups retained: %zu; filtered before display: %zu.",
+                 a.bubbles().size(), a.bubbles().filtered_groups);
+        detail += line;
+        if (rt_history_view_) {
+            snprintf(line, sizeof(line), "\nHistory: %.1fs depth bins; %zu markers from %zu trades.",
+                     double(rt_loaded_step_) / 1000, rt_archive_trades_.size(), a.view_trade_count);
+            detail += line;
         }
-        ImGui::TextUnformatted(a.error.empty() ? "Recording observed depth and received trades" : a.error.c_str());
-        if (rt_trade_tail_waiting_) ImGui::TextUnformatted("Refreshing older trades; current trades continue");
-        if (a.dropped) ImGui::Text("Capture overload: %zu records missed; depth gaps preserved", a.dropped);
-        if (ImGui::Button("Whole session")) { rt_span_ms_ = double(RealtimeArchive::target_ms) / 0.88; ctx_.candle_mgr().set_follow_live(true); }
-        ImGui::SameLine();
-        if (ImGui::Button("Return live")) { rt_span_ms_ = realtime_default_span_ms; rt_auto_price_ = true; rt_price_window_ = {}; rt_auto_fit_ = {}; ctx_.candle_mgr().set_follow_live(true); }
-        if (ImGui::Button("Clear history")) { rt_archive_->reset(); }
-        ImGui::TextUnformatted("Local session only. Switching to candles keeps recording; closing the chart clears its archive. Storage may be evicted.");
+        if (!a.startup_status.empty()) {
+            detail += "\n\n" + a.startup_status;
+            snprintf(line, sizeof(line), "\nStartup received up to %d price levels per side.", a.startup_max_levels_per_side);
+            detail += line;
+            detail += "\nStartup depth: 500ms observations, up to 512 native levels per side on supported feeds. "
+                      "Busy-market prefixes group observed trades by side over 100ms, preserving quantity and price range; "
+                      "zoom cannot recover individual trades there. Current DOM uses live depth. Startup trades do not enter CVD or alerts.";
+        }
+        tip(detail.c_str());
     }
-    ImGui::Text("%s: %d native ticks per row", rt_auto_fit_history_ && rt_dom_linked_ ? "Automatic grouping" : "Fixed grouping", rt_effective_multiplier_);
-    ImGui::TextUnformatted("Minimum fidelity: Layers > Depth settings");
-    ImGui::PopTextWrapPos();
+    if (!a.error.empty()) ImGui::TextColored(Theme::Tokens::WARN, "%s", a.error.c_str());
+    if (a.dropped) ImGui::TextColored(Theme::Tokens::WARN, "Capture overload: %zu records missed; depth gaps kept", a.dropped);
+    if (rt_trade_tail_waiting_) ImGui::TextDisabled("Refreshing older trades; current trades continue");
+    if (ImGui::SmallButton("Clear history")) rt_archive_->reset();
 }
 
 void ChartWidget::on_rewind(int64_t) {
@@ -181,7 +240,7 @@ void ChartWidget::on_rewind(int64_t) {
     candle_bubble_history_.reset();
     flow_history_.reset();
     candle_prints_.clear();
-    candle_prints_seen_ms_ = 0; candle_prints_seen_id_ = 0;
+    candle_prints_seen_ms_ = 0; candle_prints_seen_count_ = 0;
     candle_bubble_scale_ = {}; candle_bubble_scale_since_ms_ = 0;
     candle_bubble_auto_floor_ = 0; candle_bubble_size_reference_ = 0;
 }
@@ -207,8 +266,12 @@ void ChartWidget::update_realtime() {
         rt_flow_->set_tick_size(tick_size_);
         rt_flow_->advance_to(clock);
     }
-    if (clock != rt_clock_ms_ || !ctx_.replay_mgr().is_paused())
-        rt_quote_ = ctx_.ob_mgr().realtime_quote(pair_, clock);
+    if (clock != rt_clock_ms_ || !ctx_.replay_mgr().is_paused()) {
+        const auto quote = ctx_.ob_mgr().realtime_quote_as_of(pair_, clock);
+        rt_quote_ = quote.quote;
+        rt_quote_bid_since_ms_ = quote.bid_since_ms;
+        rt_quote_ask_since_ms_ = quote.ask_since_ms;
+    }
     rt_clock_ms_ = clock;
     rt_renderer_->set_observation_clock_ms(clock);
     rt_book_valid_ = ctx_.ob_mgr().copy_realtime_since(pair_, rt_serial_, rt_pending_);
@@ -251,17 +314,17 @@ void ChartWidget::update_realtime() {
 
 const std::deque<Terminal::Trade>& ChartWidget::realtime_trades() const {
     if (rt_history_view_) return rt_archive_trades_;
-    return rt_paused_ ? rt_paused_trades_ : ctx_.candle_mgr().realtime_trades().trades();
+    return rt_paused_ ? rt_paused_trades_ : candles().realtime_trades().trades();
 }
 
 void ChartWidget::render_realtime() {
     ProfileScope profile("RT overlays");
     const auto limits = ImPlot::GetPlotLimits();
-    if (!ctx_.candle_mgr().follow_live()) rt_span_ms_ = std::clamp(limits.X.Size(), 5000.0, (double(RealtimeArchive::target_ms) / 0.88));
+    if (!candles().follow_live()) rt_span_ms_ = std::clamp(limits.X.Size(), 5000.0, (double(RealtimeArchive::target_ms) / 0.88));
     ImDrawList* dl = ImPlot::GetPlotDrawList();
     ImPlot::PushPlotClipRect();
     const auto& trades = realtime_trades();
-    if (heatmap_enabled_ && rt_extend_depth_ && (!rt_history_view_ || realtime_live_edge()) && rt_book_valid_ && rt_latest_ &&
+    if (rt_depth_enabled_ && rt_extend_depth_ && (!rt_history_view_ || realtime_live_edge()) && rt_book_valid_ && rt_latest_ &&
         rt_latest_->timestamp_ms <= rt_clock_ms_ && rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000 &&
         limits.X.Max > rt_clock_ms_) {
         const float edge = std::max(ImPlot::GetPlotPos().x,
@@ -355,20 +418,21 @@ void ChartWidget::render_realtime() {
     // Calibrate from original received records even while displaying an archive.
     // Grouped archive markers are sums, not samples of individual trade sizes.
     if (rt_auto_bubbles_) rt_bubble_scale_.update(
-        rt_paused_ ? rt_paused_trades_ : ctx_.candle_mgr().realtime_trades().trades(), rt_clock_ms_);
-    const double minimum = rt_auto_bubbles_ ? rt_bubble_scale_.minimum() : rt_min_notional_;
-    if (rt_bubbles_ && minimum > 0) {
-        rt_trade_view_.build(trades, int64_t(limits.X.Min), std::min(rt_clock_ms_, int64_t(limits.X.Max)),
-            minimum, rt_history_view_ && rt_archive_->view_trades_grouped);
-        for (size_t i=0;i<rt_trade_view_.count;++i) {
-            const auto& trade = rt_trade_view_.records[i];
-            const auto& color = trade.is_buy ? Theme::Tokens::UP : Theme::Tokens::DOWN;
-            if (rt_trade_view_.grouped && rt_trade_view_.high[i]>rt_trade_view_.low[i])
-                dl->AddLine(ImPlot::PlotToPixels(double(trade.timestamp_ms), rt_trade_view_.low[i]),
-                    ImPlot::PlotToPixels(double(trade.timestamp_ms), rt_trade_view_.high[i]), Theme::u32(color, 0.5f));
-            RealtimeBubble::draw(*dl, ImPlot::PlotToPixels(double(trade.timestamp_ms), trade.price),
-                RealtimeBubble::radius(trade.price * trade.qty, minimum), color, Theme::u32(Theme::Tokens::BASE));
-        }
+        rt_paused_ ? rt_paused_trades_ : candles().realtime_trades().trades(), rt_clock_ms_);
+    const double minimum = rt_auto_bubbles_
+        ? (rt_bubble_scale_.settled() ? rt_bubble_scale_.minimum() : 0) : rt_min_notional_;
+    if (rt_bubbles_ && minimum > 0 && rt_archive_) {
+        // Immutable capture publications, not a ranking of the current viewport.
+        // Neither archive refreshes nor camera movement can change a marker.
+        rt_archive_->bubbles().for_each(int64_t(limits.X.Min), int64_t(limits.X.Max), rt_clock_ms_,
+            [&](const RealtimeBubbleHistory::Bubble& m) {
+                if (m.value() < minimum) return;
+                const ImVec4& major = m.buy_led() ? Theme::Tokens::UP : Theme::Tokens::DOWN;
+                const ImVec4& minor = m.buy_led() ? Theme::Tokens::DOWN : Theme::Tokens::UP;
+                RealtimeBubble::draw(*dl, ImPlot::PlotToPixels(double(m.timestamp_ms), m.price),
+                    RealtimeBubble::radius(m.value(), minimum), major, Theme::u32(Theme::Tokens::BASE),
+                    RealtimeBubble::Fill::Opaque, float(m.minor()), minor);
+            });
     }
     const bool fresh = rt_book_valid_ && rt_latest_ &&
         rt_latest_->timestamp_ms <= rt_clock_ms_ && rt_clock_ms_ - rt_latest_->timestamp_ms <= 15000;
@@ -394,7 +458,10 @@ void ChartWidget::render_realtime() {
         for (int side = 0; side < 2; ++side) {
             const double price = side ? book.ask : book.bid;
             const double current_price = side ? rt_dom_frame_.ask() : rt_dom_frame_.bid();
-            const double quote_ms = double(std::clamp(rt_quote_.timestamp_ms, book.timestamp_ms, rt_clock_ms_));
+            // The step sits where this side's price changed, not where the
+            // newest ticker arrived, so it holds its place in time.
+            const int64_t since = side ? rt_quote_ask_since_ms_ : rt_quote_bid_since_ms_;
+            const double quote_ms = double(std::clamp(since > 0 ? since : rt_quote_.timestamp_ms, book.timestamp_ms, rt_clock_ms_));
             const ImU32 color = Theme::u32(side ? Theme::Tokens::DOWN : Theme::Tokens::UP);
             dl->AddLine(ImPlot::PlotToPixels(double(book.timestamp_ms), price),
                 ImPlot::PlotToPixels(quote_ms, price), color, 1.25f);
@@ -411,9 +478,8 @@ void ChartWidget::render_realtime() {
         }
     }
     const char* note = rt_archive_ && rt_archive_->loading ? "Loading RT history..." : rt_archive_ && !rt_archive_->error.empty() ? "RT archive stopped: open RT settings for storage status" : rt_history_view_ ? (rt_archive_ && rt_archive_->loading ?
-        "RT history loading / recording continues" : "RT history: mean depth bins / grouped trade volume when dense / zoom for detail") : rt_paused_ ? "RT paused / session recording continues" : !fresh ? "RT: waiting for fresh synchronized depth" :
-        (rt_trade_view_.grouped && rt_bubbles_ ? "RT: grouped trade volume at average prices / zoom for individual records" :
-         "RT: sampled book held between updates / bubbles are trade records");
+        "RT history loading / recording continues" : "RT history: mean depth bins / fixed 100ms trade bubbles") : rt_paused_ ? "RT paused / session recording continues" : !fresh ? "RT: waiting for fresh synchronized depth" :
+        "RT: sampled book held between updates / fixed 100ms trade bubbles";
     const ImVec2 pos = ImPlot::GetPlotPos();
     const float note_y = pos.y + (ctx_.replay_mgr().is_active() ? 60.0f : 34.0f);
     if (!realtime_samples().empty() && realtime_samples().front()->timestamp_ms >= limits.X.Min &&
@@ -422,6 +488,11 @@ void ChartWidget::render_realtime() {
         dl->AddLine(ImVec2(start, note_y + 26), ImVec2(start, pos.y + ImPlot::GetPlotSize().y),
             Theme::u32(Theme::Tokens::TX2, 0.45f));
         dl->AddText(ImVec2(start + 6, note_y + 18), Theme::u32(Theme::Tokens::TX2), "Observed depth starts here");
+    }
+    char density_note[384];
+    if (rt_bubbles_ && rt_archive_ && rt_archive_->bubbles().filtered_groups > 0) {
+        std::snprintf(density_note, sizeof(density_note), "%s / up to 8 prices per 100ms, selected once", note);
+        note = density_note;
     }
     const ImVec2 note_size = ImGui::CalcTextSize(note);
     dl->AddRectFilled(ImVec2(pos.x + 8, note_y - 3),
@@ -471,7 +542,7 @@ void ChartWidget::configure_depth_fidelity(ShaderHeatmapRenderer& renderer) {
 
 
 void ChartWidget::capture_realtime_archive() {
-    if (!rt_archive_) rt_archive_ = RealtimeArchive::acquire(ctx_.candle_mgr(), ctx_.ob_mgr(), pair_);
+    if (!rt_archive_) rt_archive_ = RealtimeArchive::acquire(candles(), ctx_.ob_mgr(), pair_);
     const int64_t clock = ctx_.replay_mgr().is_active() ? ctx_.replay_mgr().interpolated_time_ms() :
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     rt_archive_->update(clock);
@@ -490,7 +561,7 @@ void ChartWidget::rebuild_realtime_view() {
 }
 
 bool ChartWidget::realtime_live_edge() const {
-    return realtime_view_has_live_edge(ctx_.candle_mgr().follow_live(), last_visible_range_.X.Max, rt_clock_ms_);
+    return realtime_view_has_live_edge(candles().follow_live(), last_visible_range_.X.Max, rt_clock_ms_);
 }
 
 void ChartWidget::update_realtime_archive_view() {
@@ -500,10 +571,10 @@ void ChartWidget::update_realtime_archive_view() {
         rt_archive_samples_.clear(); rt_archive_trades_.clear(); rt_query_from_ = rt_query_to_ = rt_loaded_to_ = 0;
         if (rt_history_view_) rebuild_realtime_view();
     }
-    const bool follow = ctx_.candle_mgr().follow_live();
+    const bool follow = candles().follow_live();
     const int64_t from = follow ? rt_clock_ms_ - int64_t(rt_span_ms_ * 0.88) : int64_t(last_visible_range_.X.Min);
     const int64_t to = follow ? rt_clock_ms_ : std::min(rt_clock_ms_, int64_t(last_visible_range_.X.Max));
-    const auto& recent_trades = rt_paused_ ? rt_paused_trades_ : ctx_.candle_mgr().realtime_trades().trades();
+    const auto& recent_trades = rt_paused_ ? rt_paused_trades_ : candles().realtime_trades().trades();
     const bool trades_retired = recent_trades.size() == RealtimeTradeHistory::max_trades &&
         recent_trades.front().timestamp_ms > from && rt_archive_->first < recent_trades.front().timestamp_ms;
     const bool seeded = rt_archive_->startup_first>0 && from<rt_archive_->startup_end;
@@ -643,14 +714,14 @@ double ChartWidget::candle_bubble_floor() const {
 }
 
 void ChartWidget::collect_candle_prints() {
-    const auto& trades = ctx_.candle_mgr().realtime_trades().trades();
+    const auto& trades = candles().realtime_trades().trades();
     if (trades.empty()) return;
     const int64_t clock = trades.back().timestamp_ms;
     // Time went backwards (replay seek, context swap): the retained prints
     // belong to a traversal that no longer exists.
     if (clock < candle_prints_seen_ms_) {
         candle_prints_.clear();
-        candle_prints_seen_ms_ = 0; candle_prints_seen_id_ = 0;
+        candle_prints_seen_ms_ = 0; candle_prints_seen_count_ = 0;
         candle_bubble_scale_ = {}; candle_bubble_scale_since_ms_ = 0;
         candle_bubble_auto_floor_ = 0; candle_bubble_size_reference_ = 0;
     }
@@ -667,28 +738,37 @@ void ChartWidget::collect_candle_prints() {
                 candle_bubble_auto_floor_ = candle_bubble_scale_.minimum() * kCandleBubbleMult;
                 // Recover the still-retained initial sample when auto first warms.
                 if (candle_bubble_min_ == 0) {
-                    candle_prints_.clear(); candle_prints_seen_ms_ = 0; candle_prints_seen_id_ = 0;
+                    candle_prints_.clear(); candle_prints_seen_ms_ = 0; candle_prints_seen_count_ = 0;
                 }
             }
         }
     }
     const double floor = candle_bubble_floor();
     // Fold in every trade newer than the last one scanned. Same-millisecond
-    // ties are told apart by agg_trade_id (monotonic per market on Binance).
+    // ties are told apart by arrival position: the ring appends in order for
+    // every venue, so the count already scanned at that millisecond is the
+    // only identity needed (Bybit prints carry no numeric aggregate ID).
     auto it = std::upper_bound(trades.begin(), trades.end(), candle_prints_seen_ms_,
         [](int64_t ts, const Terminal::Trade& t) { return ts < t.timestamp_ms; });
     if (candle_prints_seen_ms_ > 0) {
         auto tie = std::lower_bound(trades.begin(), it, candle_prints_seen_ms_,
             [](const Terminal::Trade& t, int64_t ts) { return t.timestamp_ms < ts; });
-        for (; tie != it; ++tie)
-            if (tie->agg_trade_id > candle_prints_seen_id_ && floor > 0 &&
+        size_t index = 0;
+        for (; tie != it; ++tie, ++index)
+            if (index >= candle_prints_seen_count_ && floor > 0 &&
                 tie->price * tie->qty >= floor)
                 candle_prints_.push_back(*tie);
     }
     for (; it != trades.end(); ++it)
         if (floor > 0 && it->price * it->qty >= floor) candle_prints_.push_back(*it);
     candle_prints_seen_ms_ = clock;
-    candle_prints_seen_id_ = trades.back().agg_trade_id;
+    {
+        const auto first = std::lower_bound(trades.begin(), trades.end(), clock,
+            [](const Terminal::Trade& a, int64_t ts) { return a.timestamp_ms < ts; });
+        const auto last = std::upper_bound(first, trades.end(), clock,
+            [](int64_t ts, const Terminal::Trade& a) { return ts < a.timestamp_ms; });
+        candle_prints_seen_count_ = size_t(last - first);
+    }
     // Same-ms ties appended after the main run can land out of order; the
     // renderer binary-searches by time, so keep the deque sorted.
     if (candle_prints_.size() > 1 &&
@@ -708,7 +788,7 @@ void ChartWidget::render_candle_bubbles() {
     // from open to open + tf. Drawn at their raw time, the second half of every
     // bar's prints landed over the NEXT bar, at prices that bar never touched.
     // Shifting each print back by half a period puts it inside its own bar.
-    const double shift_ms = double(ctx_.candle_mgr().timeframe_seconds()) * 500.0;
+    const double shift_ms = double(candles().timeframe_seconds()) * 500.0;
     const bool history = candle_bubble_history_enabled_ && Entitlements::hosted() && Entitlements::is_pro() &&
         pair_.exchange == "binancef" && !ctx_.replay_mgr().is_active() && !EducationBoot::instance().is_pack();
     const int64_t from_ms = int64_t(limits.X.Min + shift_ms), to_ms = int64_t(limits.X.Max + shift_ms);
@@ -747,9 +827,12 @@ void ChartWidget::render_candle_bubbles() {
         [](int64_t ts, const Terminal::Trade& t) { return ts < t.timestamp_ms; });
     auto* dl = ImPlot::GetPlotDrawList();
     const ImVec2 mouse = ImGui::GetIO().MousePos;
-    const Terminal::Trade* hovered = nullptr;
+    const MixedBubbles::Marker* hovered = nullptr;
     ImPlot::PushPlotClipRect();
-    // Keep original identities; strongest-first selection below removes crowding.
+    // Qualifying prints keep their identities up to here; the mixed view then
+    // merges the ones that share a bar and a price, so a level both takers hit
+    // in one bar is one two-tone bubble, and the strongest-first selection
+    // below removes crowding among the merged markers.
     static std::vector<const Terminal::Trade*> order;
     order.clear();
     for (auto it = first; it != last; ++it) {
@@ -761,17 +844,16 @@ void ChartWidget::render_candle_bubbles() {
     order.erase(std::remove_if(order.begin(),order.end(),[&](const auto* t){
         return t->price*t->qty < floor || t->price < limits.Y.Min || t->price > limits.Y.Max;
     }),order.end());
-    const auto larger = [](const Terminal::Trade* a,const Terminal::Trade* b) {
-        if (a->price*a->qty != b->price*b->qty) return a->price*a->qty > b->price*b->qty;
-        if (a->timestamp_ms != b->timestamp_ms) return a->timestamp_ms < b->timestamp_ms;
-        return a->agg_trade_id < b->agg_trade_id;
-    };
     const size_t qualifying_count=order.size();
-    if (order.size() > size_t(kCandleBubbleMaxDraw)) {
-        std::nth_element(order.begin(),order.begin()+kCandleBubbleMaxDraw,order.end(),larger);
-        order.resize(kCandleBubbleMaxDraw);
-    }
-    std::sort(order.begin(),order.end(),larger);
+    candle_bubble_view_.build(order.begin(), order.end(), int64_t(shift_ms) * 2, tick_size_, 0.0);
+    static std::vector<const MixedBubbles::Marker*> ranked;
+    ranked.clear();
+    for (size_t i = 0; i < candle_bubble_view_.count; ++i) ranked.push_back(&candle_bubble_view_.markers[i]);
+    std::sort(ranked.begin(), ranked.end(), [](const MixedBubbles::Marker* a, const MixedBubbles::Marker* b) {
+        if (a->value() != b->value()) return a->value() > b->value();
+        if (a->timestamp_ms != b->timestamp_ms) return a->timestamp_ms < b->timestamp_ms;
+        return a->price < b->price;
+    });
     if (!(candle_bubble_size_reference_ > 0)) {
         if (candle_bubble_history_.size_reference > 0) candle_bubble_size_reference_=candle_bubble_history_.size_reference;
         else if (!history || !candle_bubble_history_.error.empty() || (!candle_bubble_history_.loading() && !candle_bubble_history_.tiles.empty())) {
@@ -785,24 +867,25 @@ void ChartWidget::render_candle_bubbles() {
     static std::vector<CandleBubbleDisplay::Marker> selected;
     selected.clear();
     const auto plot_pos = ImPlot::GetPlotPos(), plot_size = ImPlot::GetPlotSize();
-    for (size_t i=0;i<order.size();++i) {
-        const auto* t=order[i];
-        const auto c=ImPlot::PlotToPixels(double(t->timestamp_ms)-shift_ms,t->price);
-        const float radius=CandleBubbleDisplay::radius(t->price*t->qty,reference);
+    for (size_t i=0;i<ranked.size();++i) {
+        const auto* m=ranked[i];
+        const auto c=ImPlot::PlotToPixels(double(m->timestamp_ms)-shift_ms,m->price);
+        const float radius=CandleBubbleDisplay::radius(m->value(),reference);
         // Offscreen candidates cannot suppress a visible execution.
         if(c.x<plot_pos.x || c.x>plot_pos.x+plot_size.x || c.y<plot_pos.y || c.y>plot_pos.y+plot_size.y) continue;
         CandleBubbleDisplay::retain(selected,{i,c.x,c.y,radius},plot_size.x);
     }
     for (const auto& marker : selected) {
-        const Terminal::Trade* t = order[marker.index];
-        const double notional = t->price * t->qty;
-        const ImVec2 c = ImPlot::PlotToPixels(double(t->timestamp_ms) - shift_ms, t->price);
-        const float r = CandleBubbleDisplay::radius(notional, reference);
-        RealtimeBubble::draw(*dl, c, r, t->is_buy ? Theme::Tokens::UP : Theme::Tokens::DOWN,
-                             Theme::u32(Theme::Tokens::BASE));
+        const MixedBubbles::Marker* m = ranked[marker.index];
+        const ImVec2 c = ImPlot::PlotToPixels(double(m->timestamp_ms) - shift_ms, m->price);
+        const float r = CandleBubbleDisplay::radius(m->value(), reference);
+        const ImVec4& major = m->buy_led() ? Theme::Tokens::UP : Theme::Tokens::DOWN;
+        const ImVec4& minor = m->buy_led() ? Theme::Tokens::DOWN : Theme::Tokens::UP;
+        RealtimeBubble::draw(*dl, c, r, major, Theme::u32(Theme::Tokens::BASE),
+                             RealtimeBubble::Fill::Translucent, float(m->minor()), minor);
         const float dx = mouse.x - c.x, dy = mouse.y - c.y;
         // Last hit is the visible topmost disc, including its circular edge.
-        if (dx * dx + dy * dy <= r * r) hovered = t;
+        if (dx * dx + dy * dy <= r * r) hovered = m;
     }
     if (hovered && ImPlot::IsPlotHovered()) {
         const auto anchor = ImPlot::PlotToPixels(double(hovered->timestamp_ms)-shift_ms,hovered->price);
@@ -816,16 +899,20 @@ void ChartWidget::render_candle_bubbles() {
         DisplayTimeZone::instance().format(hovered->timestamp_ms, TimeZoneFormat::DateTimeSeconds, time, sizeof(time));
         snprintf(price, sizeof(price), fmt_.price_fmt, hovered->price);
         Theme::begin_tooltip();
-        ImGui::TextUnformatted(hovered->is_buy ? "Large buy (taker bought)" : "Large sell (taker sold)");
+        if (hovered->buy > 0 && hovered->sell > 0)
+            ImGui::Text("Large prints, both takers: %.0f%% bought / %.0f%% sold",
+                100.0 * hovered->buy / hovered->value(), 100.0 * hovered->sell / hovered->value());
+        else ImGui::TextUnformatted(hovered->buy_led() ? "Large buy (taker bought)" : "Large sell (taker sold)");
         ImGui::Text("%s | %s %s", time, pair_.exchange.c_str(), pair_.symbol.c_str());
-        ImGui::Text("Price %s | size %.6g | value %.0f", price, hovered->qty, hovered->price * hovered->qty);
-        ImGui::Text("%.1fx display reference (%.0f quote value)", hovered->price*hovered->qty/reference,reference);
-        ImGui::Text("Showing %zu of %zu qualifying records; zoom for detail",selected.size(),qualifying_count);
+        ImGui::Text("Price %s | value %.0f (bought %.0f, sold %.0f) | %u record%s", price, hovered->value(),
+            hovered->buy, hovered->sell, hovered->count, hovered->count == 1 ? "" : "s");
+        ImGui::Text("%.1fx display reference (%.0f quote value)", hovered->value()/reference,reference);
+        ImGui::Text("Showing %zu bubbles from %zu qualifying records; zoom for detail",selected.size(),qualifying_count);
         if (candle_bubble_history_.size_reference>0)
             ImGui::TextUnformatted("Reference: initial history selection P90, held while panning.");
         else ImGui::TextUnformatted("Reference: warmed live trade-size threshold.");
-        ImGui::TextUnformatted("Log-compressed sizes. Price guide starts at this execution.");
-        ImGui::TextUnformatted("One received trade record; the exchange may aggregate fills.");
+        ImGui::TextUnformatted("Log-compressed sizes. Price guide starts at this level.");
+        ImGui::TextUnformatted("Records sharing this bar and price are one bubble; the exchange may aggregate fills.");
         Theme::end_tooltip();
     }
 }

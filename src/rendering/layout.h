@@ -1,13 +1,11 @@
 #pragma once
 #include "imgui.h"
 #include <string>
+#include <vector>
 #include <functional>
-
-class Widget;
 
 class LayoutManager {
 public:
-    static bool vertical_siblings(const Widget& first, const Widget& second);
     static void setup_default_layout(const std::string& exchange, const std::string& symbol);
     static void render_dockspace(const std::function<void()>& menu_callback,
                                   const std::string& exchange = "binancef",
@@ -16,6 +14,13 @@ public:
     static void restore_layout_for(const std::string& exchange, const std::string& symbol);
     static void reset_layout_for(const std::string& exchange, const std::string& symbol);
     static bool is_initialized;
+
+    // Compare markets (same venue as the primary) to dock UNDER the primary
+    // chart, stacked, when the layout is next built: two markets on one clock
+    // read by vertical alignment, so stacked beats side by side. Empty = the
+    // plain single-chart layout. Set before reset_layout_for / first build.
+    static void set_compare_symbols(std::vector<std::string> symbols);
+    static const std::vector<std::string>& compare_symbols();
 
     // True when the dock tree currently in place was built for this pair.
     //
@@ -36,4 +41,5 @@ private:
     static std::string pending_symbol;
     static std::string layout_exchange;
     static std::string layout_symbol;
+    static std::vector<std::string> compare_symbols_;
 };

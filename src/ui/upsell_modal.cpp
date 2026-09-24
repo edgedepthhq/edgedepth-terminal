@@ -14,11 +14,81 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#include <GLES3/gl3.h>   // preview clip texture
 #endif
 
 namespace ui {
 
 namespace {
+
+// ── Preview clips ────────────────────────────────────────────────────────────
+// Short recorded loops of the gated view, served by the web host from
+// public/media/terminal/<name>.webm (VP9) with an .mp4 (H.264) fallback, both
+// same-origin so the page's COEP needs nothing extra. A detached, muted,
+// looping <video> decodes them; each new frame is uploaded into a GL texture
+// between NewFrame and Render (the recorder's cam-bubble pattern, see
+// recorder_glue.cpp) and drawn with AddImage. Where the files are missing
+// (a local build server, the OSS terminal) the panel says so and the dialog
+// works as before.
+#ifdef __EMSCRIPTEN__
+EM_JS(void, upsell_js_preview_play, (const char* name), {
+    var st = Module['__edupsell'] || (Module['__edupsell'] = {});
+    var n = UTF8ToString(name);
+    if (st.v && st.name === n) { st.v.play().catch(function () {}); return; }
+    if (st.v) {
+        try { st.v.pause(); while (st.v.firstChild) st.v.removeChild(st.v.firstChild); st.v.load(); } catch (_) {}
+    }
+    var v = document.createElement('video');
+    v.muted = true; v.defaultMuted = true; v.loop = true; v.playsInline = true; v.preload = 'auto';
+    v.setAttribute('muted', ''); v.setAttribute('playsinline', '');
+    st.v = v; st.name = n; st.t = -1; st.failed = false;
+    [['.webm', 'video/webm'], ['.mp4', 'video/mp4']].forEach(function (f) {
+        var src = document.createElement('source');
+        src.src = '/media/terminal/' + n + f[0];
+        src.type = f[1];
+        v.appendChild(src);
+    });
+    // A <source> error never reaches the video's own onerror; the last
+    // candidate failing means nothing will play.
+    v.lastChild.addEventListener('error', function () { st.failed = true; });
+    v.play().catch(function () {});
+});
+
+// 1 = a frame is in `tex`, 0 = still loading, -1 = no clip available.
+EM_JS(int, upsell_js_preview_frame, (int tex), {
+    var st = Module['__edupsell'];
+    var v = st && st.v;
+    if (!v) return 0;
+    if (st.failed) return -1;
+    if (v.readyState < 2 || !v.videoWidth) return 0;
+    if (v.currentTime !== st.t) {
+        var glTex = GL.textures[tex];
+        if (!glTex) return 0;
+        GLctx.bindTexture(GLctx.TEXTURE_2D, glTex);
+        GLctx.pixelStorei(GLctx.UNPACK_FLIP_Y_WEBGL, false);
+        GLctx.texImage2D(GLctx.TEXTURE_2D, 0, GLctx.RGBA, GLctx.RGBA, GLctx.UNSIGNED_BYTE, v);
+        st.t = v.currentTime;
+    }
+    return 1;
+});
+
+EM_JS(void, upsell_js_preview_stop, (), {
+    var st = Module['__edupsell'];
+    if (st && st.v) { try { st.v.pause(); } catch (_) {} }
+});
+#endif
+
+const char* preview_clip(UpsellModal::Trigger t, const std::string& layer) {
+    if (t == UpsellModal::Trigger::Layer && layer == "realtime_depth") return "realtime-preview";
+    if (t == UpsellModal::Trigger::Timeframe) return "subminute-preview";
+    return nullptr;
+}
+
+const char* preview_caption(const char* clip) {
+    if (clip && std::string(clip) == "realtime-preview")
+        return "Real-time mode: sampled depth behind every trade. Recorded TUT/USDT replay.";
+    return "1s candles with large prints as bubbles. Recorded TUT/USDT replay.";
+}
 
 const char* trigger_name(UpsellModal::Trigger t) {
     using T = UpsellModal::Trigger;
@@ -34,6 +104,7 @@ const char* trigger_name(UpsellModal::Trigger t) {
         case T::Daily:      return "daily";
         case T::Auth:       return "auth";
         case T::Research:   return "research";
+        case T::Timeframe:  return "timeframe";
         default:            return "generic";
     }
 }
@@ -80,6 +151,7 @@ static const char* default_subline(UpsellModal::Trigger t, bool login) {
         case T::Daily:      return "You've used all 6 free replays for today - they reset at 00:00 UTC.";
         case T::ServerTier: return "That replay is outside your free window.";
         case T::Research:   return "Reading the record at a past minute is a Pro feature. The live read (this minute) stays free.";
+        case T::Timeframe:  return "1s, 5s, 15s and 30s candles show the moves a 1-minute bar hides. Sub-minute timeframes are part of Pro.";
         default:            return "A Free replay day is included. Pro adds live RT, sub-minute candles and deeper replay.";
     }
 }
@@ -88,6 +160,7 @@ static const char* modal_headline(UpsellModal::Trigger t, bool login) {
     if (login) return "Log in to replay";
     if (t == UpsellModal::Trigger::Research) return "Investigate past moments with Pro";
     if (t == UpsellModal::Trigger::Range) return "Replay this exact moment";
+    if (t == UpsellModal::Trigger::Timeframe) return "Watch the minute form.";
     return "Unlock advanced terminal tools";
 }
 
@@ -100,6 +173,7 @@ void UpsellModal::open(Trigger t, const char* detail, const char* layer) {
     // passes no layer must CLEAR the previous one or a Speed gate would inherit
     // the slug of the last layer pill that fired.
     layer_ = layer ? layer : "";
+    preview_ = preview_clip(trigger_, layer_);
     dismiss_redirect_.clear();  // never inherit an event/lesson-boot redirect
     want_open_ = true;
     emit_upsell_usage("locked_action", trigger_, login_variant_, layer_);
@@ -111,6 +185,7 @@ void UpsellModal::open_login(const char* detail) {
     yearly_billing_ = true;
     detail_ = detail ? detail : "";
     layer_.clear();             // an auth gate is not a layer gate
+    preview_ = nullptr;
     dismiss_redirect_.clear();  // never inherit an event/lesson-boot redirect
     want_open_ = true;
     emit_upsell_usage("locked_action", trigger_, login_variant_, layer_);
@@ -131,8 +206,17 @@ bool UpsellModal::blocks_replay_shortcuts() const {
     return open_ || want_open_ || dismissed_frame_ == ImGui::GetFrameCount();
 }
 
+void UpsellModal::stop_preview() {
+    if (!preview_playing_) return;
+    preview_playing_ = false;
+#ifdef __EMSCRIPTEN__
+    upsell_js_preview_stop();
+#endif
+}
+
 void UpsellModal::dismiss() {
     dismissed_frame_ = ImGui::GetFrameCount();
+    stop_preview();
 #ifdef __EMSCRIPTEN__
     if (!dismiss_redirect_.empty()) {
         EM_ASM({ window.location.assign(UTF8ToString($0)); }, dismiss_redirect_.c_str());
@@ -158,6 +242,13 @@ void UpsellModal::render() {
         toast_active_ = false;
         ImGui::OpenPopup("##edx_upsell");
         open_ = true;
+        stop_preview();
+        if (preview_) {
+            preview_playing_ = true;
+#ifdef __EMSCRIPTEN__
+            upsell_js_preview_play(preview_);
+#endif
+        }
         emit_upsell_usage("upsell_impression", trigger_, login_variant_, layer_,
                           {{"surface", "modal"}});
     }
@@ -167,7 +258,10 @@ void UpsellModal::render() {
     const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     const ImVec2 viewport_size = ImGui::GetMainViewport()->Size;
-    const float modal_width = std::min(560.0f, viewport_size.x - 32.0f);
+    // A gate with a preview clip gets a second column for it, when the
+    // viewport has room; otherwise the dialog stays single-column.
+    const bool wide = preview_ && viewport_size.x >= 900.0f;
+    const float modal_width = std::min(wide ? 1040.0f : 560.0f, viewport_size.x - 32.0f);
     ImGui::SetNextWindowSizeConstraints(ImVec2(modal_width, 0.0f),
                                        ImVec2(modal_width, viewport_size.y - 32.0f));
     ImGui::SetNextWindowSize(ImVec2(modal_width, 0.0f), ImGuiCond_FirstUseEver);
@@ -186,6 +280,7 @@ void UpsellModal::render() {
         ImGui::EndPopup();
     } else {
         open_ = false;
+        stop_preview();
     }
 
     ImGui::PopStyleVar(3);
@@ -221,8 +316,6 @@ void UpsellModal::render_toast() {
 // ── Modal body ───────────────────────────────────────────────────────────────
 void UpsellModal::render_modal_body() {
     using namespace Theme;
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-
     const float width = ImGui::GetContentRegionAvail().x;
     ImGui::PushFont(Fonts::label());
     ImGui::TextColored(Tokens::TX2, "%s", login_variant_ ? "YOUR FREE ACCOUNT" : "EDGEDEPTH PRO");
@@ -232,6 +325,99 @@ void UpsellModal::render_modal_body() {
     if (ImGui::IsItemHovered()) Theme::tooltip("Close");
     ImGui::Dummy(ImVec2(0, 10));
 
+    const bool wide = preview_ && width >= 820.0f;
+    if (!wide) {
+        // Narrow viewports: the clip goes above the copy when the screen is
+        // tall enough to show both without scrolling (the benefit list then
+        // makes way for it); otherwise the dialog stays text-only.
+        const bool stacked = preview_ && ImGui::GetMainViewport()->Size.y >= 980.0f;
+        if (stacked) {
+            render_preview(width);
+            ImGui::Dummy(ImVec2(0, 12));
+        }
+        render_copy(width, /*with_benefits=*/!stacked);
+    } else {
+        // Copy and actions on the left; the clip, then what Pro includes, on
+        // the right, so the two columns carry similar weight.
+        constexpr float kCopyW = 420.0f, kGap = 28.0f;
+        const float preview_w = width - kCopyW - kGap;
+        ImGui::BeginChild("##upsell_copy", ImVec2(kCopyW, 0.0f), ImGuiChildFlags_AutoResizeY);
+        render_copy(kCopyW, /*with_benefits=*/false);
+        ImGui::EndChild();
+        ImGui::SameLine(0.0f, kGap);
+        ImGui::BeginChild("##upsell_preview", ImVec2(preview_w, 0.0f), ImGuiChildFlags_AutoResizeY);
+        render_preview(preview_w);
+        ImGui::Dummy(ImVec2(0, 14));
+        render_benefits();
+        ImGui::EndChild();
+    }
+
+    if (open_ && ImGui::IsKeyPressed(ImGuiKey_Escape)) dismiss();
+}
+
+void UpsellModal::render_preview(float width) {
+    using namespace Theme;
+    // Both clips are recorded at 1200x800 (tools/record_upsell_previews.sh).
+    const float height = width * 2.0f / 3.0f;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const ImVec2 q(p.x + width, p.y + height);
+    ImGui::Dummy(ImVec2(width, height));
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(p, q, u32(Tokens::BASE));
+    int state = -1;
+#ifdef __EMSCRIPTEN__
+    if (preview_tex_ == 0) {
+        GLuint tex = 0;
+        glGenTextures(1, &tex);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        preview_tex_ = tex;
+    }
+    state = upsell_js_preview_frame(static_cast<int>(preview_tex_));
+    if (state == 1) dl->AddImage((ImTextureID)(uintptr_t)preview_tex_, p, q);
+#endif
+    if (state != 1) {
+        const char* msg = state == 0 ? "Loading preview\xe2\x80\xa6" : "Preview unavailable here";
+        ImGui::PushFont(Fonts::label());
+        const ImVec2 ts = ImGui::CalcTextSize(msg);
+        dl->AddText(ImVec2(p.x + (width - ts.x) * 0.5f, p.y + (height - ts.y) * 0.5f), u32(Tokens::TX3), msg);
+        ImGui::PopFont();
+    }
+    dl->AddRect(p, q, u32(Tokens::BD2), 0.0f, 0, 1.0f);
+    ImGui::Dummy(ImVec2(0, 6));
+    ImGui::PushFont(Fonts::label());
+    ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX3);
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+    ImGui::TextWrapped("%s", preview_caption(preview_));
+    ImGui::PopTextWrapPos();
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+}
+
+void UpsellModal::render_benefits() {
+    using namespace Theme;
+    // A short outcome and its concrete tools, rather than a feature inventory.
+    auto benefit = [&](const char* title, const char* description) {
+        ImGui::PushFont(Fonts::ui_semibold());
+        ImGui::TextWrapped("%s", title);
+        ImGui::PopFont();
+        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
+        ImGui::TextWrapped("%s", description);
+        ImGui::PopStyleColor();
+        ImGui::Dummy(ImVec2(0, 9));
+    };
+    benefit("Read the live pressure", "Real-time depth, trade bubbles and sub-minute candles.");
+    benefit("Add liquidation context", "Hyperliquid sampled-position levels, available history and reported events.");
+    char replay[128];
+    snprintf(replay, sizeof(replay), "%d-day tick replay. Every recorded pair. Up to 4\xc3\x97 speed.", Entitlements::pro_lookback_days());
+    benefit("Go back and study the move", replay);
+}
+
+void UpsellModal::render_copy(float width, bool with_benefits) {
+    using namespace Theme;
     const char* headline = modal_headline(trigger_, login_variant_);
     const char* context = default_subline(trigger_, login_variant_);
     if (!login_variant_ && trigger_ == Trigger::Layer) {
@@ -241,6 +427,8 @@ void UpsellModal::render_modal_body() {
         } else if (layer_ == "liq_observed") {
             headline = "See the liquidations that printed.";
             context = "Put reported liquidation events alongside price and order flow.";
+        } else if (layer_ == "realtime_depth") {
+            headline = "See every trade meet the book.";
         } else {
             headline = "Read the market in more detail.";
         }
@@ -261,24 +449,10 @@ void UpsellModal::render_modal_body() {
     ImGui::Dummy(ImVec2(0, 12));
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0, 10));
-
-    // A short outcome and its concrete tools, rather than a feature inventory.
-    auto benefit = [&](const char* title, const char* description) {
-        ImGui::PushFont(Fonts::ui_semibold());
-        ImGui::TextWrapped("%s", title);
-        ImGui::PopFont();
-        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX2);
-        ImGui::TextWrapped("%s", description);
-        ImGui::PopStyleColor();
-        ImGui::Dummy(ImVec2(0, 9));
-    };
-    benefit("Read the live pressure", "Real-time depth, trade bubbles and sub-minute candles.");
-    benefit("Add liquidation context", "Hyperliquid sampled-position levels, available history and reported events.");
-    char replay[128];
-    snprintf(replay, sizeof(replay), "%d-day tick replay. Every recorded pair. Up to 4\xc3\x97 speed.", Entitlements::pro_lookback_days());
-    benefit("Go back and study the move", replay);
-
-    ImGui::Separator();
+    if (with_benefits) {
+        render_benefits();
+        ImGui::Separator();
+    }
     ImGui::Dummy(ImVec2(0, 10));
     if (!login_variant_) {
         const float choice_w = (ImGui::GetContentRegionAvail().x - 8) * 0.5f;
@@ -316,8 +490,16 @@ void UpsellModal::render_modal_body() {
     if (ImGui::Button(login_variant_ ? "Not now" : "Maybe later", ImVec2(dismiss_w, 40))) dismiss();
     ImGui::PopStyleColor(3);
     ImGui::SameLine(0, 8);
+    // The primary action wears the brand mint (the marketing site's CTA), the
+    // one filled control in the dialog.
     ImGui::PushFont(Fonts::ui_semibold());
-    if (Theme::choice_button(login_variant_ ? "Log in" : "Explore Pro plans", true, ImVec2(width - dismiss_w - 8, 40))) {
+    ImGui::PushStyleColor(ImGuiCol_Button, Tokens::LOGO);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Tokens::LOGO_HOVER);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, Tokens::LOGO);
+    ImGui::PushStyleColor(ImGuiCol_Text, Tokens::BRAND_INK);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+    if (ImGui::Button(login_variant_ ? "Log in" : "Explore Pro plans", ImVec2(width - dismiss_w - 8, 40))) {
         if (login_variant_) {
             emit_upsell_usage("login_click", trigger_, true, layer_);
             Entitlements::open_login();
@@ -329,10 +511,19 @@ void UpsellModal::render_modal_body() {
         }
         ImGui::CloseCurrentPopup();
         open_ = false;
+        stop_preview();
     }
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor(4);
     ImGui::PopFont();
-
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) dismiss();
+    if (!login_variant_) {
+        ImGui::Dummy(ImVec2(0, 4));
+        ImGui::PushFont(Fonts::label());
+        ImGui::PushStyleColor(ImGuiCol_Text, Tokens::TX3);
+        ImGui::TextWrapped("Pricing opens in a new tab and this terminal stays open. Reload it after upgrading.");
+        ImGui::PopStyleColor();
+        ImGui::PopFont();
+    }
 }
 
 }  // namespace ui

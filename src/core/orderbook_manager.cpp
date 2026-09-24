@@ -135,7 +135,7 @@ void OrderbookManager::apply_book_update_from_pb(
     orderbook.timestamp_ms = update_pb.timestamp_ms();
     orderbook.delta_updates++;  // incremental depth tick (not seed) - see context_primed
 
-    db.realtime.observe(orderbook, update_pb.timestamp_ms());
+    if (realtime_recording_.load()) db.realtime.observe(orderbook, update_pb.timestamp_ms());
     if (++orderbook.update_count_since_prune >= 100) {
         prune_orderbook(orderbook);
         orderbook.update_count_since_prune = 0;
@@ -197,9 +197,17 @@ void OrderbookManager::apply_orderbook_snapshot_from_pb(
     db.epoch = epoch;
     if (observed_source) {
         db.realtime.seed();
-        db.realtime.observe(orderbook, snapshot_pb.timestamp_ms());
+        if (realtime_recording_.load()) db.realtime.observe(orderbook, snapshot_pb.timestamp_ms());
     } else db.realtime.interrupt();
     db.mark_dirty();
+}
+
+void OrderbookManager::set_realtime_recording(bool on) {
+    if (realtime_recording_.exchange(on) == on || !on) return;
+    for (auto& [key, db] : orderbooks_) {
+        std::lock_guard<std::mutex> lock(db.write_mutex);
+        db.realtime.mark_segment();
+    }
 }
 
 void OrderbookManager::apply_book_ticker_from_pb(
@@ -303,10 +311,14 @@ void OrderbookManager::prune_orderbook(Terminal::Orderbook& orderbook) {
 }
 
 Terminal::BookTicker OrderbookManager::realtime_quote(const Terminal::Pair& pair, int64_t clock) const {
+    return realtime_quote_as_of(pair, clock).quote;
+}
+
+RealtimeQuotes::AsOf OrderbookManager::realtime_quote_as_of(const Terminal::Pair& pair, int64_t clock) const {
     const auto it = orderbooks_.find({pair.exchange, pair.symbol});
     if (it == orderbooks_.end()) return {};
     const auto& db = it->second;
     std::lock_guard lock(db.write_mutex);
     if (!realtime_transport_open_.load() || db.quote_epoch != realtime_epoch_.load()) return {};
-    return db.quotes.at(clock);
+    return db.quotes.as_of(clock);
 }

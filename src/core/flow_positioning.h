@@ -24,7 +24,7 @@ inline const char* error_message(const std::string& code) {
 }
 
 struct Bar { int64_t time=0; double open=0, close=0, buy=0, sell=0; };
-struct OI { int64_t time=0; double contracts=0; }; // zero means unavailable, never a measured zero
+struct OI { int64_t time=0; double contracts=0; bool recovered=false; }; // zero means unavailable, never a measured zero
 struct Liquidation { int64_t time=0; bool buy=false; double usd=0; int64_t count=0; };
 struct Evidence {
     int64_t from=0,to=0,retrieved=0;
@@ -37,7 +37,7 @@ struct Evidence {
 struct Assessment {
     double buy=0,sell=0,price_pct=0,oi_pct=0,forced_buy=0,forced_sell=0;
     int64_t first_oi=0,last_oi=0,max_gap=0,report_count=0;
-    size_t raw_count=0;
+    size_t raw_count=0,recovered_count=0;
     double oi_start=0,oi_end=0;
     int64_t forced_buy_count=0,forced_sell_count=0;
     bool complete_bars=false,usable_oi=false;
@@ -60,7 +60,7 @@ inline Assessment assess(const Evidence& e) {
         if(o.contracts<=0){missing=true;continue;}
         if(a.raw_count==0){first=o.contracts;a.first_oi=o.time;}
         else a.max_gap=std::max(a.max_gap,o.time-a.last_oi);
-        ++a.raw_count;last=o.contracts;a.last_oi=o.time;
+        ++a.raw_count;if(o.recovered)++a.recovered_count;last=o.contracts;a.last_oi=o.time;
     }
     a.usable_oi=a.raw_count>=2 && !missing && a.first_oi-e.from<=30000 &&
         e.to-a.last_oi<=30000 && a.max_gap<=30000;
@@ -73,7 +73,7 @@ inline Assessment assess(const Evidence& e) {
     a.explanation=a.price_pct>0 ? "Price rose; inspect aggression and contract changes below."
         : a.price_pct<0 ? "Price fell; inspect aggression and contract changes below."
         : "Price ended unchanged; inspect the two-sided flow.";
-    if(!a.usable_oi){a.hypothesis=a.raw_count<2 ? "Raw contract OI unavailable. Positioning interpretation withheld."
+    if(!a.usable_oi){a.hypothesis=a.raw_count<2 ? "OI unavailable. No complete positioning assessment."
         : "OI has missing or stale observations. Positioning interpretation withheld.";return a;}
     // No universal materiality cutoff: display measured size without mapping a
     // tiny signed change to participant behavior or a covering/unwinding claim.
@@ -139,7 +139,13 @@ private:
         for(const char* key:{"bars","oi","liquidations"})if(!j.contains(key)||!j[key].is_array()){fail();return;}
         if(j["bars"].size()>240||j["oi"].size()>8192||j["liquidations"].size()>480){fail();return;}
         for(const auto& row:j["bars"]){Bar b;if(!row.is_object()||!timestamp(row,"time",b.time)||b.time<e.from||b.time>=e.to||b.time%60000||(!e.bars.empty()&&b.time<=e.bars.back().time)||!number(row,"open",b.open,1e-12)||!number(row,"close",b.close,1e-12)||!number(row,"buy",b.buy)||!number(row,"sell",b.sell)){fail();return;}e.bars.push_back(b);}
-        for(const auto& row:j["oi"]){OI o;if(!row.is_object()||!timestamp(row,"time",o.time)||o.time<e.from||o.time>e.to||(!e.oi.empty()&&o.time<=e.oi.back().time)||!row.contains("contracts")){fail();return;}if(!row["contracts"].is_null()&&!number(row,"contracts",o.contracts,1e-12)){fail();return;}e.oi.push_back(o);}
+        for(const auto& row:j["oi"]){OI o;if(!row.is_object()||!timestamp(row,"time",o.time)||o.time<e.from||o.time>e.to||(!e.oi.empty()&&o.time<=e.oi.back().time)||!row.contains("contracts")){fail();return;}if(!row["contracts"].is_null()&&!number(row,"contracts",o.contracts,1e-12)){fail();return;}
+            if(row["contracts"].is_null()&&row.contains("recovered_contracts")){
+                double usd=0,mark=0;
+                if((!row.contains("source")||!row["source"].is_string()||row["source"]!="stored_usd_mark")||!number(row,"recovered_contracts",o.contracts,1e-12)||!number(row,"stored_oi_usd",usd,1e-12)||!number(row,"stored_mark_price",mark,1e-12)||std::abs(usd/mark-o.contracts)>std::max(1e-9,o.contracts*1e-10)){fail();return;}
+                o.recovered=true;
+            }
+            e.oi.push_back(o);}
         for(const auto& row:j["liquidations"]){Liquidation l;if(!row.is_object()||!timestamp(row,"time",l.time)||l.time<e.from||l.time>=e.to||l.time%60000||!row.contains("buy")||!row["buy"].is_boolean()||!number(row,"usd",l.usd)||!timestamp(row,"count",l.count)){fail();return;}l.buy=row["buy"].get<bool>();e.liquidations.push_back(l);}
         if(j.contains("components")){
             const auto& c=j["components"];

@@ -34,12 +34,15 @@
 #include "ui/upsell_modal.h"
 #include "ui/research_moment_panel.h"  // Esc arbitration: panel close vs replay stop
 #include "rendering/layout.h"
+#include "rendering/menu.h"
 #include "rendering/theme.h"
+#include "ui/drawing/drawing_icons.h"
 #include "types/frame_profiler.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <nlohmann/json.hpp>
+#include <cctype>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
@@ -210,6 +213,21 @@ void ReplayManager::request_replay(
             return;
         }
     }
+    // ── Order-book floor (DATA, every tier, native flow only) ──────────────
+    // The record has no depth before Entitlements::book_replay_from_ms() and the
+    // replay engine cannot open without a book, so a window that starts earlier
+    // is not a plan question: no upsell, no POST. The backend refuses the same
+    // window with DATA_WINDOW (on_session_error routes it); embedded hosts (the
+    // research viewer, studio) turn it away on the page before the source push.
+    if (!EducationBoot::instance().is_embedded() &&
+        Entitlements::before_book_record(start_time_ms)) {
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+                 "No order book recorded before %s. Earlier days are trades and candles only.",
+                 Entitlements::book_replay_from_label().c_str());
+        ui::UpsellModal::instance().toast(msg);
+        return;
+    }
 
     if (is_active()) {
         stop();
@@ -240,6 +258,7 @@ void ReplayManager::request_replay(
 
     // Store pending request
     pending_.symbols = symbols;
+    info_.exchange = exchange_;
     pending_.start_time_ms = start_time_ms;
     pending_.end_time_ms = end_time_ms;
     pending_.anchor_ms = anchor_ms;
@@ -272,6 +291,9 @@ void ReplayManager::request_replay(
     // Build JSON payload
     json payload;
     payload["symbols"] = symbols;
+    // The venue the symbols belong to (set_exchange). Without it the backend
+    // can only default to binancef, and "btcusdt" is a Bybit contract too.
+    payload["exchange"] = exchange_;
     // Convert ms → ISO 8601 string for the REST API
     // The backend accepts both unix timestamps and ISO strings
     payload["start_timestamp"] = start_time_ms;
@@ -640,6 +662,32 @@ void ReplayManager::on_session_error(int status_code, const char* error_msg) {
         finish_gate_failure("Replay authorization failed");
         return;
     }
+    // DATA_WINDOW: the window starts before the archive's first recorded book
+    // for this symbol. A DATA fact, not a plan: no login, no upsell. The
+    // backend's `error` is our own coded copy naming the symbol and its exact
+    // floor day (a non-major's book starts later than the majors'), so it is
+    // shown as-is; absent, compose the venue floor from the injected global.
+    if (code == "DATA_WINDOW") {
+        std::string msg = human;
+        if (msg.empty()) {
+            msg = "No order book recorded before " + Entitlements::book_replay_from_label() +
+                  ". Earlier days are trades and candles only.";
+        } else {
+            msg[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(msg[0])));
+            if (msg.back() != '.') msg += '.';
+        }
+        if (historical_boot || EducationBoot::instance().is_embedded()) {
+            // Embedded chrome reads replayUnavailable + the message from the
+            // state emit; the page has its own reload / back affordances.
+            info_.error_message = msg;
+            transition(State::Error);
+        } else {
+            modal.toast(msg.c_str());
+            reset();
+        }
+        return;
+    }
+
     // Any TIER_* gate → the one upsell modal. Map the well-known codes to a
     // contextual surface; the modal supplies the friendly copy (never raw text).
     if (code.rfind("TIER_", 0) == 0) {
@@ -823,7 +871,18 @@ void ReplayManager::speed_down() {
 }
 
 void ReplayManager::seek(int64_t timestamp_ms, bool deliberate) {
-    if (transport_interrupted_) return;
+    if (transport_interrupted_) {
+        // A historical replay parked on a depth error keeps its session; a
+        // deliberate seek retries from another position (the backend, or the
+        // local pack engine, re-seeds and re-primes on seek). Connection loss
+        // stays terminal.
+        const auto& boot = EducationBoot::instance();
+        const bool retry = deliberate && info_.state == State::Error && replay_ctx_ &&
+            (boot.is_event() || boot.is_lesson() || boot.is_pack());
+        if (!retry) return;
+        transport_interrupted_ = false;
+        info_.error_message.clear();
+    }
     if (!is_active()) return;
 
     // No session yet → refuse WITHOUT touching the state machine. A seek fired
@@ -865,6 +924,9 @@ void ReplayManager::seek(int64_t timestamp_ms, bool deliberate) {
         if (timestamp_ms <= info_.current_time_ms) return;  // nothing to gain
     }
 
+    // A committed seek is a new "from here": re-anchor the compare read.
+    if (lead_lag_.armed()) arm_lead_lag(timestamp_ms);
+
     // Clear stale data BEFORE sending the seek to the backend. The backend
     // will reconnect consumers and send a fresh OB seed + data from the new
     // position. We must clear here (not in replay_seeked handler) because
@@ -872,9 +934,7 @@ void ReplayManager::seek(int64_t timestamp_ms, bool deliberate) {
     // from different goroutines with no ordering guarantee - clearing in
     // replay_seeked risks wiping the newly-arrived OB seed.
     if (replay_ctx_) {
-        if (replay_ctx_->candles) {
-            replay_ctx_->candles->reset_for_seek(timestamp_ms);
-        }
+        replay_ctx_->each_candles([&](CandleManager& cm) { cm.reset_for_seek(timestamp_ms); });
         if (replay_ctx_->orderbooks) {
             replay_ctx_->orderbooks->clear_all();
         }
@@ -890,6 +950,15 @@ void ReplayManager::seek(int64_t timestamp_ms, bool deliberate) {
             replay_ctx_->series->clear_all();
         }
     }
+    // The backend reconstructs the book at the target before it plays: hold RT
+    // recording until its depth_ready status, and forget the previous position's
+    // interruption state.
+    primed_since_seek_ = false;
+    depth_stale_ = false;
+    server_depth_interrupted_ = false;
+    depth_unverified_ = false;
+    depth_gap_from_ms_ = depth_gap_at_ms_ = depth_gap_to_ms_ = 0;
+    if (!pack_mode_ && orderbook_expected()) set_depth_pending(true);
 
     send_control_with_int64("seek", "timestamp", timestamp_ms);
     info_.current_time_ms = timestamp_ms;
@@ -965,9 +1034,7 @@ void ReplayManager::skip_forward_to(int64_t timestamp_ms) {
         if (replay_ctx_->orderbooks) {
             replay_ctx_->orderbooks->clear_all();
         }
-        if (replay_ctx_->candles) {
-            replay_ctx_->candles->reset_for_seek(timestamp_ms);
-        }
+        replay_ctx_->each_candles([&](CandleManager& cm) { cm.reset_for_seek(timestamp_ms); });
     }
 
     // ─── Trailing-edge debounce: coalesce rapid >> into one backend message ──
@@ -1030,8 +1097,8 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
             pending_skip_needs_flush_ = true;
 
             // Always trim future candles - even during debounce
-            if (replay_ctx_ && replay_ctx_->candles) {
-                replay_ctx_->candles->trim_candles_after(timestamp_ms);
+            if (replay_ctx_) {
+                replay_ctx_->each_candles([&](CandleManager& cm) { cm.trim_candles_after(timestamp_ms); });
             }
             rewind_cutoff_ms_ = timestamp_ms;
             return;
@@ -1047,9 +1114,7 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
 
     if (replay_ctx_) {
         // Trim candles after target (always - independent of buffer path)
-        if (replay_ctx_->candles) {
-            replay_ctx_->candles->trim_candles_after(timestamp_ms);
-        }
+        replay_ctx_->each_candles([&](CandleManager& cm) { cm.trim_candles_after(timestamp_ms); });
 
         // Clear OB, trades, DOM, debug - they'll be rebuilt from buffer or backend
         if (replay_ctx_->orderbooks) {
@@ -1079,7 +1144,7 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
             auto& ob_mgr = *replay_ctx_->orderbooks;
             // Build a pair from the session symbols
             if (info_.symbols.empty()) return;
-            Terminal::Pair pair{"binancef", info_.symbols[0]};
+            const Terminal::Pair pair = primary_pair();
             // Build a synthetic pb::BookUpdate snapshot and apply via existing API
             pb::BookUpdate snapshot_pb;
             snapshot_pb.set_snapshot(true);
@@ -1121,9 +1186,7 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
         // Server candle messages carry accumulated OHLCV for their tick
         // period - replaying them after a rewind would re-introduce price
         // data from after the rewind target. Trades rebuild candles correctly.
-        if (replay_ctx_->candles) {
-            replay_ctx_->candles->set_suppress_candle_messages(true);
-        }
+        replay_ctx_->each_candles([](CandleManager& cm) { cm.set_suppress_candle_messages(true); });
 
         // Replay up to target + 1s slack. This rebuilds state AT the target
         // (OB snapshot, recent trades for the trades widget). The backend
@@ -1133,9 +1196,7 @@ void ReplayManager::skip_backward_to(int64_t timestamp_ms) {
 
         // Re-enable candle messages - the backend will stream fresh data
         // from the rewind target once it processes our skip_forward.
-        if (replay_ctx_->candles) {
-            replay_ctx_->candles->set_suppress_candle_messages(false);
-        }
+        replay_ctx_->each_candles([](CandleManager& cm) { cm.set_suppress_candle_messages(false); });
 
         // Tell the backend to seek to the rewind target using trailing-edge
         // debounce. Rapid << presses coalesce into ONE backend message.
@@ -1197,12 +1258,41 @@ bool ReplayManager::context_primed() const {
 
     if (!replay_ctx_->orderbooks) return false;
     if (info_.symbols.empty()) return false;
-    const Terminal::Pair pair{"binancef", info_.symbols[0]};
+    // The server is playing through a labelled recording interruption: the
+    // held book is not fresh by definition and must not stall the clock.
+    if (server_depth_interrupted_) return true;
+    const Terminal::Pair pair = primary_pair();
     return replay_ctx_->orderbooks->realtime_ready(pair, info_.current_time_ms, server_depth_asof_ms_);
 }
 
+void ReplayManager::set_depth_pending(bool pending) {
+    server_depth_pending_ = pending;
+    if (replay_ctx_ && replay_ctx_->orderbooks) replay_ctx_->orderbooks->set_realtime_recording(!pending);
+}
+
 void ReplayManager::tick_buffering_gate() {
-    if (info_.state == State::Playing && !context_primed()) transition(State::Buffering);
+    // Compare read: a few times a second on the wall clock is plenty (the
+    // strip is read, not watched), and the correlation pass is O(lags x
+    // window), not per-frame work.
+    if (lead_lag_.armed()) {
+        const int64_t wall = now_ms();
+        if (wall >= lead_lag_next_compute_ms_) {
+            lead_lag_result_ = lead_lag_.compute(interpolated_time_ms());
+            lead_lag_next_compute_ms_ = wall + 250;
+        }
+    }
+    if (info_.state == State::Playing && !context_primed()) {
+        if (primed_since_seek_ && !server_depth_pending_) {
+            // The book stopped being fresh mid-play and the server has not
+            // labelled a gap (older backend, or a source stall). Keep playing
+            // on prices and trades with the book marked stale; the next
+            // observed snapshot restores it. A dead session is never the answer.
+            depth_stale_ = true;
+            return;
+        }
+        transition(State::Buffering);
+    }
+    if (info_.state == State::Playing) depth_stale_ = false;
     if (info_.state != State::Buffering) {
         buffering_since_ms_ = 0;
         return;
@@ -1215,8 +1305,17 @@ void ReplayManager::tick_buffering_gate() {
 
     // Timeout is an unavailable result, never permission to play an invalid book.
     if (timed_out && !primed) {
+        if (primed_since_seek_ && !server_depth_pending_) {
+            // Already played from here: resume with the stale label instead of
+            // ending the replay (a resume after pause inside a gap lands here).
+            depth_stale_ = true;
+            info_.last_status_update = now_ms();
+            transition(State::Playing);
+            buffering_since_ms_ = 0;
+            return;
+        }
         send_control("pause");
-        info_.error_message = "Replay depth unavailable: recorded depth could not be synchronized. Reopen at another time or retry.";
+        info_.error_message = "Replay depth unavailable: recorded depth could not be synchronized at this position. Scrub to another time to retry.";
         transition(State::Error);
         buffering_since_ms_ = 0;
         return;
@@ -1226,6 +1325,7 @@ void ReplayManager::tick_buffering_gate() {
         // counted as elapsed market time on the first Playing frame.
         info_.last_status_update = now_ms();
         transition(State::Playing);
+        primed_since_seek_ = true;
         buffering_since_ms_ = 0;
     }
 }
@@ -1246,6 +1346,7 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
                        : msg;
 
     if (type == "replay_joined") {
+        info_.confirmed_time_ms = 0;
         if (data.contains("session_id")) {
             info_.session_id = data["session_id"].get<std::string>();
         }
@@ -1257,6 +1358,12 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
             for (const auto& s : data["symbols"]) {
                 info_.symbols.push_back(s.get<std::string>());
             }
+        }
+        // The venue the box actually plays (it stored it with the session). An
+        // older box sends none; the request's venue stands.
+        if (data.contains("exchange") && data["exchange"].is_string()) {
+            const std::string ex = data["exchange"].get<std::string>();
+            if (!ex.empty()) info_.exchange = ex;
         }
         if (data.contains("streams") && data["streams"].is_array()) {
             info_.streams.clear();
@@ -1282,14 +1389,34 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
             ? std::clamp(pending_.anchor_ms, info_.start_time_ms, info_.end_time_ms)
             : info_.start_time_ms;
         transition(State::Buffering);
+        // The server primes the book before it plays; hold RT recording until
+        // its depth_ready status so the priming traversal is not shown as history.
+        primed_since_seek_ = false;
+        if (!pack_mode_ && orderbook_expected()) set_depth_pending(true);
         return true;
     }
 
     if (type == "replay_status") {
         if (data.contains("extra") && data["extra"].contains("depth_ready")) {
-            server_depth_pending_ = !data["extra"]["depth_ready"].get<bool>();
+            set_depth_pending(!data["extra"]["depth_ready"].get<bool>());
             server_depth_asof_ms_ = data["extra"].value("depth_timestamp", int64_t(0));
             if (server_depth_pending_ && info_.state == State::Playing) transition(State::Buffering);
+        }
+        if (data.contains("extra") && data["extra"].contains("depth_interrupted")) {
+            // Archive gap recovery: the server withholds untrusted depth between
+            // a recording gap and the next observed snapshot and says so.
+            const auto& extra = data["extra"];
+            server_depth_interrupted_ = extra["depth_interrupted"].get<bool>();
+            depth_gap_from_ms_ = extra.value("depth_gap_from", int64_t(0));
+            depth_gap_at_ms_   = extra.value("depth_gap_at", int64_t(0));
+            if (server_depth_interrupted_) {
+                depth_gap_to_ms_ = 0;
+                depth_unverified_ = false;
+            } else {
+                depth_gap_to_ms_ = extra.value("depth_gap_to", int64_t(0));
+                depth_unverified_ = extra.value("depth_unverified", false);
+            }
+            depth_stale_ = false;
         }
         if (data.value("status", "") == "error") {
             const auto extra = data.value("extra", json::object());
@@ -1344,6 +1471,7 @@ bool ReplayManager::handle_ws_message(const std::string& type, const void* json_
             }
 
             info_.current_time_ms = server_time;
+            info_.confirmed_time_ms = server_time;
         }
         if (data.contains("progress")) {
             info_.progress = data["progress"].get<float>();
@@ -1627,6 +1755,11 @@ void ReplayManager::reset() {
     server_depth_pending_ = false;
     server_depth_asof_ms_ = 0;
     buffering_since_ms_ = 0;
+    server_depth_interrupted_ = false;
+    depth_stale_ = false;
+    depth_unverified_ = false;
+    depth_gap_from_ms_ = depth_gap_at_ms_ = depth_gap_to_ms_ = 0;
+    primed_since_seek_ = false;
     transport_interrupted_ = false;
     pending_ = PendingRequest{};
     scrubber_dragging_ = false;
@@ -1683,6 +1816,7 @@ void ReplayManager::create_replay_data_context() {
         DataContext::create_replay_context(
             info_.session_id,
             info_.symbols,
+            info_.exchange,
             ws_handle,
             playback_start_ms,
             info_.timeframe_ms / 1000  // Use the chart's timeframe, not hardcoded 5m
@@ -1693,10 +1827,68 @@ void ReplayManager::create_replay_data_context() {
     if (on_context_swap_) {
         on_context_swap_(replay_ctx_.get());
     }
+
+    // Two or more markets on one clock: start the lead/lag read at the
+    // playback origin (the anchor when there is one, else the window start).
+    if (info_.symbols.size() >= 2) arm_lead_lag(playback_start_ms);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Compare replay: lead/lag feed
+// ═══════════════════════════════════════════════════════════════════════════════
+
+static void lead_lag_trade_cb(void* ptr, const Terminal::Trade& t) {
+    auto* sub = static_cast<ReplayManager::LeadLagSub*>(ptr);
+    if (!sub || !sub->self) return;
+    sub->self->lead_lag_on_trade(sub->pair.symbol, t.timestamp_ms, t.price);
+}
+
+void ReplayManager::lead_lag_on_trade(const std::string& symbol, int64_t ts_ms, double px) {
+    lead_lag_.on_trade(symbol, ts_ms, px);
+}
+
+void ReplayManager::arm_lead_lag(int64_t anchor_ms) {
+    if (!replay_ctx_ || !replay_ctx_->streams || info_.symbols.size() < 2) return;
+    // (Re)subscribe once per context. The subscriptions ride the replay
+    // StreamManager, which routes by the wire pair, so each leg sees only its
+    // own market's trades whatever order the merged tape delivers them in.
+    if (lead_lag_streams_ != replay_ctx_->streams) {
+        disarm_lead_lag();
+        lead_lag_streams_ = replay_ctx_->streams;
+        for (const auto& sym : info_.symbols) {
+            auto sub = std::make_unique<LeadLagSub>();
+            sub->self = this;
+            sub->pair = Terminal::Pair{info_.exchange, sym};
+            lead_lag_streams_->subscribe_trades(
+                StreamKey{sub->pair, Terminal::Stream::Trades, 0},
+                StreamHandler<Terminal::Trade>{sub.get(), &lead_lag_trade_cb});
+            lead_lag_subs_.push_back(std::move(sub));
+        }
+    }
+    lead_lag_.reset(anchor_ms, info_.symbols);
+    lead_lag_result_ = lead_lag_.compute(anchor_ms);
+    lead_lag_next_compute_ms_ = 0;
+}
+
+void ReplayManager::disarm_lead_lag() {
+    if (lead_lag_streams_) {
+        for (const auto& sub : lead_lag_subs_) {
+            lead_lag_streams_->unsubscribe_trades(
+                StreamKey{sub->pair, Terminal::Stream::Trades, 0}, sub.get());
+        }
+    }
+    lead_lag_subs_.clear();
+    lead_lag_streams_ = nullptr;
+    lead_lag_.reset(0, {});
+    lead_lag_result_ = leadlag::Result{};
 }
 
 void ReplayManager::destroy_replay_data_context() {
     if (!replay_ctx_) return;
+    // Unsubscribe while the StreamManager is still alive; the context is
+    // retired a frame later and would otherwise take the handlers with it
+    // while these subscription objects outlive it.
+    disarm_lead_lag();
 
     // Notify AppState to swap AppContext pointers back to live managers
     if (on_context_swap_) {
@@ -1841,8 +2033,8 @@ void ReplayManager::drip_feed_pending_replay() {
         drip_feed_end_ms_ = 0;  // Reset so std::max doesn't carry stale values
         // Re-enable candle messages now that drip-feed catch-up is done.
         // Normal streaming from the backend will have correct incremental data.
-        if (replay_ctx_ && replay_ctx_->candles) {
-            replay_ctx_->candles->set_suppress_candle_messages(false);
+        if (replay_ctx_) {
+            replay_ctx_->each_candles([](CandleManager& cm) { cm.set_suppress_candle_messages(false); });
         }
         // Reset OB update_ids - the backend stream has been running at the
         // original position during the entire drip-feed. Its update_id chain
@@ -1983,8 +2175,7 @@ void ReplayManager::set_timeframe_ms(int64_t tf_ms) {
     // renderable until the new one lands, so there is no ghost flicker.
     if (changed && tf_ms > 0 && replay_ctx_ && replay_ctx_->preview &&
         replay_ctx_->streams && !replay_ctx_->symbols.empty()) {
-        Terminal::Pair pair{"binancef", replay_ctx_->symbols[0]};
-        replay_ctx_->preview->request(*replay_ctx_->streams, pair, tf_ms / 1000);
+        replay_ctx_->preview->request(*replay_ctx_->streams, replay_ctx_->primary_pair(), tf_ms / 1000);
     }
 }
 
@@ -2382,52 +2573,61 @@ static bool focused_replay_nav_allowed() {
 // explicit window (see header). Full-document nav via EM_ASM (the WASM canvas
 // is a non-remountable singleton, so it can't soft-nav); the destination page
 // enforces sign-in + entitlement.
-void ReplayManager::open_focused_replay(const std::string& symbol, int64_t from_ms,
-                                        int64_t to_ms, int64_t seek_ms) {
+void ReplayManager::open_focused_replay(const std::string& exchange, const std::string& symbol,
+                                        int64_t from_ms, int64_t to_ms, int64_t seek_ms,
+                                        const std::vector<std::string>& with) {
+    // The venue ALWAYS travels, binancef included. It used to be implied, and
+    // an implied venue is how a Bybit chart replayed as Binance: the page
+    // could only default. An explicit binancef costs nothing and reads true.
+    const std::string ex = exchange.empty() ? exchange_ : exchange;
+    // Compare set: explicit, else inherited from the session being re-anchored
+    // (every session symbol except the one clicked, which becomes primary).
+    std::vector<std::string> others = with;
+    if (others.empty() && info_.symbols.size() > 1 && ex == info_.exchange) {
+        bool member = false;
+        for (const auto& s : info_.symbols) member = member || (s == symbol);
+        if (member)
+            for (const auto& s : info_.symbols)
+                if (s != symbol) others.push_back(s);
+    }
+    std::string with_q;
+    for (const auto& s : others) {
+        if (s.empty() || s == symbol) continue;
+        with_q += with_q.empty() ? "&with=" : ",";
+        with_q += s;
+    }
 #ifdef __EMSCRIPTEN__
     if (!focused_replay_nav_allowed()) return;
-    char url[224];
-    if (seek_ms > 0)
-        snprintf(url, sizeof(url), "/terminal?replay=%s&from=%lld&to=%lld&t=%lld",
-                 symbol.c_str(), static_cast<long long>(from_ms),
-                 static_cast<long long>(to_ms), static_cast<long long>(seek_ms));
-    else
-        snprintf(url, sizeof(url), "/terminal?replay=%s&from=%lld&to=%lld",
-                 symbol.c_str(), static_cast<long long>(from_ms),
-                 static_cast<long long>(to_ms));
-    EM_ASM({ window.location.href = UTF8ToString($0); }, url);
+    std::string url = "/terminal?replay=" + symbol + "&exchange=" + ex + with_q +
+                      "&from=" + std::to_string(from_ms) + "&to=" + std::to_string(to_ms);
+    if (seek_ms > 0) url += "&t=" + std::to_string(seek_ms);
+    EM_ASM({ window.location.href = UTF8ToString($0); }, url.c_str());
 #else
     // Native dev build: no browser to navigate - keep an in-place replay so
     // local replay testing still works.
+    (void)ex; (void)with_q;
     request_replay_from(symbol, seek_ms > 0 ? seek_ms : from_ms, 1.0f, 300);
 #endif
 }
 
 // A 4h window AROUND an anchor bar (30m lead), seeked to the bar.
-void ReplayManager::open_focused_replay_at(const std::string& symbol, int64_t anchor_ms) {
+void ReplayManager::open_focused_replay_at(const std::string& exchange, const std::string& symbol,
+                                           int64_t anchor_ms, const std::vector<std::string>& with) {
     const int64_t lead_ms = 30LL * 60000;      // 30 min before
     const int64_t span_ms = 4LL * 60 * 60000;  // 4h total window
     const int64_t from_ms = anchor_ms - lead_ms;
-    open_focused_replay(symbol, from_ms, from_ms + span_ms, anchor_ms);
-}
-
-// Minimal lock glyph for the locked replay row (the ac_ic_* icon helpers are
-// file-local to app_shell.cpp, so we draw a small one here).
-static void draw_mini_lock(ImDrawList* dl, ImVec2 c, float s, ImU32 col) {
-    const ImVec2 b0(c.x - s * 0.5f, c.y - s * 0.1f);
-    const ImVec2 b1(c.x + s * 0.5f, c.y + s * 0.62f);
-    dl->AddRectFilled(b0, b1, col, 1.5f);
-    dl->PathArcTo(ImVec2(c.x, b0.y), s * 0.32f, IM_PI, IM_PI * 2.0f, 10);
-    dl->PathStroke(col, 0, 1.4f);
+    open_focused_replay(exchange, symbol, from_ms, from_ms + span_ms, anchor_ms, with);
 }
 
 bool ReplayManager::render_chart_context_menu(
+    const std::string& exchange,
     const std::string& symbol,
     int64_t hovered_time_ms,
     int64_t timeframe_seconds,
     int64_t selection_start_ms,
     int64_t selection_end_ms)
 {
+    using drawing::UiIcon;
     bool initiated = false;
 
     if (hovered_time_ms > 0) {
@@ -2435,9 +2635,7 @@ bool ReplayManager::render_chart_context_menu(
         format_timestamp_full(hovered_time_ms, time_buf, sizeof(time_buf));
 
         // Section label (redesign 1f: the replay actions live under a REPLAY group).
-        ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::TX3);
-        ImGui::TextUnformatted("REPLAY");
-        ImGui::PopStyleColor();
+        Theme::menu_section("REPLAY");
 
         // Plan gate: a non-Pro user can only replay the recent window + the major
         // symbols. Rather than hide the item (confusing), show WHY it's locked and
@@ -2456,109 +2654,122 @@ bool ReplayManager::render_chart_context_menu(
             // the item is DISABLED rather than inert: it used to render enabled,
             // gated only on entitlement, and silently do nothing.
             const bool nav_ok = focused_replay_nav_allowed();
-            if (ImGui::MenuItem("Replay from here", time_buf, false, nav_ok)) {
-                open_focused_replay_at(symbol, hovered_time_ms);
+            if (Theme::menu_item(UiIcon::Play, "Replay from here", time_buf, nav_ok)) {
+                open_focused_replay_at(exchange, symbol, hovered_time_ms);
                 initiated = true;
             }
             if (!nav_ok && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 Theme::tooltip("Finish or leave this view to start a new replay.");
-        } else if (!sym_ok) {
-            // Symbol isn't one of the free majors, so the free day can't rescue
-            // this (wrong symbol). Explain + route to upgrade. The Go backend
-            // still enforces the real cap on the session request.
-            ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::WARN);
-            if (ImGui::MenuItem("Replay locked - Pro unlocks this symbol"))
-                ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Symbol);
-            ImGui::PopStyleColor();
-            if (ImGui::IsItemHovered())
-                Theme::tooltip("Free replay covers 6 majors (%s).\n"
-                                  "Pro replays every recorded pair.",
-                                  Entitlements::free_symbols_label());
-        } else if (Entitlements::is_pro()) {
-            // Pro, but this point is older than the account's replay window. No free-day
-            // rescue applies; just say why.
-            ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::WARN);
-            char lock_lbl[64], lock_tip[96];
-            snprintf(lock_lbl, sizeof(lock_lbl), "Replay locked - beyond the %d-day archive",
-                     Entitlements::pro_lookback_days());
-            snprintf(lock_tip, sizeof(lock_tip),
-                     "Replay reaches back %d days. This point is older than that.",
-                     Entitlements::pro_lookback_days());
-            if (ImGui::MenuItem(lock_lbl))
-                ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Range);
-            ImGui::PopStyleColor();
-            if (ImGui::IsItemHovered())
-                Theme::tooltip("%s", lock_tip);
-        } else {
-            // Free tier, free symbol, clicked outside the Free day. Keep the
-            // context menu about actions: one available replay and one clearly
-            // locked exact-minute replay. The spacious modal owns the offer.
-            char free_hint[64];
-            snprintf(free_hint, sizeof(free_hint), "%s \xc2\xb7 24H",
-                     Entitlements::free_window_short_label().c_str());
-            ImGui::PushStyleColor(ImGuiCol_Text, Theme::Tokens::BRAND_TX);
-            // Same navigation, same refusal: disable rather than render a dead row.
-            if (ImGui::MenuItem("Replay your free day", free_hint, false,
-                                focused_replay_nav_allowed())) {
-                int64_t fw_s = 0, fw_e = 0;
-                Entitlements::free_window_range(now_ms(), fw_s, fw_e);
-                open_focused_replay(symbol, fw_s, fw_e, fw_s);
-                initiated = true;
+            // Two markets on one clock: pick the second in the finder, then
+            // the same focused viewer plays both, stacked, time-linked, with
+            // the lead/lag strip. The finder is the native picker, so this
+            // row exists only where that renders (the full shell); the
+            // research viewer offers the same through its own header.
+            if (!EducationBoot::instance().is_embedded()) {
+                const bool compare_ok = nav_ok && Entitlements::is_pro();
+                if (Theme::menu_item(UiIcon::PlayWith, "Replay from here with\xe2\x80\xa6", nullptr, compare_ok)) {
+                    auto& pk = Menu::g_symbol_picker;
+                    pk.compare_mode      = true;
+                    pk.compare_exchange  = exchange;
+                    pk.compare_symbol    = symbol;
+                    pk.compare_anchor_ms = hovered_time_ms;
+                    pk.selected_exchange = exchange;
+                    pk.pending           = Menu::SymbolPickerState::PendingWidget::Charts;
+                    pk.replace_mode      = false;
+                    pk.search_buf[0]     = '\0';
+                    pk.open              = true;
+                    initiated = true;
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    if (!Entitlements::is_pro())
+                        Theme::tooltip("Pro replays two markets on one clock:\nwhich moved first, and how the other reacted.");
+                    else
+                        Theme::tooltip("Pick a second market on %s. Both play from %s\non one clock, stacked and time-linked.",
+                                       exchange.c_str(), time_buf);
+                }
             }
-            ImGui::PopStyleColor();
-            if (ImGui::IsItemHovered())
-                Theme::tooltip("Opens the full Free replay day: %s.",
-                               Entitlements::free_window_label().c_str());
-
-            // Locked exact-minute row: amber-tinted, lock + bordered PRO tag.
-            {
-                ImDrawList* dl = ImGui::GetWindowDrawList();
-                const ImVec2 rp = ImGui::GetCursorScreenPos();
-                const float rw = ImGui::GetContentRegionAvail().x, rh = 34.0f;
-                const bool rclk = ImGui::InvisibleButton("##rlock", ImVec2(rw, rh));
-                const bool rhov = ImGui::IsItemHovered();
-                dl->AddRectFilled(rp, ImVec2(rp.x + rw, rp.y + rh),
-                                  Theme::u32(Theme::Tokens::WARN, rhov ? 0.16f : 0.10f));
-                const float cy = rp.y + rh * 0.5f;
-                draw_mini_lock(dl, ImVec2(rp.x + 13.0f, cy), 9.0f, Theme::u32(Theme::Tokens::WARN));
-                dl->AddText(ImVec2(rp.x + 26.0f, cy - ImGui::GetFontSize() * 0.5f),
-                            Theme::u32(Theme::Tokens::TX1), "Replay this exact moment");
-                const ImVec2 tsz = ImGui::CalcTextSize("PRO");
-                const float tw = tsz.x + 12.0f, tx = rp.x + rw - tw - 8.0f, ty = cy - 8.0f;
-                dl->AddRect(ImVec2(tx, ty), ImVec2(tx + tw, ty + 16.0f),
-                            Theme::u32(Theme::Tokens::WARN, 0.60f), 2.0f, 0, 1.0f);
-                dl->AddText(ImVec2(tx + 6.0f, ty + (16.0f - tsz.y) * 0.5f),
-                            Theme::u32(Theme::Tokens::WARN), "PRO");
-                if (rclk) {
+        } else {
+            // Locked: the row keeps the name a Pro viewer sees ("Replay from
+            // here") with a lock and the reason under it, so the menu reads as
+            // "this action, closed, because ...", not as a separate offer. It
+            // used to be a WARN-tinted "Replay this exact moment [PRO]" row
+            // under "Replay your free day", which read as two unrelated items.
+            // The Go backend still enforces every cap on the session request;
+            // this is the explanation, not the lock itself.
+            const std::string free_day = Entitlements::free_window_short_label();
+            char reason[128];
+            if (!sym_ok) {
+                // Not one of the free majors: the free day cannot rescue it.
+                snprintf(reason, sizeof(reason), "Free replay covers 6 majors. Pro replays every pair.");
+                if (Theme::menu_item_locked("Replay from here", reason, /*pro=*/true))
+                    ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Symbol);
+                if (ImGui::IsItemHovered())
+                    Theme::tooltip("Free replay covers 6 majors (%s).\n"
+                                   "Pro replays every recorded pair.",
+                                   Entitlements::free_symbols_label());
+            } else if (Entitlements::before_book_record(hovered_time_ms)) {
+                // Older than the recorded ORDER BOOK: a data limit, not a plan
+                // limit. No tier can replay it, so nothing is offered.
+                snprintf(reason, sizeof(reason), "No order book recorded before %s",
+                         Entitlements::book_replay_from_label().c_str());
+                Theme::menu_item_locked("Replay from here", reason, /*pro=*/false, /*enabled=*/false);
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                    Theme::tooltip("Order-book replay covers windows from %s.\n"
+                                   "This point is earlier: the record holds trades and candles\n"
+                                   "for it, but no book, so there is no tape to play.",
+                                   Entitlements::book_replay_from_label().c_str());
+            } else if (Entitlements::is_pro()) {
+                // Pro, but older than the account's replay window.
+                snprintf(reason, sizeof(reason), "Older than your %d-day replay window",
+                         Entitlements::pro_lookback_days());
+                if (Theme::menu_item_locked("Replay from here", reason, /*pro=*/false))
+                    ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Range);
+            } else {
+                // Free tier, free symbol, outside the free day.
+                snprintf(reason, sizeof(reason), "Outside your free replay day (%s)", free_day.c_str());
+                if (Theme::menu_item_locked("Replay from here", reason, /*pro=*/true)) {
                     char detail[192];
                     snprintf(detail, sizeof(detail),
-                             "This exact chart minute is outside your Free replay day. "
-                             "Pro unlocks %d-day replay across every recorded pair.",
-                             Entitlements::pro_lookback_days());
+                             "This chart minute is outside your free replay day (%s). "
+                             "Pro replays any minute in the last %d days, on every recorded pair.",
+                             free_day.c_str(), Entitlements::pro_lookback_days());
                     ui::UpsellModal::instance().open(ui::UpsellModal::Trigger::Range, detail);
                 }
             }
-
+            // The free day stays one click away wherever it can help.
+            if (sym_ok && !Entitlements::is_pro()) {
+                char free_hint[64];
+                snprintf(free_hint, sizeof(free_hint), "%s \xc2\xb7 24h", free_day.c_str());
+                // Same navigation, same refusal: disable rather than render a dead row.
+                if (Theme::menu_item(UiIcon::Play, "Replay your free day", free_hint,
+                                     focused_replay_nav_allowed())) {
+                    int64_t fw_s = 0, fw_e = 0;
+                    Entitlements::free_window_range(now_ms(), fw_s, fw_e);
+                    open_focused_replay(exchange, symbol, fw_s, fw_e, fw_s);
+                    initiated = true;
+                }
+                if (ImGui::IsItemHovered())
+                    Theme::tooltip("Opens the full Free replay day: %s.",
+                                   Entitlements::free_window_label().c_str());
+            }
         }
 
         // Replay an EXACT window → the same focused viewer. The window is a
         // shift-drag selection on the chart; without one there's nothing to
         // bound, so show a disabled hint rather than the old in-place launcher.
         if (selection_start_ms > 0 && selection_end_ms > selection_start_ms) {
-            if (ImGui::MenuItem("Replay selected range\xe2\x80\xa6")) {
-                open_focused_replay(symbol, selection_start_ms, selection_end_ms,
+            if (Theme::menu_item(UiIcon::Range, "Replay selected range\xe2\x80\xa6")) {
+                open_focused_replay(exchange, symbol, selection_start_ms, selection_end_ms,
                                     selection_start_ms);
                 initiated = true;
             }
         } else {
-            ImGui::BeginDisabled();
-            ImGui::MenuItem("Replay range (shift-drag to select)");
-            ImGui::EndDisabled();
+            Theme::menu_item(UiIcon::Range, "Replay a range", "Shift-drag", false);
         }
     }
 
     if (is_active()) {
-        if (ImGui::MenuItem("Stop Replay", "Esc")) {
+        if (Theme::menu_item(UiIcon::Stop, "Stop replay", "Esc")) {
             stop();
         }
     }
@@ -2717,6 +2928,9 @@ void ReplayManager::render_status_badge() {
 
     if (transport_interrupted_) {
         label = "CONNECTION LOST: REOPEN REPLAY";
+        color = Theme::Tokens::WARN;
+    } else if (info_.state == State::Playing && depth_gap().interrupted) {
+        label = "DEPTH GAP: BOOK HELD";
         color = Theme::Tokens::WARN;
     }
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -3258,8 +3472,8 @@ void ReplayManager::render_timeline_scrubber() {
         ImGui::PushFont(Theme::Fonts::label());
         const float cap_y = track_y - 15.0f;
         char cap[72];
-        snprintf(cap, sizeof(cap), "tick-by-tick \xc2\xb7 binancef \xc2\xb7 %s",
-                 Entitlements::archive_label());
+        snprintf(cap, sizeof(cap), "tick-by-tick \xc2\xb7 %s \xc2\xb7 %s",
+                 info_.exchange.c_str(), Entitlements::archive_label());
         const float capw = ImGui::CalcTextSize(cap).x;
         dl->AddText(ImVec2(scrubber_min.x + (available_width - capw) * 0.5f, cap_y),
                     tok(Theme::Tokens::TX4), cap);
@@ -3366,7 +3580,7 @@ void ReplayManager::render_timeline_scrubber() {
                 char px_buf[24];
                 const std::string sym = info_.symbols.empty() ? "" : info_.symbols.front();
                 SymbolRegistry::instance()
-                    .get_formatter("binancef", sym)
+                    .get_formatter(info_.exchange, sym)
                     .format_price(px_buf, sizeof(px_buf), aim_px);
                 if (have_now) {
                     snprintf(px_line, sizeof(px_line), "\n%s  (%+.2f%% from now)",

@@ -79,6 +79,9 @@ inline constexpr uint32_t kFibDefaultMask = 0x7F;  // first 7 levels
 // optional fields, present only when the tool uses them (mirrors the JSON).
 struct Drawing {
     uint64_t          id = 0;
+    // Wall-clock ms of the last change this window flushed, JSON "m". Two
+    // terminal windows on one symbol merge by id and keep the newer stamp.
+    int64_t           modified_ms = 0;
     Tool              tool = Tool::Trendline;
     std::vector<Anchor> anchors;
     Style             style;

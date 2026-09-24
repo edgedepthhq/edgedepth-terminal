@@ -70,6 +70,9 @@ void reset_state() {
     Entitlements::free_window_end_ms() = 0;
     Entitlements::user_email().clear();
     Entitlements::hosted() = true;
+    // The recorded-book floor is a data limit layered over every tier; tier
+    // reach is measured without it and the floor has its own test below.
+    Entitlements::book_replay_from_ms() = 0;
 }
 
 void test_tier_is_a_superset_chain() {
@@ -261,6 +264,22 @@ void test_pro_reach_follows_the_backend_injected_lookback() {
     }
 }
 
+// No tier replays a day older than the recorded order book: the engine cannot
+// open without a book. The floor clamps the tier's reach, and a point before it
+// is a data lock rather than a plan lock.
+void test_book_floor_clamps_every_tier() {
+    reset_state();
+    const int64_t book = kNow - 200 * kDay;
+    Entitlements::book_replay_from_ms() = book;
+    Entitlements::pro_lookback_ms() = 414 * kDay;
+    expect_i64(Entitlements::replay_start_floor_ms(kNow), book, "a deeper lookback stops at the book floor");
+    expect_true(!Entitlements::time_replayable(book - kHour, kNow), "a point before the book is not replayable");
+    expect_true(Entitlements::before_book_record(book - kHour), "a point before the book is a data lock");
+    expect_true(Entitlements::time_replayable(book + kHour, kNow), "a point after the book is replayable");
+    Entitlements::pro_lookback_ms() = Entitlements::PRO_REPLAY_LOOKBACK_MS;
+    expect_i64(Entitlements::replay_start_floor_ms(kNow), kNow - 90 * kDay, "a shallower tier floor is unchanged");
+}
+
 void test_symbol_and_speed_gates() {
     reset_state();
     Entitlements::current() = Entitlements::Tier::Free;
@@ -346,6 +365,7 @@ int main() {
     test_dynamic_free_window_overrides_the_client_guess();
     test_free_range_gate_matches_the_window_exactly();
     test_pro_reach_follows_the_backend_injected_lookback();
+    test_book_floor_clamps_every_tier();
     test_symbol_and_speed_gates();
     test_authentication_is_not_the_same_question_as_tier();
     test_pricing_href_preserves_billing_choice();

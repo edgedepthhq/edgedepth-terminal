@@ -3,7 +3,6 @@
 #include "imgui_internal.h"
 #include "../core/education_boot.h"
 #include <algorithm>
-#include "ui/widget.h"
 #include <cstdio>
 
 bool LayoutManager::is_initialized = false;
@@ -15,6 +14,34 @@ std::string LayoutManager::pending_exchange;
 std::string LayoutManager::pending_symbol;
 std::string LayoutManager::layout_exchange;
 std::string LayoutManager::layout_symbol;
+std::vector<std::string> LayoutManager::compare_symbols_;
+
+void LayoutManager::set_compare_symbols(std::vector<std::string> symbols) {
+    compare_symbols_ = std::move(symbols);
+}
+const std::vector<std::string>& LayoutManager::compare_symbols() { return compare_symbols_; }
+
+// Dock the compare charts, stacked and evenly sized, into `rest` (the space
+// under the primary chart, which the caller already split off). The chart
+// identity must match ChartWidget::rebuild_title for instance 1.
+static void dock_compare_charts(ImGuiID rest, const std::string& exchange,
+                                const std::vector<std::string>& compare) {
+    const size_t n = compare.size();
+    for (size_t i = 0; i < n; ++i) {
+        const std::string name = "Chart " + exchange + " " + compare[i] +
+                                 "###chart_" + exchange + "_" + compare[i];
+        if (i + 1 == n) {
+            ImGui::DockBuilderDockWindow(name.c_str(), rest);
+            break;
+        }
+        // Take an equal share of what is left for this chart; the remainder
+        // is split again for the next one.
+        ImGuiID slot;
+        ImGui::DockBuilderSplitNode(rest, ImGuiDir_Up,
+                                    1.0f / static_cast<float>(n - i), &slot, &rest);
+        ImGui::DockBuilderDockWindow(name.c_str(), slot);
+    }
+}
 
 void LayoutManager::setup_default_layout(const std::string& exchange, const std::string& symbol) {
     ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
@@ -53,7 +80,14 @@ void LayoutManager::setup_default_layout(const std::string& exchange, const std:
         ImGuiID dock_right_trades;
         ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Down, 0.365f, &dock_right_trades, &dock_right);
 
-        ImGui::DockBuilderDockWindow(chart_name.c_str(), dock_main);
+        ImGuiID chart_node = dock_main;
+        if (!compare_symbols_.empty()) {
+            ImGuiID rest = dock_main;
+            ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Up,
+                1.0f / static_cast<float>(compare_symbols_.size() + 1), &chart_node, &rest);
+            dock_compare_charts(rest, exchange, compare_symbols_);
+        }
+        ImGui::DockBuilderDockWindow(chart_name.c_str(), chart_node);
         ImGui::DockBuilderDockWindow(dom_name.c_str(), dock_right);
         ImGui::DockBuilderDockWindow(trades_name.c_str(), dock_right_trades);
 
@@ -84,8 +118,15 @@ void LayoutManager::setup_default_layout(const std::string& exchange, const std:
     ImGuiID dock_right_trades;
     ImGui::DockBuilderSplitNode(dock_right, ImGuiDir_Down, 0.365f, &dock_right_trades, &dock_right);
 
+    ImGuiID chart_node = dock_main;
+    if (!compare_symbols_.empty()) {
+        ImGuiID rest = dock_main;
+        ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Up,
+            1.0f / static_cast<float>(compare_symbols_.size() + 1), &chart_node, &rest);
+        dock_compare_charts(rest, exchange, compare_symbols_);
+    }
     ImGui::DockBuilderDockWindow("Watchlist", dock_left);
-    ImGui::DockBuilderDockWindow(chart_name.c_str(), dock_main);
+    ImGui::DockBuilderDockWindow(chart_name.c_str(), chart_node);
     ImGui::DockBuilderDockWindow(dom_name.c_str(), dock_right);
     ImGui::DockBuilderDockWindow(trades_name.c_str(), dock_right_trades);
 
@@ -166,19 +207,4 @@ void LayoutManager::reset_layout_for(
     is_initialized = false;
     pending_exchange = exchange;
     pending_symbol = symbol;
-}
-
-// Only expand a simple DOM/tape vertical split. Floating windows, different
-// branches and tabbed user layouts retain their geometry and visible tape.
-bool LayoutManager::vertical_siblings(const Widget& first, const Widget& second) {
-    auto node_for = [](const Widget& widget) -> ImGuiDockNode* {
-        char title[512];
-        snprintf(title, sizeof(title), "%s%s", widget.title(), widget.title_suffix().c_str());
-        const auto* window = ImGui::FindWindowByName(title);
-        return window ? ImGui::DockBuilderGetNode(window->DockId) : nullptr;
-    };
-    const auto* a = node_for(first);
-    const auto* b = node_for(second);
-    return a && b && a != b && a->ParentNode && a->ParentNode == b->ParentNode &&
-        a->ParentNode->SplitAxis == ImGuiAxis_Y && a->Windows.Size <= 1 && b->Windows.Size <= 1;
 }

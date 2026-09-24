@@ -21,6 +21,8 @@
 #include "core/scanner_manager.h"
 #include "core/stream_presence.h"
 #include "core/url_router.h"
+#include "replayer/replay_manager.h"
+#include "ui/upsell_modal.h"
 #include <cctype>
 #include <algorithm>
 #include <cstring>
@@ -132,11 +134,11 @@ void render_symbol_picker_popup(
     static bool ticker_subscribed = false;
     static bool scanner_subscribed = false;
     if (g_symbol_picker.open && !was_open) {
-        // Picker just opened - subscribe to scanner for BOTH venues (the feeds are
-        // venue-parameterized: scanner.{binancef,hl}.global; ScannerManager keys by
-        // exchange). ticker24h is always-on, owned by AppShell - don't manage it here.
+        // Picker just opened - subscribe to the scanner for every venue (the feeds
+        // are venue-parameterized: scanner.{binancef,hl,bybit}.global; ScannerManager
+        // keys by exchange). ticker24h is always-on, owned by AppShell - don't manage it here.
         if (!scanner_subscribed) {
-            for (const char* ex : {"binancef", "hl"}) {
+            for (const char* ex : {"binancef", "hl", "bybit"}) {
                 StreamKey scanner_key{
                     Terminal::Pair{ex, "global"},
                     Terminal::Stream::Scanner,
@@ -172,12 +174,14 @@ void render_symbol_picker_popup(
     if (!g_symbol_picker.open && was_open) {
         // Picker just closed - unsubscribe from scanner only
         if (scanner_subscribed) {
-            StreamKey scanner_key{
-                Terminal::Pair{"binancef", "global"},
-                Terminal::Stream::Scanner,
-                0
-            };
-            ctx.stream_mgr().send_unsubscribe(scanner_key);
+            for (const char* ex : {"binancef", "hl", "bybit"}) {
+                StreamKey scanner_key{
+                    Terminal::Pair{ex, "global"},
+                    Terminal::Stream::Scanner,
+                    0
+                };
+                ctx.stream_mgr().send_unsubscribe(scanner_key);
+            }
             scanner_subscribed = false;
         }
     }
@@ -211,6 +215,7 @@ void render_symbol_picker_popup(
     }
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
         g_symbol_picker.open = false;
+        g_symbol_picker.compare_mode = false;
         ImGui::CloseCurrentPopup();
     }
 
@@ -226,11 +231,29 @@ void render_symbol_picker_popup(
         auto pair = pair_for(m); auto fmt = fmt_for(m); auto tick = tick_for(m);
         g_symbol_picker.record_recent(m.symbol);
         persist_recents();
+        if (g_symbol_picker.compare_mode) {
+            // Two markets on one clock: navigate to the focused replay of the
+            // anchored chart with this row as its compare market. Same venue
+            // only (a session is single-venue); the picker was pinned to it.
+            g_symbol_picker.compare_mode = false;
+            if (m.exchange != g_symbol_picker.compare_exchange) {
+                ui::UpsellModal::instance().toast("Compare replays play one venue at a time. Pick a market on the same exchange.");
+            } else if (m.symbol != g_symbol_picker.compare_symbol) {
+                ctx.replay_mgr().open_focused_replay_at(
+                    g_symbol_picker.compare_exchange, g_symbol_picker.compare_symbol,
+                    g_symbol_picker.compare_anchor_ms, {m.symbol});
+            }
+            g_symbol_picker.open = false;
+            g_symbol_picker.replace_mode = false;
+            ImGui::CloseCurrentPopup();
+            return;
+        }
         if (g_symbol_picker.replace_mode) {
             // url_navigate carries ?ws= (and any other user params) across the
             // reload; a bare location.href would drop a self-hosted feed here.
             url_navigate(build_terminal_path(m.exchange, m.symbol));
         } else {
+            const size_t before = widgets.size();
             switch (g_symbol_picker.pending) {
                 case SymbolPickerState::PendingWidget::Orderbook:
                     widgets.push_back(std::make_unique<OrderbookWidget>(pair, ctx, fmt, 25)); break;
@@ -239,13 +262,19 @@ void render_symbol_picker_popup(
                 case SymbolPickerState::PendingWidget::Trades:
                     widgets.push_back(std::make_unique<TradesWidget>(pair, ctx, fmt)); break;
                 case SymbolPickerState::PendingWidget::Charts:
-                    widgets.push_back(std::make_unique<ChartWidget>(pair, ctx, tick)); break;
+                    // Same secondary-chart rule as resolve_widget_add_request:
+                    // a pair that already has a chart gets a second identity
+                    // (live only) instead of a duplicate ImGui window.
+                    widgets.push_back(std::make_unique<ChartWidget>(pair, ctx, tick,
+                        ctx.replay_mgr().is_active() ? 1 : next_chart_instance(widgets, pair)));
+                    break;
                 case SymbolPickerState::PendingWidget::Stats:
                     widgets.push_back(std::make_unique<StatsWidget>(pair, ctx, fmt)); break;
                 case SymbolPickerState::PendingWidget::Debug:
                     widgets.push_back(std::make_unique<DebugWidget>(pair, ctx)); break;
                 default: break;
             }
+            if (widgets.size() > before) widgets.back()->open_centered = true;
         }
         g_symbol_picker.open = false;
         g_symbol_picker.replace_mode = false;
@@ -277,9 +306,9 @@ void render_symbol_picker_popup(
             const float chip_y = w0.y + (head_h - chip_h) * 0.5f;
             float chip_x = w0.x + PADX + tw + 14.0f + lcw + 12.0f;
             struct Venue { const char* id; const char* label; };
-            const Venue venues[2] = { {"binancef", "Binance"}, {"hl", "Hyperliquid"} };
+            const Venue venues[3] = { {"binancef", "Binance"}, {"hl", "Hyperliquid"}, {"bybit", "Bybit"} };
             const float ven_logo = 14.0f;
-            for (int i = 0; i < 2; ++i) {
+            for (int i = 0; i < 3; ++i) {
                 const bool active = (g_symbol_picker.selected_exchange == venues[i].id);
                 const ImVec2 ts = ImGui::CalcTextSize(venues[i].label);
                 // Exchange mark left of the label; only insets once its texture is
@@ -826,10 +855,12 @@ void render_symbol_picker_popup(
         }
         ImGui::PopFont();
 
-        // TYPE - first category or PERP, mono-sm text-2 (legible, not tiny)
+        // TYPE - DATED for a dated contract, else first category or PERP,
+        // mono-sm text-2 (legible, not tiny)
         {
             ImGui::PushFont(Fonts::mono_sm());
-            const char* tp = meta->categories.empty() ? "PERP" : meta->categories[0].c_str();
+            const char* tp = !meta->perpetual ? "DATED"
+                           : meta->categories.empty() ? "PERP" : meta->categories[0].c_str();
             const float tw2 = ImGui::CalcTextSize(tp).x;
             rdl->AddText(ImVec2(col_type_r - tw2, cy - ImGui::GetFontSize() * 0.5f),
                          u32(Tokens::TX2), tp);
@@ -866,6 +897,24 @@ void render_symbol_picker_popup(
     ImGui::PopStyleVar(3);
 }
 
+// The identity a NEW chart of `pair` takes: 1 (the primary, "###chart_<ex>_<sym>")
+// when no chart draws the pair, else one past the highest instance already
+// open. Max, not count: closing chart 2 while chart 3 stays open must not hand
+// the next chart 3's window. Widgets closed this frame still count, so a
+// close-and-reopen within one frame cannot collide either.
+int next_chart_instance(const std::vector<std::unique_ptr<Widget>>& widgets,
+                        const Terminal::Pair& pair)
+{
+    int next = 1;
+    for (const auto& widget : widgets) {
+        if (!widget || widget->type() != WidgetType::Chart) continue;
+        const auto* chart = static_cast<const ChartWidget*>(widget.get());
+        if (chart->pair().exchange != pair.exchange || chart->pair().symbol != pair.symbol) continue;
+        next = std::max(next, chart->chart_instance() + 1);
+    }
+    return next;
+}
+
 // Drain one add-widget request per frame (chart-toolbar "+ widget" in the
 // embedded chromes). Mirrors the picker's open_symbol switch but uses the
 // already-resolved pair/fmt/tick the chart handed us, so it needs no registry
@@ -877,6 +926,20 @@ void resolve_widget_add_request(
     if (!req.pending) return;
     req.pending = false;
     using PW = SymbolPickerState::PendingWidget;
+    // Charts are exempt from the reopen/focus rule below: a second chart of a
+    // pair that already has one is a SECONDARY chart with its own identity and
+    // its own CandleManager (see ChartWidget), so a real-time depth view and a
+    // candle chart of one market can sit side by side. In a replay the
+    // secondary's manager lives in the replay context (seeks reach it), so
+    // the chart belongs to the replay and closes with it.
+    if (req.type == PW::Charts) {
+        auto chart = std::make_unique<ChartWidget>(
+            req.pair, ctx, req.tick_size, next_chart_instance(widgets, req.pair));
+        chart->is_replay_widget = ctx.replay_mgr().is_active();
+        chart->open_centered = true;
+        widgets.push_back(std::move(chart));
+        return;
+    }
     // Market widgets have stable window IDs. Reopen/focus that window instead
     // of constructing a second widget with the same ImGui identity.
     for (auto& widget : widgets) {
@@ -889,20 +952,17 @@ void resolve_widget_add_request(
         if(req.type==PW::Debug && widget->type()==WidgetType::DebugLog) pair=&static_cast<DebugWidget*>(widget.get())->pair();
         if(!pair || pair->exchange!=req.pair.exchange || pair->symbol!=req.pair.symbol)continue;
         widget->is_open=true;
-        if(req.type==PW::Trades)static_cast<TradesWidget*>(widget.get())->explicitly_opened=true;
         ImGui::SetWindowFocus(widget->title());
         return;
     }
+    const size_t before = widgets.size();
     switch (req.type) {
         case PW::Orderbook:
             widgets.push_back(std::make_unique<OrderbookWidget>(req.pair, ctx, req.fmt, 25)); break;
         case PW::DOM:
             widgets.push_back(std::make_unique<DOMWidget>(req.pair, ctx, req.tick_size, 25)); break;
-        case PW::Trades: {
-            auto tape=std::make_unique<TradesWidget>(req.pair, ctx, req.fmt);
-            tape->explicitly_opened=true;
-            widgets.push_back(std::move(tape)); break;
-        }
+        case PW::Trades:
+            widgets.push_back(std::make_unique<TradesWidget>(req.pair, ctx, req.fmt)); break;
         case PW::Charts:
             widgets.push_back(std::make_unique<ChartWidget>(req.pair, ctx, req.tick_size)); break;
         case PW::Stats:
@@ -935,6 +995,7 @@ void resolve_widget_add_request(
         }
         default: break;
     }
+    if (widgets.size() > before) widgets.back()->open_centered = true;
 }
 
 } // namespace Menu

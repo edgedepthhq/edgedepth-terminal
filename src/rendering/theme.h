@@ -4,8 +4,8 @@
 //
 // Source of truth: the edgedepth design system - tokens.json (v0.1.0) and
 // edgedepth.css (:root block). Dark-only.
-// Near-black cool charcoal surfaces, teal-up / magenta-rose-down market data,
-// cyan brand accent (used sparingly), amber for replay/events/POC.
+// Near-black surfaces, teal-up / magenta-rose-down market data, a neutral
+// chrome accent with the mint brand identity, amber for replay/events/POC.
 //
 // Semantic colors (UP/DOWN/BRAND/…) are runtime-mutable so the Tweaks panel
 // can switch candle conventions and accents without a rebuild. Surfaces,
@@ -14,9 +14,12 @@
 // Legacy aliases (Theme::Colors::BUY_GREEN etc.) are kept so existing widgets
 // compile unchanged; new/reworked code should use Theme::Tokens:: directly.
 // ═══════════════════════════════════════════════════════════════════════════════
+#include <cfloat>
 #include <cstdint>
 
 #include "imgui.h"
+
+namespace drawing { enum class UiIcon : uint8_t; }  // ui/drawing/drawing_icons.h
 
 namespace Theme {
 
@@ -79,11 +82,14 @@ namespace Theme {
         // dark ink for text on solid BRAND fills (play orb, price chip, pills)
         inline constexpr ImVec4 BRAND_INK = from_hex(0x111111);
         // Brand identity, FIXED: the EdgeDepth D mark and the EARLY ACCESS lockup
-        // keep the marketing cyan (tokens.css --accent / --accent-text) whatever
-        // accent the chrome runs, so the terminal header matches the web header.
-        // Identity only - never an on-state hue (that stays BRAND*).
-        inline constexpr ImVec4 LOGO    = from_hex(0x35c9c4);
-        inline constexpr ImVec4 LOGO_TX = from_hex(0x3fe0d0);
+        // keep the marketing mint (tokens.css --accent / --accent-text, both
+        // #4ddbac since 2026-09-18) whatever accent the chrome runs, so the
+        // terminal header matches the web header.
+        // Identity only - never an on-state hue (that stays BRAND*). Upgrade
+        // surfaces (PRO tags, the upsell CTA) wear it as brand, not as state.
+        inline constexpr ImVec4 LOGO    = from_hex(0x4ddbac);
+        inline constexpr ImVec4 LOGO_HOVER = from_hex(0x78e7c4);  // marketing mint hover tint
+        inline constexpr ImVec4 LOGO_TX = from_hex(0x4ddbac);
         // resting-book blue (DOM v2): pending limit-order depth, side-agnostic. The
         // one neutral data hue - teal/rose stays reserved for EXECUTED flow. (Confirm
         // this hue or remap to a brand blue before shipping - dom.SPEC.md §8.)
@@ -172,6 +178,48 @@ namespace Theme {
     bool begin_popup(const char* id, ImGuiWindowFlags flags = 0);
     bool choice_button(const char* label, bool selected, ImVec2 size = ImVec2(0, 0));
     void section_label(const char* label);
+
+    // Floating action menus (chart right-click, + widget, chart tools, Layers,
+    // Chart view, timeframes): one look everywhere. begin_menu pushes the
+    // chrome and a minimum width and lets the popup auto-size, so a long label
+    // or hint widens the menu instead of running past its edge. Rows are 30px:
+    // a 16px icon slot, the label in the current ImGuiCol_Text and a
+    // right-hand mono hint (a price, a time, a market). Rows close the popup on
+    // click like ImGui::MenuItem unless keep_open; a disabled row still answers
+    // IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) for its tooltip.
+    // Callers keep the normal ImGui::EndPopup pairing.
+    bool begin_menu(const char* id, float min_width = 232.0f, float max_height = FLT_MAX);
+    struct MenuRow {
+        bool   clicked = false, right_clicked = false, hovered = false;
+        ImVec2 min, max;       // the full row
+        ImVec2 icon;           // centre of the icon slot
+        ImU32  icon_col = 0;   // label colour, muted until hovered
+    };
+    // The primitive under the rows below, for a caller that draws its own
+    // glyph in the icon slot. trailing_w reserves room at the right for a
+    // control the caller submits after the row (it may overlap the row).
+    MenuRow menu_row(const char* label, const char* hint = nullptr, bool enabled = true,
+                     bool keep_open = false, float trailing_w = 0.0f);
+    bool menu_item(drawing::UiIcon icon, const char* label,
+                   const char* hint = nullptr, bool enabled = true, bool keep_open = false);
+    // Checklist row for multi-select menus (Layers): a check box in the icon
+    // slot, stays open on click. Locked = a lock and a PRO tag; the caller
+    // routes the click to the upsell.
+    bool menu_toggle(const char* label, bool on, bool locked = false, const char* hint = nullptr);
+    // An action the viewer cannot take yet, under its own name: lock, label,
+    // and the reason on a second line. pro adds the mint PRO tag.
+    bool menu_item_locked(const char* label, const char* reason, bool pro, bool enabled = true);
+    // Collapsible settings inside a menu. true = open: the content that
+    // follows is indented to the label column and wraps at a fixed width;
+    // close it with end_menu_group. Open state lives in ImGui storage.
+    bool begin_menu_group(const char* label);
+    void end_menu_group();
+    void menu_note(const char* text);        // muted wrapped explanation
+    void menu_section(const char* label);
+    void menu_separator();
+    // The upgrade tag (mint outline, "PRO"): menus, timeframe groups, locks.
+    ImVec2 pro_tag_size();
+    void draw_pro_tag(ImDrawList* dl, ImVec2 top_left);
 
     // ── Tooltips ─────────────────────────────────────────────────────────────
     // The global WindowPadding is (0,0) (panels manage their own gutters) and

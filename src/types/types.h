@@ -132,6 +132,11 @@ namespace Terminal {
         double size;
     };
 
+    // Venue-scoped key for managers that index by market. Two venues can list
+    // the same symbol name; a symbol alone must never be a map key.
+    inline std::string pair_key(const std::string& exchange, const std::string& symbol) {
+        return exchange + ":" + symbol;
+    }
     struct Trade {
         double price;
         double qty;
@@ -141,6 +146,8 @@ namespace Terminal {
         // Display-only grouped archive records. Zero count means an original trade.
         double summary_low = 0, summary_high = 0;
         uint64_t summary_count = 0;
+        std::string native_trade_id;
+        int64_t source_sequence = 0;
     };
 
     struct Candle {
@@ -156,6 +163,7 @@ namespace Terminal {
         int64_t tsell;
         int64_t timestamp_ms;
         bool final;
+        bool trade_stats_unavailable = false;
     };
 
     struct Candles {
@@ -208,6 +216,11 @@ namespace Terminal {
         double oi_high;
         double oi_low;
         double oi_close;
+        // Per-field observation clocks; 0 = not stated by the publisher.
+        int64_t mark_price_ms = 0;
+        int64_t funding_ms = 0;
+        int64_t open_interest_ms = 0;
+        int32_t funding_interval_minutes = 0;
     };
 
     struct Stats {

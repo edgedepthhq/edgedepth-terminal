@@ -22,6 +22,7 @@ struct QueueBacklogSnapshot {
     QueueDepthSnapshot pending_dispatch{};
     QueueDepthSnapshot carry{};
     QueueDepthSnapshot total{};
+    std::uint64_t dropped_dispatches = 0;  // lifetime, bounded-queue overflow
 };
 
 // Relaxed counters mirror queue sizes while each queue's existing mutex is

@@ -86,6 +86,8 @@ message Trade {
     bool is_buy = 3;
     int64 timestamp_ms = 4;
     int64 agg_trade_id = 5;
+    string native_trade_id = 8;
+    int64 source_sequence = 9;
 }
 
 message Candle {
@@ -101,6 +103,7 @@ message Candle {
     int64 timestamp_ms = 10;
     int64 timeframe = 11;
     bool final = 12;
+    bool trade_stats_unavailable = 13;
 }
 
 message Volume {
@@ -143,6 +146,14 @@ message Stat {
     double oi_high = 17;
     double oi_low = 18;
     double oi_close = 19;
+    // Per-field observation clocks (exchange ms). Zero means the publisher did
+    // not state one and the legacy carry-forward applies. A stated clock with a
+    // zero value means that field is unavailable, not zero.
+    int64 mark_price_ms = 20;
+    int64 funding_ms = 21;
+    int64 open_interest_ms = 22;
+    // Native funding cadence in minutes; 0 for contracts without funding.
+    int32 funding_interval_minutes = 23;
 }
 
 // WS4 (2026-07-03): field numbers MUST mirror the backend's canonical wire
@@ -816,7 +827,7 @@ message PackSeedRef {
 // Aggregate receipt provenance only. No wallet identifiers or positions are stored.
 // Absence means legacy unknown. USD values use venue positionValue at wallet receipt.
 message CensusQuality {
-  uint32 version = 1; // 1: existing hot/warm census, mark-relative 0.25% grid
+  uint32 version = 1; // 1: mark-relative 0.25% grid; 2: fixed log grid, ratio 1.0025 anchored at price 1. Population/clock semantics unchanged.
   int64 venue_received_at_ms = 2; // mark and OI response backend receipt, not exchange time
   double weighted_wallet_age_ms = 3; // usable-notional weighted age at snapshot
   int64 p95_wallet_age_ms = 4; // position-count percentile among usable positions

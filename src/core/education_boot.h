@@ -137,12 +137,15 @@ public:
     const std::string& lesson_json() const { return lesson_json_; }
     bool lesson_ready() const { return lesson_ready_; }
 
-    // Studio mode: the symbol the picker chose (lowercase, e.g. "1000cheemsusdt"),
-    // read from the studio global at detect() so the terminal can build its widgets
-    // + dock layout for the RIGHT symbol at boot (the client has no in-place
-    // symbol-switch - a different symbol means a fresh mount). Empty if not studio
-    // or no symbol was provided.
+    // Studio mode: the symbol the picker chose (as the host sent it; main.cpp
+    // applies the venue's case), read from the studio global at detect() so the
+    // terminal can build its widgets + dock layout for the RIGHT symbol at boot
+    // (the client has no in-place symbol-switch - a different symbol means a
+    // fresh mount). Empty if not studio or no symbol was provided.
     const std::string& studio_symbol() const { return studio_symbol_; }
+    // The venue of studio_symbol() (binancef | bybit | hl), lowercase. Empty
+    // when the host page predates venues, which only ever meant binancef.
+    const std::string& studio_exchange() const { return studio_exchange_; }
 
     // Read window.__EDGEDEPTH_LESSON__ once. Safe to call when not embedded
     // (leaves mode_ == None). Call early in main(), before url_push.
@@ -162,6 +165,7 @@ private:
     std::string doc_url_;
     std::string lesson_json_;
     std::string studio_symbol_;
+    std::string studio_exchange_;
     // Which studio chrome the host embedded us in: "research" for the ad-hoc
     // research replay viewer, empty for the Course Studio. See is_research_replay.
     std::string studio_chrome_;

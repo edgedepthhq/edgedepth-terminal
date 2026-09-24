@@ -82,6 +82,14 @@ bool enabled() {
     return is_enabled;
 }
 
+namespace {
+char g_cadence_note[160] = "";
+}
+
+void set_cadence_note(const char* note) {
+    std::snprintf(g_cadence_note, sizeof(g_cadence_note), "%s", note ? note : "");
+}
+
 void render(FrameProfiler& profiler,
             const FrameTimeTracker& presentation_intervals,
             const QueueBacklogSnapshot& queues) {
@@ -147,6 +155,7 @@ void render(FrameProfiler& profiler,
         } else if (presentation_cache.scheduler_mode == 2) {
             ImGui::TextColored(Theme::Tokens::TX2, "Scheduler: setImmediate");
         }
+        if (g_cadence_note[0]) ImGui::TextColored(Theme::Tokens::TX3, "%s", g_cadence_note);
 
         if (presentation.has_samples()) {
             render_duration_stats(presentation);
@@ -215,6 +224,11 @@ void render(FrameProfiler& profiler,
         }
         ImGui::PopFont();
         ImGui::TextColored(Theme::Tokens::TX3, "High-water counts are lifetime values");
+        if (queues.dropped_dispatches > 0) {
+            ImGui::TextColored(Theme::Tokens::DOWN,
+                               "Dropped %llu dispatches at the queue bound (hidden window); charts refetched",
+                               static_cast<unsigned long long>(queues.dropped_dispatches));
+        }
 
         ImGui::Spacing();
         section_label("WORK COUNTS");

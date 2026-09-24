@@ -349,6 +349,14 @@ int main() {
     expect(small_scale.minimum() == 0, "rewind excludes future records from scale");
     small_scale.update(small_trades, 60100);
     expect(small_scale.minimum() == 7500, "rewind starts an eligible scale anew");
+    RealtimeBubbleScale quiet_scale;
+    std::deque<Terminal::Trade> quiet_trades{{100,2,1000,true}};
+    quiet_scale.update(quiet_trades,1000);
+    expect(!quiet_scale.settled(),"quiet market initially samples without displaying a changing size reference");
+    quiet_scale.update(quiet_trades,6000);
+    expect(quiet_scale.settled() && quiet_scale.minimum()==200,"quiet market settles after five seconds even below 32 records");
+    quiet_trades.push_back({100,10000,6001,true});quiet_scale.update(quiet_trades,11000);
+    expect(quiet_scale.minimum()==200,"later large print cannot rescale quiet-market bubbles");
     RealtimeDOMFrame frame;
     frame.frame = 10; frame.top = 100; frame.bottom = 900;
     frame.price_min = 90; frame.price_max = 110;

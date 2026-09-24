@@ -125,12 +125,23 @@ int test_archive_capture() {
         "startup removes only matching exchange IDs and keeps distinct identical trades");
     expect(archive.serial_==book_serial && archive.startup_first==99000,
         "history seed never advances live orderbook cursor");
+    archive.bubbles_.advance(100100);
+    double published_value=0;
+    archive.bubbles().for_each(0,100100,100100,[&](const auto& bubble){published_value+=bubble.value();});
+    expect(archive.bubbles().size()==2 && published_value==300,
+        "frozen bubbles join validated startup trades and live IDs exactly once");
     const auto buffered=archive.batch_.size();
     archive.append_trade({100,1,99000,true,9});
     expect(archive.batch_.size()==buffered,"late live copy of a seeded ID is not recorded twice");
     archive.append_trade({100,1,99000,true,12});
     expect(archive.batch_.size()==buffered+6,"distinct identical late trade remains visible");
+    archive.bubbles_.advance(100200);
+    double after_late=0;
+    archive.bubbles().for_each(0,100200,100200,[&](const auto& bubble){after_late+=bubble.value();});
+    expect(after_late==published_value && archive.bubbles().late_records==1,
+        "late unique trade stays in archive without mutating a published bubble");
     archive.reset();archive.startup_end=100000;archive.startup_pending_=true;
+    expect(archive.bubbles().size()==0,"archive reset clears frozen bubble publications");
     auto adjacent=response;
     adjacent["records"][1]=99500;
     adjacent["trades"]=nlohmann::json::array();
@@ -272,6 +283,23 @@ int test_archive_capture() {
     expect(archive.take_view(width_samples,width_trades,width_step) && width_samples.front()->source_bucket_ticks==20 &&
         width_samples.front()->levels.front().size==40,
         "archive uses returned source width while another query is pending without altering quantities");
+    archive.error="storage fixture failure";
+    archive.append_trade({100,2,1101,true});
+    archive.bubbles_.advance(1200);
+    expect(archive.bubbles().size()==1,"storage failure does not interrupt independent live bubble capture");
+    EM_ASM({const s=Module['rtArchive'].state(UTF8ToString($0));
+        s.view=({step:1000,tradeCount:9999,grouped:true,
+            buffer:new Float64Array([4,1100,9,999,1000,1,1,2000,9999]).buffer});
+    },archive.id_.c_str());
+    archive.take_view(width_samples,width_trades,width_step);
+    double unchanged_value=0;
+    archive.bubbles().for_each(0,2000,2000,[&](const auto& bubble){unchanged_value+=bubble.value();});
+    expect(unchanged_value==200,"coarse archive refresh cannot rebuild or replace published bubbles");
+    archive.reset();archive.startup_end=100000;archive.startup_pending_=true;
+    auto malformed=response;malformed["trades"][3]["qty"]=-1;
+    archive.receive_seed(malformed);archive.bubbles_.advance(100100);
+    expect(archive.seed_.empty() && archive.bubbles().size()==0,
+        "invalid startup response cannot partially publish bubbles");
     RealtimeDepthHistory::Sample native_sample;
     expect(native_sample.source_bucket_ticks==1,"native observations retain one native tick source width");
     return failures;

@@ -37,6 +37,7 @@ struct WatchlistVenue {
 constexpr WatchlistVenue kWatchlistVenues[] = {
     {"binancef", "Binance",     "Binance"},
     {"hl",       "Hyperliquid", "Hyperliquid"},
+    {"bybit",    "Bybit",       "Bybit"},
 };
 
 int64_t now_ms() {
@@ -215,6 +216,7 @@ void WatchlistWidget::render() {
     ImGui::SetNextWindowClass(&wc);
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    place_new_window();
     const bool visible = ImGui::Begin("Watchlist", &is_open,
         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar |
         ImGuiWindowFlags_NoScrollWithMouse);

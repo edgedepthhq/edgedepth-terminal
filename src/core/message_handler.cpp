@@ -1,4 +1,6 @@
 #include "message_handler.h"
+#include "core/trade_identity.h"
+#include <unordered_map>
 #include "message_parser.h"
 #include "realtime_archive.h"
 #include "stream_presence.h"
@@ -501,6 +503,7 @@ void MessageHandler::handle_replay_preview_candles(int64_t timeframe,
         candle.tbuy = candle_pb.tbuy();
         candle.tsell = candle_pb.tsell();
         candle.final = candle_pb.final();
+        candle.trade_stats_unavailable = candle_pb.trade_stats_unavailable();
         candles.push_back(candle);
     }
     preview->apply_batch(tf_sec, std::move(candles));
@@ -599,6 +602,13 @@ void MessageHandler::handle_trade(const Terminal::Pair& pair, const pb::Trade& t
     trade.is_buy = trade_pb.is_buy();
     trade.timestamp_ms = trade_pb.timestamp_ms();
     trade.agg_trade_id = trade_pb.agg_trade_id();
+    trade.native_trade_id = trade_pb.native_trade_id();
+    trade.source_sequence = trade_pb.source_sequence();
+    // Native-ID publishers deliver at least once; a repeated identity is the
+    // same print and must not count twice anywhere downstream.
+    static std::unordered_map<std::string, RecentTradeIdentities> recent;
+    if (!trade.native_trade_id.empty() &&
+        !recent[Terminal::pair_key(pair.exchange, pair.symbol)].admit(trade.native_trade_id)) return;
     const StreamKey key{pair, Terminal::Stream::Trades, 0};
     stream_mgr->dispatch_trade(key, trade);
 }
@@ -622,6 +632,7 @@ void MessageHandler::handle_candle(const Terminal::Pair& pair, int64_t timeframe
     candle.tbuy = candle_pb.tbuy();
     candle.tsell = candle_pb.tsell();
     candle.final = candle_pb.final();
+    candle.trade_stats_unavailable = candle_pb.trade_stats_unavailable();
 
     const StreamKey key{pair, Terminal::Stream::Candles, timeframe};
     stream_mgr->dispatch_candle(key, candle);
@@ -645,6 +656,7 @@ void MessageHandler::handle_candles_batch(const Terminal::Pair& pair, int64_t ti
         candle.tbuy = candle_pb.tbuy();
         candle.tsell = candle_pb.tsell();
         candle.final = candle_pb.final();
+        candle.trade_stats_unavailable = candle_pb.trade_stats_unavailable();
 
         candles.push_back(candle);
     }
@@ -718,6 +730,10 @@ void MessageHandler::handle_stat(const Terminal::Pair& pair, int64_t timeframe, 
     stat.timeframe = stat_pb.timeframe();
     stat.final = stat_pb.final();
     stat.open_interest_usd = stat_pb.open_interest_usd();
+    stat.mark_price_ms = stat_pb.mark_price_ms();
+    stat.funding_ms = stat_pb.funding_ms();
+    stat.open_interest_ms = stat_pb.open_interest_ms();
+    stat.funding_interval_minutes = stat_pb.funding_interval_minutes();
     stat.next_funding_time = stat_pb.next_funding_time();
     stat.oi_open = stat_pb.oi_open();
     stat.oi_high = stat_pb.oi_high();
@@ -746,6 +762,10 @@ void MessageHandler::handle_stats_batch(const Terminal::Pair& pair, int64_t time
         stat.timeframe = stat_pb.timeframe();
         stat.final = stat_pb.final();
         stat.open_interest_usd = stat_pb.open_interest_usd();
+        stat.mark_price_ms = stat_pb.mark_price_ms();
+        stat.funding_ms = stat_pb.funding_ms();
+        stat.open_interest_ms = stat_pb.open_interest_ms();
+        stat.funding_interval_minutes = stat_pb.funding_interval_minutes();
         stat.next_funding_time = stat_pb.next_funding_time();
         stat.oi_open = stat_pb.oi_open();
         stat.oi_high = stat_pb.oi_high();
@@ -1025,7 +1045,7 @@ void MessageHandler::handle_vpin_state_message(
     p.hmm_conf  = static_cast<float>(update_pb->hmm_confidence());
     p.hmm_state = static_cast<int16_t>(update_pb->hmm_state());
     p.regime    = Series::regime_index(update_pb->regime().c_str());
-    series_mgr->add_vpin(pair.symbol, p);
+    series_mgr->add_vpin(Terminal::pair_key(pair.exchange, pair.symbol), p);
 }
 
 void MessageHandler::handle_historical_vpin_message(
@@ -1052,7 +1072,7 @@ void MessageHandler::handle_historical_vpin_message(
         p.regime    = Series::regime_index(v.toxicity_regime().c_str());
         pts.push_back(p);
     }
-    series_mgr->add_vpin_batch(pair.symbol, pts.data(), pts.size());
+    series_mgr->add_vpin_batch(Terminal::pair_key(pair.exchange, pair.symbol), pts.data(), pts.size());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1074,7 +1094,7 @@ void MessageHandler::handle_positioning_state_message(
     if (!update_pb->ParseFromArray(data, static_cast<int>(size))) {
         return;
     }
-    analytics_mgr->apply_positioning(pair.symbol, *update_pb);
+    analytics_mgr->apply_positioning(Terminal::pair_key(pair.exchange, pair.symbol), *update_pb);
 }
 
 // ContagionSnapshot = market-wide stress (not per-symbol). Replay-only today.

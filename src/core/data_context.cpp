@@ -21,9 +21,19 @@ DataContext::~DataContext() = default;
 DataContext::DataContext(DataContext&&) noexcept = default;
 DataContext& DataContext::operator=(DataContext&&) noexcept = default;
 
+CandleManager* DataContext::candles_for(const Terminal::Pair& pair) const {
+    if (pair.exchange != exchange || symbols.empty()) return nullptr;
+    if (pair.symbol == symbols.front()) return candles;
+    for (size_t i = 1; i < symbols.size() && i - 1 < owned_compare_candles.size(); ++i) {
+        if (symbols[i] == pair.symbol) return owned_compare_candles[i - 1].get();
+    }
+    return nullptr;
+}
+
 DataContext DataContext::create_replay_context(
     const std::string& session_id,
     const std::vector<std::string>& symbols,
+    const std::string& exchange,
     int ws_handle,
     int64_t start_time_ms,
     int64_t default_timeframe_sec)
@@ -32,6 +42,7 @@ DataContext DataContext::create_replay_context(
     ctx.source = DataSource::Replay;
     ctx.session_id = session_id;
     ctx.symbols = symbols;
+    ctx.exchange = exchange.empty() ? std::string("binancef") : exchange;
     // Use the LIVE WS handle so we can request historical data from the server.
     // Replay binary data is routed here via MessageHandler, not via WS subscriptions.
     ctx.owned_streams = std::make_unique<StreamManager>(ws_handle);
@@ -67,9 +78,12 @@ DataContext DataContext::create_replay_context(
     ctx.analytics = ctx.owned_analytics.get();
     // CandleManager needs Pair + timeframe + StreamManager.
     // Use first symbol as primary. Replay will push candles directly via
-    // MessageHandler → StreamManager dispatch, not via WS subscription.
+    // MessageHandler → StreamManager dispatch, not via WS subscription. The
+    // pair carries the SESSION venue: frames route by the wire pair
+    // (exchange, symbol), so a manager built for binancef would never see a
+    // Bybit session's candles.
     if (!symbols.empty()) {
-        Terminal::Pair primary_pair{"binancef", symbols[0]};
+        const Terminal::Pair primary_pair = ctx.primary_pair();
         ctx.owned_candles = std::make_unique<CandleManager>(
             primary_pair, default_timeframe_sec, *ctx.streams);
         ctx.candles = ctx.owned_candles.get();
@@ -83,6 +97,21 @@ DataContext DataContext::create_replay_context(
         ctx.streams->request_candles_before(
             primary_pair, default_timeframe_sec, start_time_ms,
             CandleManager::INITIAL_PRELOAD_CANDLES);
+        // Compare markets: the same construction per extra symbol, so each
+        // builds its own candles from the merged tape and carries its own
+        // pre-roll history. The replayer already plays every session symbol
+        // on one clock; this is the client half of "two markets, one tape".
+        for (size_t i = 1; i < symbols.size(); ++i) {
+            const Terminal::Pair pair{ctx.exchange, symbols[i]};
+            auto cm = std::make_unique<CandleManager>(pair, default_timeframe_sec, *ctx.streams);
+            cm->subscribe();
+            cm->mark_ready_for_replay();
+            cm->set_replay_time(start_time_ms);
+            ctx.streams->request_candles_before(
+                pair, default_timeframe_sec, start_time_ms,
+                CandleManager::INITIAL_PRELOAD_CANDLES);
+            ctx.owned_compare_candles.push_back(std::move(cm));
+        }
         // Scrub-preview store (ghost candles): fetch the FULL replay window in
         // one async batch on its dedicated stream. Non-gating - context_primed
         // never waits on it; the ghost pass simply stays empty until it lands.

@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(EDGEDEPTH_EXPOSURE_V2_DEV "Compile the V2 exposure chart attachment (Layers > Exposure scenarios); the runtime checkbox stays default-off" ON)
+
 include(FetchContent)
 
 # ===================================================================
@@ -330,6 +332,7 @@ set(ZSTD_SRC
 
 # Project sources
 set(PROJECT_SRC
+        src/ui/chart_widget_exposure.cpp
         # Main
         src/main.cpp
 
@@ -393,6 +396,7 @@ set(PROJECT_SRC
         src/ui/chart_widget.cpp
         src/ui/chart_widget_realtime.cpp
         src/ui/chart_widget_flow.cpp
+        src/ui/chart_widget_liquidity_response.cpp
         src/core/realtime_archive.cpp
         src/ui/chart_widget_scrub_preview.cpp
         src/ui/price_profile_renderer.h
@@ -405,6 +409,8 @@ set(PROJECT_SRC
         src/ui/orderbook_widget.cpp
         src/ui/dom_widget.h
         src/ui/dom_widget.cpp
+        src/ui/realtime_dom_ladder.h
+        src/ui/realtime_dom_ladder.cpp
         src/ui/stats_widget.h
         src/ui/stats_widget.cpp
 
@@ -530,12 +536,32 @@ add_executable(c_based_trader_client
         ${ZSTD_SRC}
 )
 
+if(EDGEDEPTH_EXPOSURE_V2_DEV)
+    target_compile_definitions(c_based_trader_client PRIVATE EDGEDEPTH_EXPOSURE_V2_DEV=1)
+endif()
+
 # WebGL2 supports 32-bit indices but not base-vertex drawing. Dense RT bubbles
 # can exceed 64K vertices; every ImGui consumer must use the same index layout.
 target_compile_definitions(c_based_trader_client PRIVATE "ImDrawIdx=unsigned int")
 
 # Standalone production depth regression uses the same pinned wire/runtime.
 if(EMSCRIPTEN)
+    add_executable(census_overlay_regression EXCLUDE_FROM_ALL
+        tests/wasm/census_overlay_test.cpp
+        ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp
+        ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp
+        ${IMPLOT_DIR}/implot.cpp ${IMPLOT_DIR}/implot_items.cpp)
+    target_compile_options(census_overlay_regression PRIVATE -O1)
+    target_link_options(census_overlay_regression PRIVATE -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1)
+    set_target_properties(census_overlay_regression PROPERTIES SUFFIX ".js")
+    add_executable(cvd_availability_regression EXCLUDE_FROM_ALL
+        tests/wasm/cvd_availability_test.cpp src/ui/indicators/cvd_indicator.cpp
+        ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp
+        ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp
+        ${IMPLOT_DIR}/implot.cpp ${IMPLOT_DIR}/implot_items.cpp)
+    target_compile_options(cvd_availability_regression PRIVATE -O1)
+    target_link_options(cvd_availability_regression PRIVATE -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1)
+    set_target_properties(cvd_availability_regression PROPERTIES SUFFIX ".js")
     add_executable(pack_seek_regression EXCLUDE_FROM_ALL
         tests/wasm/pack_seek_test.cpp src/replayer/pack_replay_engine.cpp
         src/core/message_parser.cpp src/core/orderbook_manager.cpp
@@ -621,6 +647,7 @@ set(WASM_EXPORTED_FUNCTIONS
         __event_cmd_set_paused
         __event_cmd_set_speed
         __event_cmd_seek
+        __event_cmd_seek_ms
         __event_cmd_skip
         __event_cmd_restart
         __replay_cmd_scrub_hover

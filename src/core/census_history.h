@@ -29,8 +29,8 @@ public:
                 !std::isfinite(b.est_long_usd) || b.est_long_usd < 0 ||
                 !std::isfinite(b.est_short_usd) || b.est_short_usd < 0) return false;
         const auto& q = frame.census_quality;
-        if (q.version > 1) return false;
-        if (q.version == 1) {
+        if (q.version > 2) return false;
+        if (q.version >= 1) {
             if (q.venue_received_at_ms < 0 || q.venue_received_at_ms > frame.timestamp_ms ||
                 !std::isfinite(q.weighted_wallet_age_ms) || q.weighted_wallet_age_ms < 0 || q.weighted_wallet_age_ms > 300000 ||
                 q.p95_wallet_age_ms < 0 || q.p95_wallet_age_ms > 300000) return false;

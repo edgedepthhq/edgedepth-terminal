@@ -21,7 +21,6 @@ Json DOMWidget::save_settings() const {
     Json j = Json::object();
     j["group_mult"] = group_mult_;
     j["levels_per_side"] = levels_per_side_;
-    j["link_rt"] = link_rt_;
     j["auto_center"] = auto_center_;
     j["show_trade_columns"] = show_trade_columns_;
     j["display_usd"] = display_usd_;
@@ -32,7 +31,6 @@ Json DOMWidget::save_settings() const {
 void DOMWidget::load_settings(const Json& j) {
     workspace::read(j, "group_mult", group_mult_, 1, 1000);
     workspace::read(j, "levels_per_side", levels_per_side_, 5, 200);
-    workspace::read(j, "link_rt", link_rt_);
     workspace::read(j, "auto_center", auto_center_);
     workspace::read(j, "show_trade_columns", show_trade_columns_);
     workspace::read(j, "display_usd", display_usd_);
@@ -48,13 +46,11 @@ Json TradesWidget::save_settings() const {
     Json j = Json::object();
     j["auto_scroll"] = auto_scroll_;
     j["show_stats"] = show_stats_;
-    j["explicitly_opened"] = explicitly_opened;
     return j;
 }
 void TradesWidget::load_settings(const Json& j) {
     workspace::read(j, "auto_scroll", auto_scroll_);
     workspace::read(j, "show_stats", show_stats_);
-    workspace::read(j, "explicitly_opened", explicitly_opened);
 }
 
 Json OrderbookWidget::save_settings() const {
@@ -110,7 +106,10 @@ Json ChartWidget::save_settings() const {
     j["candle_bubble_history"] = candle_bubble_history_enabled_;
     j["candle_bubble_min"] = candle_bubble_min_;
     j["rt_trade_line"] = rt_trade_line_;
+    j["rt_dom"] = rt_dom_shown_;
     j["rt_extend_depth"] = rt_extend_depth_;
+    j["rt_depth"] = rt_depth_enabled_;
+    j["liquidity_response"] = liquidity_response_enabled_;
     j["rt_auto_fit_history"] = rt_auto_fit_history_;
     j["rt_auto_price"] = rt_auto_price_;
     j["rt_auto_bubbles"] = rt_auto_bubbles_;
@@ -138,6 +137,8 @@ Json ChartWidget::save_settings() const {
     j["liq_observed_enabled"] = liq_observed_enabled_;
     j["rt_liq_strip"] = rt_liq_strip_;
     j["liq_census_enabled"] = liq_census_enabled_;
+    j["liq_census_history"] = liq_census_show_history_;
+    j["liq_census_min_usd"] = liq_census_min_usd_;
     j["liq_obs_min_usd"] = liq_obs_min_usd_;
     j["liq_obs_ref_usd"] = liq_obs_ref_usd_;
     j["vpvr_enabled"] = vpvr_enabled_;
@@ -149,7 +150,10 @@ Json ChartWidget::save_settings() const {
     { const auto& v = ctx_.vpvr_mgr();
       j["volume_profile"] = {{"mode",v.mode()},{"poc",v.show_poc()},
         {"value_area",v.show_vah_val()},{"values",v.show_values()},{"width",v.width_pct()}}; }
-    j["chart_type"] = chart_type_;
+    // Real-time replaces the type with Line / 1s candles for its duration; the
+    // saved type is the one the chart returns to, so a restored workspace that
+    // opens in real-time still leaves it on the user's chart.
+    j["chart_type"] = rt_mode_ ? rt_prev_chart_type_ : chart_type_;
     j["timeframe"] = timeframe_seconds();
     j["indicators"] = Json::array();
     for (size_t i = 0; i < indicator_mgr_.count(); ++i) {
@@ -225,7 +229,11 @@ void ChartWidget::load_settings(const Json& j) {
     workspace::read(j, "candle_bubble_history", candle_bubble_history_enabled_);
     workspace::read(j, "candle_bubble_min", candle_bubble_min_, 0, 1000000000000.0);
     workspace::read(j, "rt_trade_line", rt_trade_line_);
+    workspace::read(j, "rt_dom", rt_dom_shown_);
     workspace::read(j, "rt_extend_depth", rt_extend_depth_);
+    workspace::read(j, "rt_depth", rt_depth_enabled_);
+    workspace::read(j, "liquidity_response", liquidity_response_enabled_);
+    liquidity_response_history_.reset();
     // A manual inspection is transient. Restored sessions start following price.
     workspace::read(j, "rt_auto_fit_history", rt_auto_fit_history_);
     rt_auto_fit_ = {};
@@ -255,6 +263,8 @@ void ChartWidget::load_settings(const Json& j) {
     workspace::read(j, "liq_observed_enabled", liq_observed_enabled_);
     workspace::read(j, "rt_liq_strip", rt_liq_strip_);
     workspace::read(j, "liq_census_enabled", liq_census_enabled_);
+    workspace::read(j, "liq_census_history", liq_census_show_history_);
+    workspace::read(j, "liq_census_min_usd", liq_census_min_usd_, 0, 1e12);
     workspace::read(j, "liq_obs_min_usd", liq_obs_min_usd_, 0, 1000000000000000.0);
     workspace::read(j, "liq_obs_ref_usd", liq_obs_ref_usd_, 1, 1000000000000000.0);
     workspace::read(j, "vpvr_enabled", vpvr_enabled_);
@@ -273,6 +283,7 @@ void ChartWidget::load_settings(const Json& j) {
             const auto& name = n->get_ref<const std::string&>();
             const auto before = indicator_mgr_.count();
             if (name == "Vol (USDT)") add_volume_indicator();
+            else if (name == "Absorption") add_absorption_indicator();
             else if (name == "CVD") add_cvd_indicator();
             else if (name == "Open Interest") add_oi_indicator();
             else if (name == "Funding Rate") add_funding_rate_indicator();

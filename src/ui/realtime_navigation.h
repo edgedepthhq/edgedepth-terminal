@@ -76,17 +76,25 @@ struct RealtimePriceWindow {
 };
 
 // Fit observed prices, not remote resting orders. Expand immediately; require
-// five seconds of spare room before reducing the display increment.
+// five seconds of spare room before reducing the display increment, so a
+// market that goes quiet does not flap the ladder. A deliberate zoom or pan
+// is not the market going quiet: `navigate()` lets the next updates contract
+// at once, otherwise zooming back in leaves the history as a thin band in a
+// range sized for the wide view for five seconds.
 struct RealtimeAutoFit {
     RealtimePriceWindow::Range range{};
     int grouping = 0;
     int64_t spare_since = 0, last_clock = 0;
+    int navigated = 0;   // updates left that may contract without the wait
+    void navigate() { navigated = 10; }
     void update(double low, double high, double tick, int minimum,
                 double pixels, double row_height, int64_t clock) {
         if (!std::isfinite(low) || !std::isfinite(high) || high < low ||
             !std::isfinite(tick) || tick <= 0 || pixels <= 0 || row_height <= 0) return;
         if (clock < last_clock) { grouping = 0; spare_since = 0; }
         last_clock = clock;
+        const bool immediate = navigated > 0;
+        if (navigated > 0) --navigated;
         minimum = std::max(1, minimum);
         const double rows = std::max(4.0, std::floor(pixels / row_height));
         const double padding = std::max((high - low) * 0.10, tick * minimum * 2);
@@ -108,7 +116,7 @@ struct RealtimeAutoFit {
             grouping = wanted; spare_since = 0; resize = true;
         } else if (wanted < grouping && (high-low) < (range.high-range.low) * 0.6) {
             if (!spare_since) spare_since = clock;
-            if (clock - spare_since >= 5000) { grouping = wanted; spare_since = 0; resize = true; }
+            if (immediate || clock - spare_since >= 5000) { grouping = wanted; spare_since = 0; resize = true; }
         } else spare_since = 0;
         const double step = tick * grouping;
         const double span = rows * step;

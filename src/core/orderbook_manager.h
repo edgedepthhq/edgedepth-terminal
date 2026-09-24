@@ -97,12 +97,21 @@ public:
     }
 
     Terminal::BookTicker realtime_quote(const Terminal::Pair& pair, int64_t clock) const;
+    // The as-of quote with the time each side's price has held since.
+    RealtimeQuotes::AsOf realtime_quote_as_of(const Terminal::Pair& pair, int64_t clock) const;
 
     // Uses the strict RT chain under its owning write lock, never legacy DOM IDs.
     bool realtime_ready(const Terminal::Pair& pair, int64_t clock_ms, int64_t required_ms = 0) const;
     bool copy_realtime_since(const Terminal::Pair& pair, uint64_t serial,
         std::vector<RealtimeDepthHistory::SamplePtr>& out) const;
     void interrupt_realtime() { realtime_epoch_.fetch_add(1); }
+    // Replay priming applies recorded depth from a seed up to the held clock:
+    // the book must absorb it, but it is not real-time history AT that clock
+    // (the chart would show hours of pre-target depth with no trades beside it).
+    // Recording pauses for the traversal and resumes at the target as a new
+    // segment. Delta continuity is still checked while paused.
+    void set_realtime_recording(bool on);
+    bool realtime_recording() const { return realtime_recording_.load(); }
     void set_realtime_transport_open(bool open) {
         realtime_transport_open_.store(open);
         interrupt_realtime();
@@ -117,6 +126,7 @@ private:
     };
     std::atomic<uint64_t> realtime_epoch_{0};
     std::atomic<bool> realtime_transport_open_{true};
+    std::atomic<bool> realtime_recording_{true};
     uint64_t realtime_generation_ = 0;
     bool replay_mode_ = false;
     ManagedOrderbook& get_or_create(const OrderbookKey& key);
