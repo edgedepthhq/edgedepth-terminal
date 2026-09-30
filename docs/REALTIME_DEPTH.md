@@ -1,401 +1,89 @@
-# Real-time depth and trade bubbles
+# Real-time depth
 
-Select **RT** in the chart's timeframe menu. The default view combines observed
-resting liquidity, historical best bid/ask steps and received trade records.
-It opens without candles. The right gutter shows the current fresh book.
+[Data sources](DATA_SOURCES.md) · [Replay packs](EDPACK.md)
 
-![Live SOPH RT depth and trade bubbles](../assets/terminal-rt-live.png)
+Choose **Real-time** in the chart's timeframe menu to see the order book over
+time, with trades on top. It works with a compatible live feed or a recording
+containing a book snapshot and continuous deltas. A trade-only file has no depth.
 
-*Real SOPH/USDT market data through the community gateway, captured from a local
-browser build on 8 September 2026, with linked DOM delta and CVD. The gateway requests Binance depth at 100ms; this is not a
-measurement of the hosted feed's cadence or performance.*
+![Real-time depth and trade bubbles in the OSS terminal](../assets/oss-realtime-20261001.png)
 
-## Startup history depends on the feed
+*Public TUT recording from 9 August 2026, replayed locally in the OSS build.
+Captured 1 October 2026. [Try the recording](EDPACK.md#getting-a-sample).*
 
-A compatible hosted live feed can seed up to 30 seconds of recent depth and
-identified trades while live updates continue. Depth is observed every 500ms,
-with up to 128 native price levels on each side. Historical coverage can be
-shorter after a server restart, through gaps or during busy trade bursts.
-The chart shows depth and trade coverage separately; RT settings describe limits.
-Backfill does not change current DOM quantities, live CVD or alerts.
+## Read the chart
 
-The community gateway currently supplies live observations only. Selecting RT
-against that gateway does not manufacture history from its initial book snapshot.
-This client change requires the matching server endpoint for startup history.
+| Element | Meaning |
+| --- | --- |
+| Heatmap | Observed resting bid/ask quantity. Brighter rows contain more quantity; they are not predictions or executed trades. |
+| Bubbles | Received trades grouped into fixed 100 ms windows at their exact price. Up to eight busiest price groups per window are selected once. Green/red shows buy/sell aggression; mixed groups can contain both. |
+| Price line / 1s candles | Prices from received trades. Trades and book updates arrive separately, so the line can briefly sit outside the displayed spread. |
+| Depth ladder | Quantities on the chart's price grid. Prices label row centers, not executable quotes; both sides can share a grouped row. The header shows the separate best bid/ask. |
+| CVD | Received buy minus sell base quantity in five-minute market-time windows. It starts when RT opens, not at the beginning of the exchange session. |
 
-## Reading a bubble outside the spread
+Bubbles settle after a short delay and retain their selected price, time and
+quantity when you zoom. They do not show every fill or identify traders,
+positions, entries or exits. Late/approximate records may be omitted; the RT
+status reports these limits.
 
-The **center** is the received trade's timestamp and execution price. Its radius
-represents size, so its edge can cross either quote even when its center is at
-that quote. Green means buy aggressor; red means sell aggressor. This does not
-identify a trader or say whether they opened or closed a position.
+## Controls
 
-The quote lines come from synchronized depth observations, keeping the first
-actual event in each 100ms display bin. Trades retain their own source timestamps.
-These are separate streams, not an atomic quote-and-trade record. Prices can move
-between depth observations, and an aggressive order can execute at several prices.
-A trade center outside the *displayed sampled* spread is therefore possible.
-It is not proof of an erroneous fill, nor proof that the sampled quote was the
-executable quote at that exact instant. Never clamp trades to the drawn lines.
-[Binance documents the separate depth and trade streams](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/ws-streams/public).
+Open the **Real-time** settings to:
 
-At detail resolution, each bubble is one received record. Dense views instead
-show labelled summed volume at average prices; zoom restores individual records. A source may aggregate fills, and this wire
-format has no trade IDs for reliable deduplication. The renderer preserves the
-received price, time, quantity and side; it cannot verify every exchange fill
-from a screenshot.
+- Show trade bubbles, the price line, observed 1s candles or the depth ladder.
+- **Pause display** to inspect live history while collection continues. In replay,
+  use the replay transport to pause.
+- **Return to live** for the latest 30 seconds, or **Whole session** for retained history.
+- Enable **Follow price** or **Auto fit visible history**. Manual price-axis
+  navigation takes control until you enable following again.
+- Use **Auto size** / **Recalibrate** for bubble sizing. The scale settles from
+  received trades; it does not continually resize earlier bubbles.
 
-## Settings
+**Layers** controls depth grouping and brightness. Grouped intensity uses mean
+quantity per native tick; time bins average observed samples. Changing grouping
+can recalibrate colors without changing the stored quantities.
 
-| Location | Control | Effect |
-| --- | --- | --- |
-| Timeframe > RT | Pause display | Live only: freeze the displayed book, clock and trades while collection continues. Replay uses its transport pause. |
-| Timeframe > RT | 1s observed candles | Show partial one-second OHLC from received trades. These are not historical candle backfill. |
-| Timeframe > RT | Trade-price line | Connect eligible observed trade prices. |
-| Timeframe > RT | Trade bubbles | Show or hide trade markers. |
-| Timeframe > RT | Auto market size | Default on. Minimum is based on the 75th percentile of received quote notionals over 60 seconds. After at least 32 eligible records, the reference stays fixed until explicit recalibration or replay reset. |
-| Timeframe > RT | Recalibrate bubble sizes | Reset the automatic size reference using eligible received records. This deliberately resizes and refilters historical bubbles. |
-| DOM | Link RT | Default on. Use the matching RT chart's sampled book, display clock and exact price-to-screen mapping. Includes buys, sells, delta and CVD. Turn off for independent centering and reset controls. |
-| Timeframe > RT | Minimum trade value | With auto off, set price times quantity in quote units. For a USDT pair, the threshold is in USDT. Default manual value: 10,000. |
-| Layers > Depth settings | Fidelity | UHD/HD/SD/LD/ULD select the minimum grouping of 1/2/5/10/20 native ticks. Auto-fit may use coarser groups; disable it to keep this grouping fixed. |
-| RT settings | Auto-fit visible history | Default on. Expand to fit observed prices in the visible time interval, with padding. Group rows to keep the linked DOM readable; reduce grouping only after five seconds of spare room. Price-axis zoom or vertical pan enters manual inspection; Follow price resumes fitting. |
-| Layers > Depth settings | Cool-to-warm palette | Default deep-blue/cyan/yellow/orange/red colors on the same fixed intensity scale. |
-| Layers > Depth settings | Recalibrate colors | Explicitly recalibrate brightness from the currently visible liquidity. This deliberately recolors history; normal feed updates do not. |
-| Chart navigation | Time zoom / Follow | Show five seconds through the retained session. Whole session fits the 30-minute target; Return live restores a 60-second view. Wheel zoom keeps Following live/replay in both directions. Pan detaches; zoom in then keeps the inspected history. While running, zoom out resumes Follow. Paused history stays detached in both directions. Follow returns to the current display clock without unpausing; use Pause display or the replay transport to resume time. Price auto-fits eligible visible trades and quote steps. |
-
-Bubbles use square-root radius scaling from 3px to a 12px cap. Values at or above
-16 times the minimum share the cap. Flat signed fills and thin dark edges reduce pale overlapping clusters. Quote lines have
-dark backing so they remain visible over bright liquidity. Newer records draw on top, with
-individual centers kept at their received timestamps and prices. Up to 1,500
-qualifying records draw individually; denser views group time and side across
-the whole visible period instead of deleting the oldest markers. Group centers
-use average prices and the latest contributing timestamp. The archive preserves
-original records; its dense queries group all received volume before rendering. Auto size is independent of chart zoom. During warm-up the reference may
-settle every five seconds; after 32 eligible records it stays fixed. Explicit
-recalibration or changing the manual threshold can change which historical
-markers qualify. Neither changes heatmap cells.
-
-## Linked DOM
-
-The matching instrument's existing DOM links by default when RT is active.
-Charts render before DOMs each frame: the ladder consumes the chart's final
-price bounds and absolute screen coordinates after zoom, pan and resize.
-It never independently recenters or stretches prices to fill its own panel.
-A hidden chart produces a waiting state, not a stale transform.
-
-Linked mode shows the same immutable sampled book as the RT chart, including
-its 100ms sampling, 512-level-per-side coverage, 15-second freshness boundary,
-live display pause and replay as-of clock. It does not use the independent
-DOM's current read buffer. The six columns show buys, bids, price, asks,
-sells and delta. Trade flow advances only through the chart clock. The CVD
-header is received buy quantity minus sell quantity since the latest reset;
-it resets every five minutes of market time, not wall time. It starts when RT
-is enabled and is not a backfilled exchange-session total. CVD stays in base
-quantity when the row display switches to quote value.
-
-The header prints exact best bid/ask, their spread in price units and native
-ticks, with Native BBO or Depth BBO identifying the quote source. Native
-quotes and sampled depth have separate ages at the chart clock. Pause freezes
-both observations and their ages. A one-tick spread may be smaller than one screen pixel. The two gutter
-markers use separate horizontal halves so both remain identifiable without
-moving either vertically. No minimum visual spread is manufactured.
-
-At wider price ranges, nearby native ticks are summed into readable rows;
-**Auto: N ticks / row; prices are centers** states the effective grouping. PRICE labels are bucket centers,
-not native executable quotes; bids and asks can share a grouped row. Both resting depth and traded volume use
-the same row groups as the RT heatmap. Automatic grouping changes the display
-grid and recalibrates colors; it does not rewrite retained observations or move
-trade coordinates. Zooming back in restores finer retained detail. Best bid/ask lines retain their exact
-prices, also printed in the header. Qty / Quote toggles row amounts between
-base quantity and the sum of each actual price times quantity.
-
-Live depth interruptions request a fresh seed after three seconds of unhealthy
-RT state, with retries no more than once every five seconds per subscription.
-Sequence validation remains strict and the missing interval stays visible.
-Replay never requests live recovery. Unverified pack seeks still withhold depth.
-The header identifies live/replay and paused state.
-
-Pausing freezes CVD and all flow columns along with the chart. Reception stays
-bounded to 20,000 pending trade records. If a long, busy pause exceeds that
-budget, resuming starts fresh totals and displays **reset after gap** instead
-of presenting incomplete accumulation as continuous CVD.
-
-For a simple vertical DOM/tape split, linked mode temporarily hides the matching
-tape so the ladder can use the full right column. Turning linking off or leaving
-RT restores the tape and split. Floating and tabbed arrangements are preserved;
-rows outside a custom panel's bounds are clipped, never moved to fit.
-Independent mode is explicitly labelled and may continue updating while the RT
-chart's live display is paused. Close the independent panel or restore linking
-when comparing a frozen chart with depth.
-
-## Why historical depth stays fixed
-
-An observation owns its original time, prices and quantities. New columns and
-GPU rebuilds use the same absolute price grid, including after the oldest samples
-expire. RT does not automatically regroup historical rows as the price axis fits.
-The color scale calibrates from grouped visible liquidity at the 98th percentile,
-then stays fixed. A large new order cannot recolor all earlier observations.
-
-Changing fidelity explicitly recalibrates the scale and redraws price groups;
-Recalibrate colors updates brightness without changing the price grouping;
-replay resets start a new traversal. The fixed scale can saturate unusually large
-new orders or make thinner new liquidity look dim. Recalibrate only when you
-want a new reference for the visible market. Scrolling and price auto-fit still change screen coordinates for the
-whole chart. Those axis transformations are distinct from rewriting a past price
-level or quantity. The history remains anchored to market coordinates.
-
-## Replay: verified workflow and current limitation
-
-![TUT recorded RT depth paused with the replay transport](../assets/terminal-rt-replay.png)
-
-*Actual TUT v2 pack playback, paused on 9 August 2026. The screenshot uses the
-Pacific/Auckland display timezone (UTC+12). This is a local recording, not live
-market data or proof of hosted deployment.*
-
-1. Open the TUT recording from the Replay Library at its beginning.
-2. Select **RT** in the chart timeframe menu.
-3. Play forward to build observed depth. Use the transport speed controls to slow
-   the tape, then pause to inspect it. All RT evidence is bounded by the playhead.
-4. Use the same bubble and fidelity controls as live. Replay's transport replaces
-   the live Pause display checkbox.
-
-Continuous playback, forward scrub, a minute rewind and pause were checked with
-the TUT v2 pack in a local Release build. Pack seeks reconstruct depth by reading
-every orderbook event from the opening seed through the target. Reads keep one
-block queued at a time and delivery uses a per-frame budget; the clock stays at
-the target until reconstruction completes. Later seeks may take longer because
-existing packs have no intermediate checkpoints.
-
-Other streams begin at the target with their original timestamps. Future depth
-cannot paint backward. RT still requires a valid seed and continuous deltas:
-actual source gaps and an unverified in-buffer DOM restore do not certify depth.
-A trades-only recording can show bubbles but cannot supply an orderbook heatmap.
-Hosted replay depends on the source seed, continuity and stream coverage delivered
-by its service; local verification is not evidence of hosted deployment.
+**Extend current depth** holds a fresh book into the right margin for context.
+It does not predict future liquidity or fill missing history.
 
 ## Coverage
 
-Depth stores up to 3,000 observations/five minutes and 512 levels per side. It
-samples the first actual event per 100ms bin; it does not claim an exchange event
-occurred at every bin boundary. Quiet intervals hold the last synchronized book.
-Sequence breaks and transport interruptions wait for a fresh seed. The initial
-history boundary is marked; no current book is painted into pre-join history.
-Other candle/model overlays are omitted in RT. Feed cadence, recorded coverage
-and display sampling are separate limits.
+| Source | Available history |
+| --- | --- |
+| Live working window | Up to five minutes of depth, sampled at 100 ms, with at most 512 levels per side. Recent trades are capped at five minutes / 20,000 records. |
+| Browser archive | Best-effort 30-minute target, within a shared 256 MiB compressed storage budget and four active archives. Capture continues while paused or hidden. Browser storage limits can shorten coverage. |
+| Startup history | A compatible feed may supply up to 30 seconds of recent observations at coarser resolution. The community gateway does not supply this backfill. |
+| Replay pack | Only recorded coverage. Seeking restores book and trades from the opening seed; the replay clock waits for reconstruction. Later seeks can take longer. |
 
+The first real observation in each 100 ms bin is retained. A synchronized book
+can be held between updates while fresh; gaps, invalid chains and data older
+than the 15-second freshness limit remain unavailable. The current book is never
+painted backward into missing time.
 
-## Native quotes and current-depth projection (2026-09-08)
+The browser archive is temporary, not a recording or a cross-reload guarantee.
+Source changes, replay seeks and closing the chart reset it. Switching back to
+candles keeps collection running. **Clear history**
+clears archived data; a recent working window can remain. Large paused views can
+use substantial memory even though storage and visible columns are bounded.
 
-Hosted orderbook subscriptions already include Ticker; do not request a second
-subscription. Sources without native quotes use the labeled depth fallback.
-Native BBO stays in a separate bounded
-8,192-observation/two-minute queue under the book write lock, with as-of and
-transport-epoch checks. Chart and DOM share a copied quote at the chart clock;
-pause freezes it. Missing/stale native quotes explicitly fall back to Depth BBO.
-Native BBO never rewrites depth quantities or validates a broken depth sequence.
-Historical quote steps remain sampled-depth observations. PRICE notches show
-exact selected BBO coordinates; readable row centers remain grouped depth.
-Extend current depth defaults on in RT settings and projects the last fresh
-sampled book into the right margin, with a current-depth label and time boundary.
-It is not recorded history or future evidence. RT DOM draws each numeric column
-in one clip scope instead of changing GPU clips for every cell. Optional hidden
-trade lines no longer transform every retained execution. RT overlays and RT DOM
-have separate profiler scopes. No production deployment is implied.
+## When something looks wrong
 
+- **Empty depth:** check for a valid snapshot and continuous deltas. Candles and
+  trades alone are insufficient. Wait for fresh coverage; reopening a gap does
+  not recover it.
+- **Sparse bubbles:** each window keeps at most eight price groups. Check the
+  displayed coverage/counters before treating silence as no trading.
+- **DOM moves while RT is paused:** an independent DOM can still be live. A
+  linked depth ladder follows the RT display clock; check its mode label.
+- **CVD restarts:** windows reset every five minutes. An overflow during a long
+  pause also resets after a gap rather than presenting an unbroken total.
+- **Buffered seek:** keep replay open while the recorded book is reconstructed.
+  Missing/corrupt chains remain an error; close replay to return to live.
 
-## Readability and resource budgets
+Startup backfill does not alter live DOM, CVD or alerts. Hosted history and
+analytics require their own source coverage and access; changing the renderer
+cannot recover data that was never recorded.
 
-RT starts at SD (five native ticks) independently of candle fidelity. UHD and
-other fixed groups remain explicit choices. Price auto-fit, new orders and
-retention do not regroup or recalibrate history. The fixed intensity shoulder
-maps 0.1/0.5/1/2 times the frozen reference to 0.038/0.5/0.8/0.941, separating
-later larger orders without hard clipping at the reference. The default
-cool-to-warm LUT changes colors only. The RT crosshair uses the pointer time;
-standard candles retain candle snapping.
-
-Depth retention is 3,000 actual 100ms observations/up to five minutes, still
-512 levels per side. The recent trade working window is five minutes or 20,000 records, whichever
-is reached first; the archive extends history and dense views group bubbles. Shared samples use at most
-46.875 MiB of level payload per market; a paused chart can pin another window.
-The existing two 8192x1024 R32F textures total 64 MiB per renderer. Its CPU
-column values remain bounded to 8,192x1,024 floats, while raw RT maps retain at
-most 3,000x1,024 entries. No application-wide chart-count cap is added.
-
-RT retires CPU history without rebasing the grid on every sample. Read lookups,
-calibration and draw bounds exclude expired columns. The texture rebases only
-when its spare span is exhausted or on explicit rebuild/reset. Collection copies
-use a serial binary search. Normalization still examines at most 64x1,024 rows.
-A full-depth WASM/Node CPU harness with GL stubs measured append/retire p50
-0.033ms, p95 0.041ms at 3,000 samples, and a 19.1ms maximum including a rebase.
-The old 1,200-sample path measured 5.84/7.57ms p50/p95. The new harness reached
-169 MiB of WASM heap, excluding real GPU allocation and shared sample payloads.
-These are CPU measurements, not browser FPS or hosted 0ms throughput claims.
-With loaded archive history, budget roughly 400 MiB or more per full paused RT
-chart plus the application; allocator and graphics-driver costs vary. The
-30-minute archive target is bounded by actual compressed storage availability.
-
-Sequence gaps, quiet holds, live pause, replay cutoff and rewind gates remain.
-No live pre-join depth is introduced. Recorded pack seeks reconstruct from their seed. The pack boot
-accepts realtime:true (packrt=1 for local QA); demo callers opt in and start at
-pack opening. Explicit time links use candles at their requested timestamp.
-The tour and timeframe tooltips explain Chart view (Line) > Candles to exit RT.
-This describes locally verified behavior; feed coverage remains source-dependent.
-
-
-## Browser-local RT session history (2026-09-08, local build)
-
-RT now archives observations from activation in browser IndexedDB, targeting a
-rolling 30 minutes within a shared 256 MiB compressed origin budget. The menu
-shows actual retained timestamps and bytes; the target is not guaranteed under
-quota pressure. A native gzip worker stores original received trade records and
-100ms sampled depth. No server history, pre-join reconstruction or new feed is
-introduced. Four active market archives and transport/query buffers are bounded.
-Collection continues while live display is paused or hidden. Closing RT, changing
-context, source clear/seek and normal replay completion end the session. Small
-replay clock corrections do not erase it. Clear history clears the archive; the
-existing recent live working window can remain visible.
-
-Whole session and Return live navigate the existing renderer. Overview depth is
-mean observed quantity per time/price bin; bins crossing known gaps stay absent.
-Detail restores original sampled observations. Queries obey the display cutoff
-and never replace the current DOM book. Calibration and the fixed price grid
-survive history loads. RT defaults to the deeper blue cool-to-warm palette.
-
-The old newest-1500 draw truncation is replaced by bounded time/side grouping
-across the viewport. Dense bubbles represent summed volume at average prices,
-with a grouped label; zoom restores individual records when density permits.
-Archive queries above 20,000 trades group all queried records; the renderer draws
-at most 1,500 markers. Individual records retain source timestamps, prices,
-quantities and multiplicity in storage. Minimum-size filtering still controls
-individual bubbles. Grouped history omits raw-trade candles and the trade line.
-
-The recent 3,000-depth/20,000-trade working window remains bounded. Loaded history
-uses at most 2,048 depth columns; GPU allocation does not grow with session time.
-Compression and query decode run in a worker, but materialization/GPU rebuild
-still run on the main thread. Full 1,800x1,024 history materialization and rebuild
-measured 72ms in a GL-stub CPU harness, so navigation can cause a short hitch.
-This is not a guaranteed FPS or hosted 0ms throughput result. Budget roughly
-400 MiB or more for a full paused chart plus application/driver overhead.
-
-Checks: both WASM builds, native suites (14/14), RT and heatmap and stream
-regressions; `node tests/browser/realtime_archive_bridge_test.cjs`; browser
-`tests/browser/realtime_archive.html` with real IndexedDB. The synthetic 30-minute
-fixture retains 18,000 full-depth observations and 540,000 trades in about 81 MiB,
-preserving summed volume and restoring earliest individual detail. Storage quota,
-eviction, replay cutoffs, gaps, backpressure and stale query/reset responses are
-covered. Source archive loss is explicit in the RT menu. Browser storage remains
-best effort; no persistent cross-reload session recovery is promised.
-
-## Quiet RT startup and zoom correction (2026-09-08)
-
-RT now opens at its requested 60-second span even before a minute is collected.
-Zoom changes that span immediately; pre-join time remains empty. This supersedes
-initial observed-window growth, which overrode zoom-out on newly joined markets.
-Price auto-fit includes at least 48 grouped depth rows or a 0.1% full price span,
-whichever is wider, while preserving the full observed move. It no longer expands
-a few quiet levels to fill the plot. The fixed palette and depth grouping remain.
-
-The production artifact inspected on 8 September matched the older canonical
-build-release WASM SHA256 494922cad38229e3d6e1996dc6a22c4798347fad495d38f69898601ca13aa95b.
-It contained initial session-history controls but lacked the final dense-volume
-label and was not the final build previously verified. Rebuild the canonical
-Release target before copying deployment assets; a current source commit does
-not establish that an existing build directory is current.
-
-## RT interaction and continued depth (2026-09-08)
-
-Clicks, small pointer jitter and vertical gestures keep RT Follow. A deliberate
-horizontal drag over 12px detaches it; Shift selection retains its own behavior.
-Panning alone does not select archive storage. Recent views continue to use live
-working data, and archived views containing the live clock append new depth and
-trades even while detached. Queries refresh as their eligible end advances.
-Current-depth projection and quiet holds follow the visible live edge, not the
-Follow latch. Fully historical views do not project the current book backward.
-
-Selecting a standard timeframe while RT is active now exits RT into Candles
-automatically. Explicit chart-type selection still selects the requested type.
-
-## RT capture bursts and settings (2026-09-09, local)
-
-RT archive capture flushes full bounded batches before continuing collection.
-When the worker has no capacity, depth collection leaves its serial cursor at
-uncollected samples and retries from the existing bounded owner history next
-frame. Trade overflow remains explicit but no longer invents depth gaps. The
-1 MiB capture and 2 MiB transport limits are unchanged; prolonged storage stalls
-can still lose observations when owner retention expires. Existing lost records
-cannot be recovered. Genuine source interruptions still leave gaps.
-
-The toolbar RT button opens a dedicated settings popup. Its adjacent arrow opens
-the compact timeframe menu with only the RT mode toggle and timeframes.
-Canonical/public isolated Release builds and capture/transport regressions pass.
-A real TUT pack seek from the beginning to about 18:55, followed by a five-minute
-history overview, showed continuous depth and no capture-overload warning.
-This remains local pending James's deployment gate.
-
-## Pack trade history and loading transitions (2026-09-09, local)
-
-Pack seeks now restore every trade as well as depth from the opening seed to
-the target. Other streams still start at the requested target. Original source
-timestamps and multiplicity are retained, and the normal bounded archive owns
-older trades. Pack delivery checks archive capacity between groups of 32 frames
-and waits for pending capture to drain; archive failure remains visible without
-blocking playback. The existing capture, worker and retention limits are unchanged.
-
-The display uses the pack engine clock, including catch-up holds for full seeks
-and small forward skips. RT shows a loading spinner during replay priming.
-Archive navigation retains the displayed view until a matching replacement is
-ready; stale responses cannot empty it or change its trade grouping.
-
-Both isolated Release client builds and pack/capture/transport regressions pass.
-Local TUT verification sought to about 19:01:34, retained 11.8 minutes without a
-capture-overload warning, and showed bubbles in the preceding minute when panned
-back. Repeated zoom changes retained displayed history. A spinner was visible
-during reconstruction. These changes are local and still require deployment.
-
-TUTUSDT pack charts default to LD (10 ticks per RT row); other markets retain
-SD (5 ticks). Depth fidelity remains adjustable. A wider price range still
-reduces row height. The current-price tag stays hidden while replay is loading.
-
-## RT archive tail continuity (2026-09-09, local)
-
-The chart no longer replaces its displayed live tail from a 20,000-trade ring
-that has already passed the archive snapshot cutoff. It retains the current
-view and requests a fresh snapshot immediately instead of waiting five seconds.
-A response whose cutoff is already behind the recent ring is rejected without
-clearing the display. This bounds memory without erasing previously shown trades.
-Queries flush pending native capture before requesting a worker snapshot, and
-view replacement preserves depth observations delivered during the query.
-The archive and recent-ring budgets are unchanged. Very slow storage can delay
-new displayed tail data until a complete replacement is available.
-
-Grouped archives and their raw tails always use the same aggregation, even
-immediately after refresh when their record count falls below the marker limit.
-Grouped quantities include all volume consistently on both sides of the seam.
-
-Both isolated Release builds and focused RT/transport regressions pass. Tests
-cover ring exhaustion, duplicate multiplicity, replay cutoff and capture flush
-ordering. Local only; hosted acceptance still requires deployment.
-
-## RT live history under delayed queries (2026-09-10, local)
-
-Archive reads have a separate serial worker queue from capture. A query waits
-for earlier writes to become durable, while later appends can complete during
-its decompression. Reset discards in-flight results. The 256 MiB origin budget,
-2 MiB transport budget and single active query materialization remain bounded.
-
-A retired trade-ring boundary now preserves the displayed prefix and merges
-the complete current tail while requesting a replacement. It also detects
-five-minute time retirement below the count cap. A partial oldest timestamp
-cannot replace an already displayed complete timestamp group. Above 40,000
-display records, only the nonreplaceable prefix is compacted through the existing
-volume-weighted bubble aggregator; original archive records remain unchanged.
-Displayed depth-bin width is separate from pending query width, so navigation
-cannot rebuild retained observations on the next query's grid before it arrives.
-
-Focused regressions reproduce the old worker blockage and frozen trade tail.
-Ten-minute synthetic market-time tests preserve 60,000 trades' quantity and
-price-weighted notional through retirement and bounded compaction. Real IndexedDB
-checks cover concurrent appends, delayed queries, reset, exact quantities, gaps,
-30-minute capture and eviction. Production observation is recorded in the task
-handoff. This does not reconstruct the earlier missing-depth interval or prove
-its cause. Production deployment remains James's.
+For implementation details, see [depth sampling](../src/core/realtime_history.h),
+[bubble grouping](../src/core/realtime_bubbles.h), and the
+[native regression tests](../CONTRIBUTING.md#native-tests).
