@@ -338,50 +338,7 @@ ChartWidget::ChartWidget(
     liq_census_pair_ = hl_census_pair_for(pair_);
     liq_census_enabled_ = (pair_.exchange == "hl");
 
-    // Subscribe to Volume stream for CVD intra-candle wicks
-    {
-        volume_sub_tf_ms_ = candles().timeframe_seconds() * 1000;
-        StreamKey vol_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
-        StreamHandler<Terminal::Volume> vol_handler{
-            .widget_ptr = this,
-            .callback = [](void* ptr, const Terminal::Volume& v) {
-                static_cast<ChartWidget*>(ptr)->handle_volume(v);
-            }
-        };
-        ctx_.stream_mgr().subscribe_volume(vol_key, vol_handler);
-        volume_subscribed_ = true;
-    }
-
-    // Subscribe to Stats stream for funding rate data
-    {
-        stats_sub_tf_ms_ = candles().timeframe_seconds() * 1000;
-        StreamKey stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
-        StreamHandler<Terminal::Stat> stat_handler{
-            .widget_ptr = this,
-            .callback = [](void* ptr, const Terminal::Stat& s) {
-                static_cast<ChartWidget*>(ptr)->handle_stat_for_chart(s);
-            }
-        };
-        ctx_.stream_mgr().subscribe_stats(stat_key, stat_handler);
-        stats_subscribed_ = true;
-    }
-
-    // Subscribe to the discrete @forceOrder liquidation stream (WS4 Observed
-    // markers). TF-independent (timeframe 0); live frames come from the
-    // LIQUIDATIONS NATS stream, replay frames from the archive bundle / the
-    // liquidation_events DB seed. Events land in LiquidationHeatmapManager.
-    {
-        StreamKey liq_key{pair_, Terminal::Stream::Liquidations, 0};
-        StreamHandler<Terminal::Liquidation> liq_handler{
-            .widget_ptr = this,
-            .callback = [](void* ptr, const Terminal::Liquidation& l) {
-                auto* w = static_cast<ChartWidget*>(ptr);
-                w->ctx_.liq_heatmap_mgr().add_observed_event(w->pair_, l);
-            }
-        };
-        ctx_.stream_mgr().subscribe_liquidations(liq_key, liq_handler);
-        liq_events_subscribed_ = true;
-    }
+    subscribe_chart_streams();
 
     // Research rollout only. This is an explicit UI gate; the dedicated stream id
     // remains separate from ordinary pattern traffic and the server retains
@@ -409,18 +366,7 @@ ChartWidget::~ChartWidget() {
     if (footprint_stream_mgr_)
         footprint_stream_mgr_->unsubscribe_direct(
             {pair_, Terminal::Stream::TickVolume, 60}, this);
-    if (volume_subscribed_) {
-        StreamKey vol_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
-        ctx_.stream_mgr().unsubscribe_volume(vol_key, this);
-    }
-    if (stats_subscribed_) {
-        StreamKey stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
-        ctx_.stream_mgr().unsubscribe_stats(stat_key, this);
-    }
-    if (liq_events_subscribed_) {
-        StreamKey liq_key{pair_, Terminal::Stream::Liquidations, 0};
-        ctx_.stream_mgr().unsubscribe_liquidations(liq_key, this);
-    }
+    unsubscribe_chart_streams();
     if (pattern_subscribed_ && pattern_stream_mgr_) {
         const StreamKey pattern_key{pair_, Terminal::Stream::PatternAdmin, 0};
         pattern_stream_mgr_->unsubscribe_patterns(pattern_key, this);
@@ -429,6 +375,75 @@ ChartWidget::~ChartWidget() {
         const StreamKey key{liq_census_pair_, Terminal::Stream::LiquidationLevels, 0};
         ctx_.stream_mgr().send_unsubscribe(key);
     }
+}
+
+// Callback ownership follows the manager used for registration, even when the
+// shared AppContext has already switched between live and replay managers.
+void ChartWidget::subscribe_chart_streams() {
+    chart_stream_mgr_ = &ctx_.stream_mgr();
+    // Subscribe to Volume stream for CVD intra-candle wicks
+    {
+        volume_sub_tf_ms_ = candles().timeframe_seconds() * 1000;
+        StreamKey vol_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
+        StreamHandler<Terminal::Volume> vol_handler{
+            .widget_ptr = this,
+            .callback = [](void* ptr, const Terminal::Volume& v) {
+                static_cast<ChartWidget*>(ptr)->handle_volume(v);
+            }
+        };
+        chart_stream_mgr_->subscribe_volume(vol_key, vol_handler);
+        volume_subscribed_ = true;
+    }
+
+    // Subscribe to Stats stream for funding rate data
+    {
+        stats_sub_tf_ms_ = candles().timeframe_seconds() * 1000;
+        StreamKey stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
+        StreamHandler<Terminal::Stat> stat_handler{
+            .widget_ptr = this,
+            .callback = [](void* ptr, const Terminal::Stat& s) {
+                static_cast<ChartWidget*>(ptr)->handle_stat_for_chart(s);
+            }
+        };
+        chart_stream_mgr_->subscribe_stats(stat_key, stat_handler);
+        stats_subscribed_ = true;
+    }
+
+    // Subscribe to the discrete @forceOrder liquidation stream (WS4 Observed
+    // markers). TF-independent (timeframe 0); live frames come from the
+    // LIQUIDATIONS NATS stream, replay frames from the archive bundle / the
+    // liquidation_events DB seed. Events land in LiquidationHeatmapManager.
+    {
+        StreamKey liq_key{pair_, Terminal::Stream::Liquidations, 0};
+        StreamHandler<Terminal::Liquidation> liq_handler{
+            .widget_ptr = this,
+            .callback = [](void* ptr, const Terminal::Liquidation& l) {
+                auto* w = static_cast<ChartWidget*>(ptr);
+                w->ctx_.liq_heatmap_mgr().add_observed_event(w->pair_, l);
+            }
+        };
+        chart_stream_mgr_->subscribe_liquidations(liq_key, liq_handler);
+        liq_events_subscribed_ = true;
+    }
+
+}
+
+void ChartWidget::unsubscribe_chart_streams() {
+    if (!chart_stream_mgr_) return;
+    if (volume_subscribed_) {
+        StreamKey vol_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
+        chart_stream_mgr_->unsubscribe_volume(vol_key, this);
+    }
+    if (stats_subscribed_) {
+        StreamKey stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
+        chart_stream_mgr_->unsubscribe_stats(stat_key, this);
+    }
+    if (liq_events_subscribed_) {
+        StreamKey liq_key{pair_, Terminal::Stream::Liquidations, 0};
+        chart_stream_mgr_->unsubscribe_liquidations(liq_key, this);
+    }
+    volume_subscribed_ = stats_subscribed_ = liq_events_subscribed_ = false;
+    chart_stream_mgr_ = nullptr;
 }
 
 // Visible prefix carries the TF; identity after "###" is TF-independent so the
@@ -799,42 +814,11 @@ void ChartWidget::change_timeframe(const int new_tf_seconds)
         cvd_ind->clear();
         cvd_ind->set_timeframe(new_tf_seconds);
     }
-    // Clear CVD wick cache and re-subscribe Volume stream for new timeframe
+    // Rebind timeframe-dependent callbacks through their original owner.
     cvd_wick_cache_.clear();
-    if (volume_subscribed_) {
-        StreamKey old_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
-        ctx_.stream_mgr().unsubscribe_volume(old_key, this);
-    }
-    {
-        volume_sub_tf_ms_ = static_cast<int64_t>(new_tf_seconds) * 1000;
-        StreamKey vol_key{pair_, Terminal::Stream::Volumes, volume_sub_tf_ms_};
-        StreamHandler<Terminal::Volume> vol_handler{
-            .widget_ptr = this,
-            .callback = [](void* ptr, const Terminal::Volume& v) {
-                static_cast<ChartWidget*>(ptr)->handle_volume(v);
-            }
-        };
-        ctx_.stream_mgr().subscribe_volume(vol_key, vol_handler);
-        volume_subscribed_ = true;
-    }
-    // Re-subscribe stats for new timeframe + clear funding cache
     funding_cache_.clear();
-    if (stats_subscribed_) {
-        StreamKey old_stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
-        ctx_.stream_mgr().unsubscribe_stats(old_stat_key, this);
-    }
-    {
-        stats_sub_tf_ms_ = static_cast<int64_t>(new_tf_seconds) * 1000;
-        StreamKey stat_key{pair_, Terminal::Stream::Stats, stats_sub_tf_ms_};
-        StreamHandler<Terminal::Stat> stat_handler{
-            .widget_ptr = this,
-            .callback = [](void* ptr, const Terminal::Stat& s) {
-                static_cast<ChartWidget*>(ptr)->handle_stat_for_chart(s);
-            }
-        };
-        ctx_.stream_mgr().subscribe_stats(stat_key, stat_handler);
-        stats_subscribed_ = true;
-    }
+    unsubscribe_chart_streams();
+    subscribe_chart_streams();
     // Clear and reset funding indicator for new timeframe
     funding_history_requested_ = false;
     funding_data_dirty_ = false;
@@ -5970,6 +5954,10 @@ void ChartWidget::toggle_liq_census() {
 }
 
 void ChartWidget::reset_overlay_subscriptions() {
+    if (chart_stream_mgr_ != &ctx_.stream_mgr()) {
+        unsubscribe_chart_streams();
+        if (is_open) subscribe_chart_streams();
+    }
     // The old context is still alive here. Release its callbacks before a
     // replay context can be retired, then bind both depth and flow to the new one.
     if (rt_stream_mgr_)
