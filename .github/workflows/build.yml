@@ -12,6 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify container routes
+        run: bash docker/test-routing.sh
+
       - name: Run native tests
         run: |
           cmake -S tests/native -B build-native-tests -DCMAKE_BUILD_TYPE=Release
