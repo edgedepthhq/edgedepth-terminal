@@ -93,10 +93,14 @@ inline void url_push(const std::string& path) {
             });
             p = p.slice(0, qi);
         }
+        var oldPath = window.location.pathname;
+        var marketChanged = (oldPath.indexOf('/terminal/binancef/') === 0 || oldPath.indexOf('/terminal/bybit/') === 0 || oldPath.indexOf('/terminal/hl/') === 0) && oldPath !== p;
+        if (marketChanged) 'compression compressionId peak touch'.split(' ').forEach(function(k) { params.delete(k); });
         var q = params.toString();
         var url = q ? p + '?' + q : p;
         if (window.location.pathname + window.location.search !== url) {
             window.history.pushState({}, "", url);
+            if (marketChanged) window.dispatchEvent(new CustomEvent("edgedepth:market-changed"));
         }
     }, path.c_str());
 #else
@@ -114,7 +118,7 @@ inline void url_navigate(const std::string& path) {
         var params = new URLSearchParams(window.location.search);
         // split(' ') instead of an array literal: EM_ASM is a C macro and the
         // preprocessor would treat the literal's commas as argument breaks.
-        'exchange pack packsym packt t lesson event'.split(' ')
+        'exchange pack packsym packt t lesson event compression compressionId peak touch'.split(' ')
             .forEach(function(k) { params.delete(k); });
         if (qi >= 0) {
             new URLSearchParams(p.slice(qi + 1)).forEach(function(v, k) {

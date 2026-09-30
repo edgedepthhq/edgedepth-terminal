@@ -210,7 +210,7 @@ void CandleManager::change_timeframe(const int64_t new_timeframe_seconds) {
     // Clear all state
     candles_.clear();
     has_current_candle_ = false;
-    cache_dirty_ = true;
+    mark_dirty();
     cached_timestamps_.clear();
     cached_opens_.clear();
     cached_closes_.clear();
@@ -280,7 +280,7 @@ void CandleManager::reset_for_seek(int64_t seek_time_ms) {
     clear_ticks();
     pending_trades_.clear();
     seam_from_ms_ = 0;
-    cache_dirty_ = true;
+    mark_dirty();
     cached_timestamps_.clear();
     cached_opens_.clear();
     cached_closes_.clear();
@@ -357,7 +357,7 @@ void CandleManager::trim_candles_after(int64_t cutoff_ms) {
         last_close_price_ = candles_.back().close;
     }
     replay_latest_time_ms_ = cutoff_ms;
-    cache_dirty_ = true;
+    mark_dirty();
     follow_live_ = true;
 }
 

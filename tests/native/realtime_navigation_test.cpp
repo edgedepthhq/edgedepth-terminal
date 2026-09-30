@@ -7,6 +7,12 @@ int main() {
     auto check = [&](bool ok, const char* what) {
         if (!ok) { std::fprintf(stderr, "FAIL: %s\n", what); ++failures; }
     };
+    // The current-book projection and a following view share one margin.
+    check(std::abs(realtime_projection_until(1000000, 600000.0) - 1072000.0) < 1e-6, "projection ends at the 12 percent live margin");
+    check(realtime_projection_until(1000000, 1800000.0 / 0.88) - 1000000 < 250000.0,
+          "a 30-minute zoom projects about four minutes, never the whole future");
+    check(std::abs(realtime_default_span_ms * (1.0 - realtime_margin_share) - 30000.0) < 1e-6,
+          "default span keeps thirty seconds of history beside the margin");
     check(!realtime_price_pan_detaches(0, 4), "click jitter preserves price follow");
     check(!realtime_price_pan_detaches(100, 13), "horizontal pan with vertical jitter preserves price follow");
     check(!realtime_price_pan_detaches(20, 20), "diagonal gesture preserves price follow");

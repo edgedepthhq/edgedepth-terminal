@@ -142,6 +142,14 @@ struct OutcomeHorizon {
 inline constexpr OutcomeHorizon kOutcomeHorizons[] = {{"30m", 30},   {"1h", 60},    {"4h", 240},
                                                       {"24h", 1440}, {"72h", 4320}, {"7d", 10080}};
 
+// A drag can extend into empty chart space. Export only observed time, bounded
+// by the latest loaded candle and the live/replay clock, at minute resolution.
+inline int64_t observed_move_end(int64_t requested, int64_t loaded_end, int64_t clock_ms) {
+    if (requested <= 0 || loaded_end <= 0 || clock_ms <= 0) return 0;
+    const int64_t available = loaded_end < clock_ms ? loaded_end : clock_ms;
+    return floor_minute_ms(requested < available ? requested : available);
+}
+
 // The dragged range reduced to a target the engine already counts. When ok is
 // false every other field is meaningless and the caller renders the menu item
 // disabled; direction and horizon are always readable strings, never null.

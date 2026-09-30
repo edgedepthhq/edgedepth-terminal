@@ -948,12 +948,12 @@ int64_t ShaderHeatmapRenderer::realtime_hold_until() const {
         ? observation_hold_until_ms_ : 0;
 }
 
-double ShaderHeatmapRenderer::realtime_draw_until(double viewport_end, bool extend) const {
+double ShaderHeatmapRenderer::realtime_draw_until(double viewport_end, bool extend, double limit) const {
     if (extend && realtime_ && replay_cutoff_ms_ > 0 &&
         realtime_hold_until() == replay_cutoff_ms_ && ring_count_ > 0 &&
         column_meta_[ring_count_ - 1].num_rows > 0 &&
         column_meta_[ring_count_ - 1].timestamp_ms <= replay_cutoff_ms_)
-        return std::max(double(replay_cutoff_ms_), viewport_end);
+        return std::max(double(replay_cutoff_ms_), std::min(viewport_end, limit));
     return double(replay_cutoff_ms_);
 }
 
@@ -961,7 +961,8 @@ void ShaderHeatmapRenderer::render_cells(
     int64_t candle_timeframe_ms,
     float sensitivity,
     bool show_labels,
-    bool extend_current_depth)
+    bool extend_current_depth,
+    double extend_limit_ms)
 {
     if (timeline_.empty() || !data_texture_ || !meta_texture_) return;
 
@@ -1036,7 +1037,7 @@ void ShaderHeatmapRenderer::render_cells(
 
     // Sequential ring buffer - column 0 = oldest, column ring_count-1 = newest.
     u.time_step = static_cast<float>(time_step_ms_) / 1000.0f;
-    const double draw_until = realtime_draw_until(limits.X.Max, extend_current_depth);
+    const double draw_until = realtime_draw_until(limits.X.Max, extend_current_depth, extend_limit_ms);
     const int64_t hold_until = realtime_hold_until();
     u.observation_hold_until = hold_until > oldest_ts
         ? float((draw_until > replay_cutoff_ms_ ? draw_until : double(hold_until)) - oldest_ts) / 1000.0f : 0;

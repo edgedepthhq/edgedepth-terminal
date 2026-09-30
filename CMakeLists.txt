@@ -387,6 +387,8 @@ set(PROJECT_SRC
         src/ui/upsell_modal.cpp
         src/ui/research_moment_panel.h
         src/ui/research_moment_panel.cpp
+        src/ui/compression_overlay.cpp
+        src/ui/touch_odds_overlay.cpp
         src/ui/replay_library_widget.h
         src/ui/replay_library_widget.cpp
         src/ui/chart_widget.h
@@ -554,6 +556,16 @@ if(EMSCRIPTEN)
     target_compile_options(census_overlay_regression PRIVATE -O1)
     target_link_options(census_overlay_regression PRIVATE -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1)
     set_target_properties(census_overlay_regression PROPERTIES SUFFIX ".js")
+    add_executable(indicator_continuity_regression EXCLUDE_FROM_ALL
+        tests/wasm/indicator_continuity_test.cpp
+        src/ui/indicators/volume_indicator.cpp src/ui/indicators/vpin_indicator.cpp
+        src/core/candle_manager.cpp src/stream_handler.cpp src/types/types.cpp
+        ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp
+        ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp
+        ${IMPLOT_DIR}/implot.cpp ${IMPLOT_DIR}/implot_items.cpp)
+    target_compile_options(indicator_continuity_regression PRIVATE -O1 -include span)
+    target_link_options(indicator_continuity_regression PRIVATE -sENVIRONMENT=node -sALLOW_MEMORY_GROWTH=1)
+    set_target_properties(indicator_continuity_regression PROPERTIES SUFFIX ".js")
     add_executable(cvd_availability_regression EXCLUDE_FROM_ALL
         tests/wasm/cvd_availability_test.cpp src/ui/indicators/cvd_indicator.cpp
         ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp

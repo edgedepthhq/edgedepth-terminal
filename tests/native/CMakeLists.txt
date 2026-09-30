@@ -97,3 +97,9 @@ target_link_libraries(realtime_bubbles_test PRIVATE nlohmann_json::nlohmann_json
 
 add_terminal_native_test(liquidity_response_test liquidity_response_test.cpp)
 target_link_libraries(liquidity_response_test PRIVATE nlohmann_json::nlohmann_json)
+
+add_terminal_native_test(compression_geometry_test compression_geometry_test.cpp)
+
+add_terminal_native_test(touch_odds_test touch_odds_test.cpp)
+add_terminal_native_test(touch_zones_test touch_zones_test.cpp)
+target_link_libraries(touch_odds_test PRIVATE nlohmann_json::nlohmann_json)

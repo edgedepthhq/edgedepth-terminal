@@ -339,12 +339,13 @@ private:
     // LayoutManager::setup_default_layout), so the chart stays docked when the
     // TF changes. A secondary chart appends "_<instance>" to the identity (and
     // " (<instance>)" to the visible label) so two charts of one pair never
-    // resolve to one ImGui window. title_tf_seconds_ tracks the TF the title
-    // was last built for, so render() can refresh it lazily.
+    // resolve to one ImGui window. title_tf_seconds_ and title_rt_ track what
+    // the title was last built for, so render() can refresh it lazily.
     void rebuild_title();
     std::string title_;
     std::string timeframe_label_;
     int64_t title_tf_seconds_ = -1;
+    bool title_rt_ = false;
     double tick_size_;
 
     // ─── Viewport ────────────────────────────────────────────────────────
@@ -596,6 +597,9 @@ private:
     // fed from the current liq heatmap snapshot instead of volume levels. Default ON: it ships
     // as an active headline layer ("Liq Profile" pill) on the bare terminal.
     bool liq_profile_enabled_ = true;
+    // Touch odds + P9 cascade chip (Heatmap V2, admin preview, live Binance only).
+    // Data comes from the web host bridge; see ui/touch_odds_overlay.h.
+    bool touch_odds_enabled_ = true;
 
     // ─── Observed layer (WS4 §7) - REAL @forceOrder liquidation markers ──────────────────
     // Discrete dots at (time, price), area ∝ USD, side-tinted (forced BUY = short liquidated

@@ -97,7 +97,7 @@ void LiqFieldRenderer::rebuild(uint8_t lmask, int64_t tf_ms) {
     }
 
     const auto& kLev = liq_field::kLeverages;
-    const auto tiers = liq_field::select_tiers(lmask,
+    const auto tiers = liq_field::display_tiers(lmask,
         liq_field::max_leverage(cm.pair().exchange, cm.pair().symbol));
     static constexpr uint8_t kBit[6] = {0x01, 0x02, 0x04, 0x08, 0x10, 0x20};
 

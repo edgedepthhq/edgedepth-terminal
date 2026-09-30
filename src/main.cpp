@@ -1869,13 +1869,14 @@ extern "C" {
     // (lesson Explore / studio) via Module.__set_chart_timeframe. Runs on the main
     // thread between frames - same change_timeframe path the live topbar uses.
     EMSCRIPTEN_KEEPALIVE
-    void _set_chart_timeframe(int sec) {
-        if (sec <= 0) return;
+    int _set_chart_timeframe(int sec) {
+        if (sec <= 0) return 0;
         for (auto& w : g_app.widgets)
             if (w && w->type() == WidgetType::Chart) {
                 static_cast<ChartWidget*>(w.get())->change_timeframe(sec);
-                return;
+                return 1;
             }
+        return 0; // Host can retry while the first chart is still booting.
     }
 
     EMSCRIPTEN_KEEPALIVE

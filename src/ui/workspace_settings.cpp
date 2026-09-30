@@ -287,7 +287,7 @@ void ChartWidget::load_settings(const Json& j) {
             else if (name == "CVD") add_cvd_indicator();
             else if (name == "Open Interest") add_oi_indicator();
             else if (name == "Funding Rate") add_funding_rate_indicator();
-            else if (name == "TOXICITY") add_vpin_indicator();
+            else if ((name == "TOXICITY" || name == "VPIN")) add_vpin_indicator();
             else if (name == "RSI") {
                 int period = 14; workspace::read(row, "period", period, 2, 500);
                 add_rsi_indicator(period);

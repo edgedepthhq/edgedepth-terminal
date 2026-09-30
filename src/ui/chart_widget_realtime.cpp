@@ -453,7 +453,9 @@ void ChartWidget::render_realtime() {
     rt_dom_frame_.paused = rt_paused_ || ctx_.replay_mgr().is_paused();
     if (fresh && limits.X.Max > rt_clock_ms_) {
         const auto& book = *rt_latest_;
-        const float right = ImPlot::GetPlotPos().x + ImPlot::GetPlotSize().x;
+        // The dashed quotes stop where the current-depth projection stops.
+        const float right = std::min(ImPlot::GetPlotPos().x + ImPlot::GetPlotSize().x,
+            ImPlot::PlotToPixels(realtime_projection_until(rt_clock_ms_, rt_span_ms_), book.bid).x);
         const float edge = ImPlot::PlotToPixels(double(rt_clock_ms_), book.bid).x;
         for (int side = 0; side < 2; ++side) {
             const double price = side ? book.ask : book.bid;
@@ -488,6 +490,13 @@ void ChartWidget::render_realtime() {
         dl->AddLine(ImVec2(start, note_y + 26), ImVec2(start, pos.y + ImPlot::GetPlotSize().y),
             Theme::u32(Theme::Tokens::TX2, 0.45f));
         dl->AddText(ImVec2(start + 6, note_y + 18), Theme::u32(Theme::Tokens::TX2), "Observed depth starts here");
+        // Trade bubbles keep their own 30-minute history, so zooming out can show
+        // trades where this session never recorded depth. Say so, rather than
+        // leaving an unexplained black stretch beside the bubbles.
+        const char* before = "Trades only: no depth recorded";
+        const float width = ImGui::CalcTextSize(before).x;
+        if (start - pos.x > width + 24)
+            dl->AddText(ImVec2(start - width - 6, note_y + 18), Theme::u32(Theme::Tokens::TX2, 0.8f), before);
     }
     char density_note[384];
     if (rt_bubbles_ && rt_archive_ && rt_archive_->bubbles().filtered_groups > 0) {

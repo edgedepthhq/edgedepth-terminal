@@ -96,6 +96,7 @@ public:
     // State queries
     bool empty() const { return candles_.empty() && !has_current_candle_; }
     size_t count() const { return candles_.size(); }
+    uint64_t history_revision() const { return history_revision_; }
     bool is_loading() const { return is_loading_; }
     bool is_initial_load_complete() const { return initial_load_complete_; }
     double last_close_price() const { return last_close_price_; }
@@ -154,7 +155,7 @@ private:
 
     void rebuild_cache() const;
     void ensure_cache() const { if (cache_dirty_) rebuild_cache(); }
-    void mark_dirty() { cache_dirty_ = true; }
+    void mark_dirty() { cache_dirty_ = true; ++history_revision_; }
 
     RealtimeTradeHistory realtime_trades_;
     Terminal::Pair pair_;
@@ -231,6 +232,7 @@ private:
     void clear_ticks();
 
     // SoA cache - mutable for lazy const rebuild
+    uint64_t history_revision_ = 1;
     mutable bool cache_dirty_ = true;
     mutable std::vector<double> cached_timestamps_;
     mutable std::vector<double> cached_opens_;

@@ -3,6 +3,9 @@
 #include <vector>
 #include <cstdint>
 #include <cstdio>
+#include <optional>
+
+class CandleManager;
 
 namespace Indicators {
     struct VolumeBar {
@@ -25,6 +28,7 @@ namespace Indicators {
     class VolumeIndicator : public IndicatorBase {
     public:
         VolumeIndicator() = default;
+        void sync_candles(const CandleManager& candles);
         void add_bar(int64_t time, double volume, bool bullish);
         void set_current_bar(int64_t time, double volume, bool bullish);
         void set_timeframe(int64_t seconds) { timeframe_seconds_ = seconds; }
@@ -61,6 +65,9 @@ namespace Indicators {
         }
 
     private:
+        const CandleManager* source_ = nullptr;
+        uint64_t source_revision_ = 0;
+        bool cache_dirty_ = true;
         std::vector<VolumeBar> bars;
         std::vector<double> times;
         std::vector<double> volumes;

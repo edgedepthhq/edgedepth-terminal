@@ -2,10 +2,29 @@
 #include "rendering/theme.h"
 #include <algorithm>
 
-#include "ui/chart_widget.h"
+#include "core/candle_manager.h"
 
 namespace Indicators {
+    void VolumeIndicator::sync_candles(const CandleManager& candles) {
+        if (source_ != &candles || source_revision_ != candles.history_revision()) {
+            clear();
+            source_ = &candles;
+            source_revision_ = candles.history_revision();
+            bars.reserve(candles.count());
+            for (const auto& c : candles.candles())
+                bars.push_back({c.timestamp_ms, c.volume * c.close, c.close >= c.open});
+            rebuild_cache();
+        }
+        timeframe_seconds_ = candles.timeframe_seconds();
+        building_bar_.reset();
+        if (candles.has_building_candle()) {
+            const auto& c = candles.building_candle();
+            set_current_bar(c.timestamp_ms, c.volume * c.close, c.close >= c.open);
+        }
+    }
+
     void VolumeIndicator::add_bar(int64_t time, double volume, bool bullish) {
+        cache_dirty_ = true;
         if (!bars.empty() && bars.back().time == time) {
             bars.back().volume = volume;
             bars.back().bullish = bullish;
@@ -18,6 +37,10 @@ namespace Indicators {
                           });
     }
     void VolumeIndicator::clear() {
+        cache_dirty_ = true;
+        source_ = nullptr;
+        source_revision_ = 0;
+        building_bar_.reset();
         bars.clear();
         times.clear();
         volumes.clear();
@@ -29,10 +52,11 @@ namespace Indicators {
     }
 
     void VolumeIndicator::update() {
-        rebuild_cache();
+        if (cache_dirty_) rebuild_cache();
     }
 
     void VolumeIndicator::rebuild_cache() {
+        cache_dirty_ = false;
         const size_t n = bars.size();
         times.resize(n);
         volumes.resize(n);

@@ -66,6 +66,11 @@ jobs:
       - name: Real-time depth sequence and retention regression
         run: bash tests/wasm/run_realtime_depth.sh "$PWD/build"
 
+      - name: Volume continuity and VPIN clock regression
+        run: |
+          cmake --build build --target indicator_continuity_regression --parallel 4
+          node build/indicator_continuity_regression.js
+
       - name: Build
         run: cd build && emmake make -j$(nproc) c_based_trader_client
 

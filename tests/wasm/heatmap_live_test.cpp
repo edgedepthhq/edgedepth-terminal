@@ -316,6 +316,12 @@ int main() {
     assert(r.realtime_draw_until(epoch + 3500, true) == epoch + 3500);
     assert(r.realtime_draw_until(epoch + 3500, false) == epoch + 2500);
     assert(r.realtime_draw_until(epoch + 2000, true) == epoch + 2500);
+    // A zoomed-out or detached view with minutes of future time: the held book
+    // stops at the chart's margin limit, not the viewport edge.
+    assert(r.realtime_draw_until(epoch + 900000, true, epoch + 2800) == epoch + 2800);
+    assert(r.realtime_draw_until(epoch + 2700, true, epoch + 2800) == epoch + 2700);
+    assert(r.realtime_draw_until(epoch + 3500, true, epoch + 2000) == epoch + 2500); // A limit never cuts observed time.
+    assert(r.realtime_draw_until(epoch + 3500, false, epoch + 2800) == epoch + 2500);
     assert(r.timeline_.size() == recorded_size);
     assert(r.get_value_at_price_and_time(100.25, epoch + 3500) == 0);
     r.set_observation_clock_ms(epoch + 1900); // A newer retained column cannot project into a rewind.

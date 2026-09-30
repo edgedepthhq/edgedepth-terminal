@@ -37,4 +37,12 @@ inline TierSelection select_tiers(uint8_t mask, double cap) {
     }
     return out;
 }
+
+// Display rule, not the pinned Go statistic: when every selected tier exceeds the market's cap,
+// draw every tier the market allows instead of a blank map (228 of 648 Binance markets in the
+// 2026-09-29 touch-odds roster cap below the default 25x). Deselecting every tier stays blank.
+inline TierSelection display_tiers(uint8_t mask, double cap) {
+    const auto t = select_tiers(mask, cap);
+    return (t.enabled == 0 && mask != 0 && cap > 0) ? select_tiers(0x3f, cap) : t;
+}
 }

@@ -45,7 +45,7 @@ struct PositioningState {
     double  cascade_risk            = 0.0;  // 0..1
     double  taker_buy_ratio         = 0.0;
     double  taker_sell_ratio        = 0.0;
-    double  cvd                     = 0.0;  // session cumulative volume delta
+    double  cvd                     = 0.0;  // current 1m window's signed taker USD delta (not cumulative)
     int64_t timestamp_ms            = 0;
     bool    valid                   = false;
 };

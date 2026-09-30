@@ -195,6 +195,14 @@ int main() {
         expect_eq(investigation_url("LSK/USDT", selected, "bybit"), "", "never substitutes a venue");
         expect_eq(investigation_url("LSK/USDT", MoveSnap{}), "", "missing range refuses");
     }
+    {
+        const int64_t now = t_minute + 27000;
+        expect_eq_i64(observed_move_end(now + 4 * 3600000, now + 3600000, now), t_minute, "future chart space stops at live clock");
+        expect_eq_i64(observed_move_end(now + 4 * 3600000, t_minute - 3600000, now), t_minute - 3600000, "stale loaded candles bound the endpoint");
+        expect_eq_i64(observed_move_end(now + 3600000, now + 7200000, t_minute - 60000), t_minute - 60000, "replay clock bounds a selection even with later candles loaded");
+        expect_eq_i64(observed_move_end(t_minute - 60000, now, now), t_minute - 60000, "historical endpoint stays exact");
+        expect_eq_i64(observed_move_end(now, 0, now), 0, "no loaded data refuses");
+    }
     if (failures > 0) {
         fprintf(stderr, "%d failure(s)\n", failures);
         return 1;

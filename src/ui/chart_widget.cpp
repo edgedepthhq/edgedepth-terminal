@@ -1,4 +1,6 @@
 #include "core/liq_field_tiers.h"
+#include "ui/compression_overlay.h"
+#include "ui/touch_odds_overlay.h"
 // ═══════════════════════════════════════════════════════════════════════════════
 // chart_widget.cpp - REFACTORED: Rendering + UI only
 //
@@ -124,7 +126,7 @@ static void render_investigate_menu_item(const Terminal::Pair& pair, int64_t min
     // like it across the sector. Needs a range that snapped onto the ladder, so
     // the shortcut column states the target the click will actually open.
     const bool move_enabled = on_record && move.end_minute_ms > move.start_minute_ms && move.start_minute_ms > 0;
-    const std::string move_shortcut = move_enabled ? "Exact UTC interval" : "";
+    const std::string move_shortcut = move_enabled ? "Through " + research_url::minute_label_utc(move.end_minute_ms) : "";
     if (Theme::menu_item(drawing::UiIcon::Move, "Investigate this move",
                          move_shortcut.empty() ? nullptr : move_shortcut.c_str(),
                          move_enabled)) {
@@ -149,10 +151,16 @@ ChartWidget::SelectedMove ChartWidget::read_selected_move() const {
     const int64_t b = replay_selection_.end_ms;
     if (a <= 0 || b <= 0 || a == b) return out;  // no range: nothing was dragged
     const int64_t from = std::min(a, b);
-    const int64_t to = std::max(a, b);
-
     const int64_t tf_ms = candles().timeframe_seconds() * 1000;
     if (tf_ms <= 0) return out;
+    int64_t loaded_end = candles().candles().empty() ? 0 : candles().candles().back().timestamp_ms + tf_ms;
+    if (candles().has_building_candle())
+        loaded_end = std::max(loaded_end, candles().building_candle().timestamp_ms + tf_ms);
+    const int64_t clock_ms = ctx_.replay_mgr().is_active()
+        ? ctx_.replay_mgr().interpolated_time_ms()
+        : std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    const int64_t to = research_url::observed_move_end(std::max(a, b), loaded_end, clock_ms);
+    if (to <= research_url::floor_minute_ms(from) || to - from > 7 * 86400000LL) return out;
 
     double start_close = 0.0, end_close = 0.0, max_high = 0.0, min_low = 0.0;
     bool have_range = false;
@@ -430,7 +438,10 @@ ChartWidget::~ChartWidget() {
 // its instance to both halves: the label so the tab reads as a second chart,
 // the identity so ImGui gives it a window of its own.
 void ChartWidget::rebuild_title() {
-    title_ = std::string("     Chart  ") + widget_symbol_label(pair_.symbol) + " " + timeframe_label_;
+    // Real-time has no timeframe; the tab names the view, so a docked
+    // real-time chart reads as that and not as another 1m chart.
+    title_ = rt_mode_ ? std::string("     Real-time  ") + widget_symbol_label(pair_.symbol)
+                      : std::string("     Chart  ") + widget_symbol_label(pair_.symbol) + " " + timeframe_label_;
     if (chart_instance_ > 1) title_ += " (" + std::to_string(chart_instance_) + ")";
     title_ += "###chart_" + pair_.exchange + "_" + pair_.symbol;
     if (chart_instance_ > 1) title_ += "_" + std::to_string(chart_instance_);
@@ -620,14 +631,8 @@ void ChartWidget::update() {
         if (px > 0.0) alert_last_price_ = px;
     }
 
+    update_volume_indicators();
     if (!candles().empty()) {
-        auto* vol_ind = indicator_mgr_.get_indicator_of_type<Indicators::VolumeIndicator>();
-        if (vol_ind && vol_ind->get_bar_count() == 0 && candles().is_initial_load_complete()) {
-            vol_ind->clear();
-            populate_volume_data(vol_ind);
-            vol_ind->update();
-        }
-        update_volume_indicators();
 
         // CVD: populate on first data availability, update building candle each frame
         auto* cvd_ind = indicator_mgr_.get_indicator_of_type<Indicators::CVDIndicator>();
@@ -703,15 +708,10 @@ void ChartWidget::update() {
             update_oi_indicator();
         }
 
-        // VPIN / Toxicity: subscribe + history request + revision-gated
-        // repopulate from the shared SeriesCache
-        {
-            auto* vpin_ind = indicator_mgr_.get_indicator_of_type<Indicators::VPINIndicator>();
-            if (vpin_ind && vpin_ind->is_visible()) {
-                update_vpin_indicator();
-            }
-        }
     }
+    // Keep the observation clock current even during empty seek/load windows.
+    if (auto* ind = indicator_mgr_.get_indicator_of_type<Indicators::VPINIndicator>();
+        ind && ind->is_visible()) update_vpin_indicator();
     // Heatmap - request once candles are loaded (WS guaranteed connected).
     // Skipped in Renko: the time-keyed overlays do not draw there, and
     // update_heatmap() reads last_visible_range_ as TIME (brick indices in Renko).
@@ -866,13 +866,14 @@ void ChartWidget::render() {
     rt_dom_frame_ = {}; // A hidden/collapsed plot must not publish a stale transform.
     if (!is_open) return;
 
-    // Keep the tab's visible TF in sync with the live timeframe (catches every
-    // TF-change path, not just the toolbar). Cheap int compare; the string is only
+    // Keep the tab's visible TF and mode in sync (catches every TF-change and
+    // real-time path, not just the toolbar). Cheap compares; the string is only
     // rebuilt on an actual change. The docking identity (after "###") is unchanged.
     {
         const int64_t tf = candles().timeframe_seconds();
-        if (tf != title_tf_seconds_) {
+        if (tf != title_tf_seconds_ || rt_mode_ != title_rt_) {
             title_tf_seconds_ = tf;
+            title_rt_ = rt_mode_;
             timeframe_label_  = timeframe_to_string(tf);
             rebuild_title();
         }
@@ -958,9 +959,18 @@ void ChartWidget::render() {
     if (chart_type_ != ChartType::Renko) {
         const bool selected = replay_selection_.start_ms != replay_selection_.end_ms;
         if (selected) {
-            if (pair_.exchange == "binancef" && ImGui::SmallButton("Investigate selection")) {
+            if (pair_.exchange == "binancef") {
                 const auto move = read_selected_move();
-                open_outcome_first_handoff(pair_, move.snap, move.range_minutes);
+                const bool valid = move.snap.end_minute_ms > move.snap.start_minute_ms;
+                ImGui::BeginDisabled(!valid);
+                if (ImGui::SmallButton("Investigate selection"))
+                    open_outcome_first_handoff(pair_, move.snap, move.range_minutes);
+                ImGui::EndDisabled();
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    if (valid) Theme::tooltip("Through %s. Empty space beyond available chart time is excluded.",
+                        research_url::minute_label_utc(move.snap.end_minute_ms).c_str());
+                    else Theme::tooltip("Select one minute to seven days of loaded candles.");
+                }
             }
             // Stack at narrow widths rather than colliding with the hint.
             if (ImGui::GetContentRegionAvail().x > 490.0f) ImGui::SameLine(0, 12);
@@ -1101,7 +1111,19 @@ void ChartWidget::render_chart() {
     if (candles().has_building_candle()) {
         x_max = std::max(x_max, static_cast<double>(candles().building_candle().timestamp_ms));
     }
-    const double x_padding = static_cast<double>(tf_sec) * 1000.0 * 3.0;
+    double x_padding = static_cast<double>(tf_sec) * 1000.0 * 3.0;
+    // Touch odds (admin preview) are drawn in the future: reserve their window,
+    // at least a readable column and at most 15% of the default view.
+    if (touch_odds_enabled_ && !rt_mode_ && !ctx_.replay_mgr().is_active()) {
+        const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        if (const int64_t until = touch_odds_overlay::window_end(pair_, now_ms)) {
+            const double span = static_cast<double>(candles().visible_candles_for_timeframe()) *
+                                static_cast<double>(tf_sec) * 1000.0;
+            const double need = std::max(static_cast<double>(until) - x_max, 0.07 * span);
+            x_padding = std::max(x_padding, std::min(need, 0.15 * span));
+        }
+    }
     x_max += x_padding;
 
     // During replay, clamp x_max so heatmaps/overlays don't render past the
@@ -1181,7 +1203,7 @@ void ChartWidget::render_chart() {
         // The requested viewport is independent of collected coverage. Leave
         // pre-join space empty rather than overriding zoom on a quiet market.
         const double span = rt_span_ms_;
-        x_max = double(rt_clock_ms_) + span * 0.12;
+        x_max = realtime_projection_until(rt_clock_ms_, span);
         x_min = x_max - span;
     }
     // Drawing tools: the ImPlot input-map override must be in place BEFORE
@@ -1570,7 +1592,8 @@ void ChartWidget::render_chart() {
         }
         if (rt_mode_ && rt_renderer_ && rt_depth_enabled_) {
             configure_depth_fidelity(*rt_renderer_);
-            rt_renderer_->render_cells(rt_renderer_->get_column_interval_ms(), heatmap_sensitivity_, false, rt_extend_depth_ && (!rt_history_view_ || realtime_live_edge()));
+            rt_renderer_->render_cells(rt_renderer_->get_column_interval_ms(), heatmap_sensitivity_, false, rt_extend_depth_ && (!rt_history_view_ || realtime_live_edge()),
+                realtime_projection_until(rt_clock_ms_, rt_span_ms_));
         }
 #ifdef EDGEDEPTH_EXPOSURE_V2_DEV
         render_exposure_v2(heatmap_replay_cutoff>0?heatmap_replay_cutoff:int64_t(emscripten_date_now()));
@@ -1713,6 +1736,22 @@ void ChartWidget::render_chart() {
         if (!rt_mode_ && !ctx_.replay_mgr().is_active() && ct_allows_time_overlays(chart_type_)) {
             ProfileScope _ps("Patterns");
             render_pattern_overlay(visible_x_min, visible_x_max);
+        }
+        if (!rt_mode_ && ct_allows_time_overlays(chart_type_)) {
+            const int64_t clock = ctx_.replay_mgr().is_active() ? ctx_.replay_mgr().interpolated_time_ms()
+                : std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            compression::render(pair_, clock);
+            if (touch_odds_enabled_) {
+                const double live = candles().has_building_candle() ? candles().building_candle().close
+                    : (candles().candles().empty() ? 0.0 : candles().candles().back().close);
+                touch_odds_overlay::render(pair_, clock, fmt_.price_fmt, live, ctx_.replay_mgr().is_active());
+                if (liq_dense_field_ && touch_odds_overlay::available(pair_)) {
+                    std::vector<touch_zones::Fuel> fuel;
+                    for (const auto& s : liq_field_.segments())
+                        if (s.end_ms == LiqFieldRenderer::kSegPending) fuel.push_back({s.price_lo, s.intensity});
+                    touch_odds_overlay::zone_labels(pair_, clock, live, fmt_.price_fmt, touch_zones::strongest(std::move(fuel), live, 3), ctx_.replay_mgr().is_active());
+                }
+            }
         }
         // 3.5 Current-price axis tag (green if current candle bullish, red if bearish).
         //     Uses the REAL candle close (never HA) so the tag tracks true price in
@@ -2935,6 +2974,7 @@ void ChartWidget::render_controls() {
                         + (candle_bubbles_ ? 1 : 0)
                         + (liq_profile_enabled_ ? 1 : 0) + (liq_observed_enabled_ ? 1 : 0)
                         + (liq_census_enabled_ ? 1 : 0)
+                        + (touch_odds_enabled_ && touch_odds_overlay::available(pair_) ? 1 : 0)
                         + (heatmap_enabled_ ? 1 : 0) + (vpvr_enabled_ ? 1 : 0));
 
     auto chart_type_label = [](ChartType type) -> const char* {
@@ -3435,6 +3475,7 @@ void ChartWidget::render_controls() {
             Theme::menu_separator();
             Theme::menu_note("Candle layers return when you leave real-time mode.");
         } else {
+        compression::menu(pair_, ctx_.replay_mgr().is_active());
         if (Theme::begin_menu_group("Price levels")) {
             ImGui::TextWrapped("Add the daily average price or levels from the previous day and week.");
             if (layer_row("Daily VWAP (UTC)", session_vwap_, false)) {
@@ -3472,16 +3513,22 @@ void ChartWidget::render_controls() {
         Theme::menu_separator();
         layer_section("LIQUIDATIONS");
 
-        // Liquidation Heatmap = the client Field (free).
-        if (layer_row("Liquidation heatmap", liq_dense_field_, false)) {
+        // Liquidation scenario heatmap = the client Field (free).
+        if (layer_row("Liquidation scenario heatmap", liq_dense_field_, false)) {
             liq_dense_field_ = !liq_dense_field_;
             liq_shelf_cache_ts_ = -1;
         }
         if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) open_liq_settings_ = true;
-        if (Theme::begin_menu_group("Heatmap source")) {
-            ImGui::TextWrapped("Candle-derived estimate (lf.v2). Brightness is relative weight, not liquidation dollars or probability. Historical shading can change when more candles load.");
+        if (Theme::begin_menu_group("Scenario source and limits")) {
+            ImGui::TextWrapped("Candle-derived scenarios. Brightness shows relative model weight, not observed positions, liquidation dollars or probability. Historical shading can change when more candles load.");
+            ImGui::TextWrapped("In our registered test on 630 Binance markets (January to June 2026), this map did not predict which levels price touches beyond what volatility already implies.");
             const double cap = liq_field::max_leverage(pair_.exchange, pair_.symbol);
-            if (cap > 0) ImGui::TextWrapped("Pinned July 2026 leverage cap: %.0fx. This is a model assumption, not current account leverage.", cap);
+            const uint8_t lmask = ctx_.liq_heatmap_mgr().get_leverage_mask();
+            if (cap > 0) {
+                ImGui::TextWrapped("Pinned July 2026 leverage cap: %.0fx. This is a model assumption, not current account leverage.", cap);
+                if (liq_field::select_tiers(lmask, cap).enabled == 0 && liq_field::display_tiers(lmask, cap).enabled != 0)
+                    ImGui::TextWrapped("The selected tiers exceed this cap, so the map shows every tier up to %.0fx.", cap);
+            }
             else ImGui::TextWrapped("No pinned venue cap for this market. Selected leverage tiers are assumptions.");
             Theme::end_menu_group();
         }
@@ -3504,6 +3551,7 @@ void ChartWidget::render_controls() {
         // Liq Profile = price-marginal of the Field (free).
         if (layer_row("Liquidation profile", liq_profile_enabled_, false))
             liq_profile_enabled_ = !liq_profile_enabled_;
+        touch_odds_overlay::menu(pair_, touch_odds_enabled_);
 #ifdef EDGEDEPTH_EXPOSURE_V2_DEV
         // Exposure V2 = the server's recorded per-minute scenario bands (pilot,
         // Pro): where positions opened since capture began would sit under a
@@ -4677,11 +4725,7 @@ void ChartWidget::render_indicators() {
 }
 
 void ChartWidget::populate_volume_data(Indicators::VolumeIndicator* vol_ind) const {
-    for (const auto& candle : candles().candles()) {
-        const bool bullish = candle.close >= candle.open;
-        // Convert base volume to quote volume (USDT) for display
-        vol_ind->add_bar(candle.timestamp_ms, candle.volume * candle.close, bullish);
-    }
+    vol_ind->sync_candles(candles());
 }
 
 void ChartWidget::add_volume_indicator() {
@@ -4698,12 +4742,7 @@ void ChartWidget::update_volume_indicators() {
     auto* vol_ind = indicator_mgr_.get_indicator_of_type<Indicators::VolumeIndicator>();
     if (!vol_ind) return;
 
-    if (candles().has_building_candle()) {
-        const auto& bc = candles().building_candle();
-        const bool bullish = bc.close >= bc.open;
-        vol_ind->set_current_bar(bc.timestamp_ms, bc.volume * bc.close, bullish);
-    }
-    vol_ind->update();
+    vol_ind->sync_candles(candles());
 }
 
 void ChartWidget::add_cvd_indicator() {
@@ -4917,6 +4956,10 @@ void ChartWidget::add_vpin_indicator() {
 void ChartWidget::update_vpin_indicator() {
     auto* ind = indicator_mgr_.get_indicator_of_type<Indicators::VPINIndicator>();
     if (!ind || !ctx_.series) return;
+    ind->set_observed_until(ctx_.replay_mgr().is_active()
+        ? ctx_.replay_mgr().interpolated_time_ms()
+        : std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
 
     const bool is_replay = ctx_.candle_mgr().replay_start_time_ms() > 0;
 

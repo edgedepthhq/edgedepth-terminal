@@ -69,14 +69,43 @@ size_t VPINIndicator::first_visible(double x_min) const {
 }
 
 bool VPINIndicator::get_latest_tag_color(ImU32& out_color) const {
-    if (pts_.empty()) { out_color = IndiTokens::TAG_NEUTRAL; return true; }
-    const int8_t r = pts_.back().regime;
+    const auto* p = latest_observed();
+    if (!p) { out_color = IndiTokens::TAG_NEUTRAL; return true; }
+    const int8_t r = p->regime;
     out_color = (r <= 0 || !regime_coloring_) ? IndiTokens::TAG_NEUTRAL
                                               : IndiTokens::risk_color(r);
     return true;
 }
 
+const Series::VPINPoint* VPINIndicator::latest_observed() const {
+    auto it = std::upper_bound(pts_.begin(), pts_.end(), observed_until_,
+        [](int64_t t, const Series::VPINPoint& p) { return t < p.ts_ms; });
+    return it == pts_.begin() ? nullptr : &*(it - 1);
+}
+
+void VPINIndicator::get_y_limits(double x_min, double x_max, double& y_min, double& y_max) const {
+    y_min = 0.0; y_max = 1.0;
+    x_max = std::min(x_max, static_cast<double>(observed_until_));
+    if (!fit_visible_ || pts_.empty() || x_max < x_min) return;
+    double lo = 1.0, hi = 0.0;
+    for (size_t i = first_visible(x_min); i < pts_.size() && pts_[i].ts_ms <= x_max; ++i) {
+        lo = std::min(lo, static_cast<double>(pts_[i].vpin));
+        hi = std::max(hi, static_cast<double>(pts_[i].vpin));
+        if (show_imbalance_) {
+            lo = std::min(lo, static_cast<double>(pts_[i].imbalance));
+            hi = std::max(hi, static_cast<double>(pts_[i].imbalance));
+        }
+    }
+    if (hi < lo) return;
+    const double pad = std::max(0.025, (hi - lo) * 0.15);
+    y_min = std::max(0.0, lo - pad);
+    y_max = std::min(1.0, hi + pad);
+}
+
 void VPINIndicator::render_settings() {
+    ImGui::Checkbox("Fit visible range", &fit_visible_);
+    if (ImGui::IsItemHovered())
+        Theme::tooltip("Fits observed values in this window. Off keeps the full 0-1 scale.");
     // §4.5 settings - F2 popover pilot. Persisted blob is S4 (F2 full).
     ImGui::Checkbox("Regime display", &regime_coloring_);
     if (ImGui::IsItemHovered())
@@ -90,7 +119,8 @@ void VPINIndicator::render_content(double x_min, double x_max) {
     // SPEC §2 axis: gridlines at 0.25/0.50/0.75 (limits fixed 0-1 via
     // get_y_limits). Setup calls are legal until the first draw.
     static const double kTicks[] = {0.0, 0.25, 0.50, 0.75, 1.00};
-    ImPlot::SetupAxisTicks(ImAxis_Y1, kTicks, 5);
+    if (!fit_visible_) ImPlot::SetupAxisTicks(ImAxis_Y1, kTicks, 5);
+    x_max = std::min(x_max, static_cast<double>(observed_until_));
 
     ImDrawList* dl = ImPlot::GetPlotDrawList();
     ImPlot::PushPlotClipRect();
@@ -101,9 +131,9 @@ void VPINIndicator::render_content(double x_min, double x_max) {
     const float px_right = plot_pos.x + plot_size.x;
     const float px_bot   = plot_pos.y + plot_size.y;
 
-    // ── Dotted threshold landmarks (.22/.30/.40) - drawn always, named.
+    // ── Fallback landmarks, hidden when the latest regime is model-classified.
     //    At the old 9% alpha the line floated in an unlabeled 0-1 void. ──
-    {
+    if (const auto* latest = latest_observed(); latest && latest->hmm_state < 0) {
         const float ys[3] = {
             ImPlot::PlotToPixels(0.0, IndiTokens::TOX_THRESHOLD_1).y,
             ImPlot::PlotToPixels(0.0, IndiTokens::TOX_THRESHOLD_2).y,
@@ -115,7 +145,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
             dotted_hline(dl, px_left, px_right, y, rule_col,
                          IndiTokens::TOX_THRESH_DASH_ON, IndiTokens::TOX_THRESH_DASH_OFF);
         }
-        static const char* const kLbl[3] = {"0.22", "0.30", "0.40"};
+        static const char* const kLbl[3] = {"Fallback 0.22", "Fallback 0.30", "Fallback 0.40"};
         ImGui::PushFont(Theme::Fonts::label());
         const float fh = ImGui::GetFontSize();
         for (int t = 0; t < 3; ++t) {
@@ -125,7 +155,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
         ImGui::PopFont();
     }
 
-    if (pts_.empty()) {
+    if (pts_.empty() || x_max < x_min) {
         // Distinguish "no prints yet" from "this feed never carries VPIN": on
         // a raw self-hosted feed the pane would otherwise sit silently blank
         // forever (see stream_presence.h).
@@ -166,7 +196,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
                 const float a = (r == 1) ? IndiTokens::TOX_WASH_ELEVATED
                               : (r == 2) ? IndiTokens::TOX_WASH_HIGH
                                          : IndiTokens::TOX_WASH_CRITICAL;
-                return era ? a : a * IndiTokens::TOX_WASH_FALLBACK;
+                return 0.5f * (era ? a : a * IndiTokens::TOX_WASH_FALLBACK);
             }
             return IndiTokens::TOX_STRIP_ALPHA *
                    (era ? 1.0f : IndiTokens::TOX_FALLBACK_MUL);
@@ -243,7 +273,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
         for (size_t i = i0; i < i_end; ++i) {
             const auto& p = pts_[i];
             const double t0 = static_cast<double>(p.ts_ms);
-            const bool   last = (i + 1 >= pts_.size());
+            const bool   last = (i + 1 >= pts_.size() || pts_[i + 1].ts_ms > observed_until_);
             const double t1 = last ? x_max
                                    : std::min(static_cast<double>(pts_[i + 1].ts_ms), x_max);
             ImU32 col = stroke_color(p);
@@ -275,11 +305,15 @@ void VPINIndicator::render_content(double x_min, double x_max) {
 
         auto flush_col = [&]() {
             if (!have_col) return;
-            if (have_prev && col_x > prev_x + 0.5f) {
+            if (have_prev && col_x > prev_x) {
                 // horizontal hold between columns (gap = quiet stretch)
                 dl->AddLine(ImVec2(prev_x, prev_y), ImVec2(col_x, prev_y), col_col, 1.0f);
             }
-            dl->AddLine(ImVec2(col_x, col_min), ImVec2(col_x, col_max), col_col, 1.0f);
+            // Preserve the full range in a quiet envelope; last value is the line.
+            dl->AddLine(ImVec2(col_x, col_min), ImVec2(col_x, col_max),
+                        IndiTokens::mul_alpha(col_col, 0.35f), 1.0f);
+            if (have_prev)
+                dl->AddLine(ImVec2(col_x, prev_y), ImVec2(col_x, col_last_y), col_col, 1.25f);
             prev_x = col_x; prev_y = col_last_y; have_prev = true;
         };
 
@@ -317,7 +351,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
             for (size_t i = i0; i < i_end; ++i) {
                 const auto& p = pts_[i];
                 const double t0 = static_cast<double>(p.ts_ms);
-                const bool   last = (i + 1 >= pts_.size());
+                const bool   last = (i + 1 >= pts_.size() || pts_[i + 1].ts_ms > observed_until_);
                 const double t1 = last ? x_max
                                        : std::min(static_cast<double>(pts_[i + 1].ts_ms), x_max);
                 const ImVec2 a = ImPlot::PlotToPixels(std::max(t0, x_min),
@@ -358,16 +392,15 @@ void VPINIndicator::render_content(double x_min, double x_max) {
     // ── Persistent corner readout next to the pane name - regime word +
     //    brain + latest VPIN without needing a hover (regime was hover-only).
     //    Mono font; regime word in regime color. ──
-    if (!pts_.empty()) {
-        const auto& lp = pts_.back();
+    if (const auto* latest = latest_observed()) {
+        const auto& lp = *latest;
         const ImU32 word_col = (regime_coloring_ && lp.regime >= 1)
             ? IndiTokens::risk_color(lp.regime) : IndiTokens::INK;
-        char rest[64];
-        if (lp.hmm_state >= 0)
-            snprintf(rest, sizeof(rest), " \xC2\xB7 HMM %.2f \xC2\xB7 VPIN %.4f",
-                     lp.hmm_conf, lp.vpin);
-        else
-            snprintf(rest, sizeof(rest), " \xC2\xB7 THRESH \xC2\xB7 VPIN %.4f", lp.vpin);
+        char rest[128];
+        snprintf(rest, sizeof(rest), " %.3f | %s%s | last bucket %llds ago",
+                 lp.vpin, fit_visible_ ? "Fit visible" : "0-1 scale",
+                 decimate ? " | range + last" : "",
+                 static_cast<long long>(std::max<int64_t>(0, observed_until_ - lp.ts_ms) / 1000));
         ImGui::PushFont(Theme::Fonts::label());
         const float name_w = ImGui::CalcTextSize(get_name()).x;
         ImGui::PopFont();
@@ -381,7 +414,7 @@ void VPINIndicator::render_content(double x_min, double x_max) {
     }
 
     // ── Hover: name the brain (SPEC §2 - "HIGH · HMM 0.82" vs "HIGH · THRESH") ──
-    if (ImPlot::IsPlotHovered()) {
+    if (ImPlot::IsPlotHovered() && ImPlot::GetPlotMousePos().x <= observed_until_) {
         const ImPlotPoint mp = ImPlot::GetPlotMousePos();
         auto it = std::upper_bound(pts_.begin(), pts_.end(), mp.x,
             [](double x, const Series::VPINPoint& p) {
@@ -392,10 +425,12 @@ void VPINIndicator::render_content(double x_min, double x_max) {
             Theme::begin_tooltip();
             ImGui::PushFont(Theme::Fonts::mono_sm());
             if (p.hmm_state >= 0)
-                ImGui::Text("%s \xC2\xB7 HMM %.2f", regime_word(p.regime), p.hmm_conf);
+                ImGui::Text("%s | HMM confidence %.0f%%", regime_word(p.regime), p.hmm_conf * 100.0f);
             else
-                ImGui::Text("%s \xC2\xB7 THRESH", regime_word(p.regime));
+                ImGui::Text("%s | Fallback thresholds", regime_word(p.regime));
             ImGui::Text("VPIN %.4f", p.vpin);
+            ImGui::TextUnformatted("Held from the last completed volume bucket.");
+            ImGui::TextUnformatted("Regime describes imbalance, not price direction.");
             if (show_imbalance_) ImGui::Text("IMB  %.4f", p.imbalance);
             ImGui::PopFont();
             Theme::end_tooltip();

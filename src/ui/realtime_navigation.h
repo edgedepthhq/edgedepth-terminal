@@ -2,8 +2,17 @@
 #include <algorithm>
 #include "core/realtime_history.h"
 
-// Thirty seconds of observed history plus the existing 12 percent live margin.
-inline constexpr double realtime_default_span_ms = 30000.0 / 0.88;
+// The live margin: the right 12 percent of a following view is future time.
+inline constexpr double realtime_margin_share = 0.12;
+// Thirty seconds of observed history plus the live margin.
+inline constexpr double realtime_default_span_ms = 30000.0 / (1.0 - realtime_margin_share);
+
+// How far past the clock the current book may be projected: the same margin a
+// following view keeps, at the current span. A zoomed-out or detached view can
+// show minutes of future time; the projection never fills more than the margin.
+inline double realtime_projection_until(int64_t clock, double span_ms) {
+    return double(clock) + std::max(0.0, span_ms) * realtime_margin_share;
+}
 
 // ImPlot has already zoomed a detached axis. Following axes are input-locked
 // by SetupAxisLimits(Always), so apply the same wheel factor to their span.

@@ -13,6 +13,11 @@ int main() {
     t = select_tiers(0x3c, 25); check(t.enabled == 0x04 && t.floor == 0x04);
     t = select_tiers(0x3f, 3); check(t.enabled == 0 && t.floor == 0);
     t = select_tiers(0, 100); check(t.enabled == 0 && t.floor == 0);
+    t = display_tiers(0x3c, 20); check(t.enabled == 0x03 && t.floor == 0x03);
+    t = display_tiers(0x3c, 100); check(t.enabled == 0x3c && t.floor == 0x38);
+    t = display_tiers(0, 20); check(t.enabled == 0);
+    t = display_tiers(0x3c, 3); check(t.enabled == 0);
+    t = display_tiers(0x3c, 0); check(t.enabled == 0x3c);
     for (const auto& cap : kLeverageCaps) {
         check(max_leverage("binancef", cap.symbol) == cap.leverage);
         for (uint8_t mask = 0; mask < 64; ++mask) {

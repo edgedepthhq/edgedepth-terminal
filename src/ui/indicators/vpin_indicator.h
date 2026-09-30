@@ -5,8 +5,8 @@
 // Implementation contract: SPEC §2 as amended by the "Eras" revamp
 // (James pick from the 2026-08-13 mockup round; SPEC/tokens.json mirror
 // pending):
-//   · fixed 0-1.0 axis, gridlines .25/.50/.75, dotted landmark rules at
-//     .30/.45/.60 at 20% alpha WITH in-plot value labels
+//   · default 0-1 axis, optional persisted fit-to-visible range
+//   · fallback-only landmarks .22/.30/.40; HMM confidence in the tooltip
 //   · VPIN = 1px STEP-HOLD line (H then V at each volume-clock print) in
 //     ONE bright ink (TX1); shelves are honest - quiet symbols hold; the
 //     hold past the last finalized bucket renders at tentative alpha
@@ -31,7 +31,7 @@
 namespace Indicators {
 
     inline int format_vpin_axis(double value, char* buf, int size, void*) {
-        return snprintf(buf, size, "%6.4f", value);
+        return snprintf(buf, size, "%6.3f", value);
     }
 
     class VPINIndicator : public IndicatorBase {
@@ -50,17 +50,17 @@ namespace Indicators {
 
         // ── IndicatorBase ──
         void render_content(double x_min, double x_max) override;
-        void get_y_limits(double, double, double& y_min, double& y_max) const override {
-            y_min = 0.0; y_max = 1.0;   // SPEC §2: fixed, never rescales
-        }
+        void get_y_limits(double x_min, double x_max, double& y_min, double& y_max) const override;
+        void set_observed_until(int64_t time_ms) { observed_until_ = time_ms; }
         void update() override {}
         void clear() override { pts_.clear(); }
-        const char* get_name() const override { return "TOXICITY"; }
+        const char* get_name() const override { return "VPIN"; }
         ImPlotFormatter get_y_formatter() const override { return format_vpin_axis; }
 
         bool get_latest_value(double& out_value) const override {
-            if (pts_.empty()) return false;
-            out_value = static_cast<double>(pts_.back().vpin);
+            const auto* p = latest_observed();
+            if (!p) return false;
+            out_value = static_cast<double>(p->vpin);
             return true;
         }
         int get_latest_direction() const override { return 0; }
@@ -75,16 +75,20 @@ namespace Indicators {
         void render_settings() override;
 
         workspace::Json save_settings() const override {
-            return {{"regime", regime_coloring_}, {"imbalance", show_imbalance_}};
+            return {{"regime", regime_coloring_}, {"imbalance", show_imbalance_}, {"fit_visible", fit_visible_}};
         }
         void load_settings(const workspace::Json& j) override {
             workspace::read(j, "regime", regime_coloring_);
             workspace::read(j, "imbalance", show_imbalance_);
+            workspace::read(j, "fit_visible", fit_visible_);
         }
     private:
         std::vector<Series::VPINPoint> pts_;   // ascending ts_ms (SeriesCache order)
 
         // §4.5 settings: regime coloring on/off + order-imbalance companion.
+        int64_t observed_until_ = 0;
+        bool fit_visible_ = false;
+        const Series::VPINPoint* latest_observed() const;
         bool regime_coloring_ = true;
         bool show_imbalance_  = false;
 

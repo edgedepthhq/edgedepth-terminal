@@ -542,7 +542,10 @@ void StatsWidget::render_order_flow() {
                         .meter = 3, .meter_a = mval, .meter_c1 = Tokens::WARN,
                         .chip = chip, .chip_level = chip_lvl });
     }
-    // CVD (session) + taker buy/sell pressure - from PositioningStateUpdate. PRO.
+    // CVD + taker buy/sell pressure of the current 1-minute window - from
+    // PositioningStateUpdate, whose cvd and taker ratios come from the
+    // backend's running 1m volume window (reset every minute), not a session
+    // total. Labelled 1M so it is not read as cumulative. PRO.
     {
         char val[24] = "--"; char det[48] = "BUY -- \xc2\xb7 SELL --";
         float mval = 0.5f; ImVec4 vcol = Tokens::TX1;
@@ -555,7 +558,7 @@ void StatsWidget::render_order_flow() {
             snprintf(det, sizeof(det), "BUY %.0f%% \xc2\xb7 SELL %.0f%%",
                      mval * 100.0f, (1.0f - mval) * 100.0f);
         }
-        metric_row(Row{ .label = "CVD (SESSION)", .pro = true, .value = val, .value_col = vcol,
+        metric_row(Row{ .label = "CVD (1M)", .pro = true, .value = val, .value_col = vcol,
                         .detail = det, .meter = 1, .meter_a = mval });
     }
     // Trades / sec - LIVE from the stat stream (buys/sells/imbalance). FREE.
@@ -691,7 +694,9 @@ void StatsWidget::render_liq_risk() {
     }
     // Nearest wall - PLACEHOLDER: cluster price + distance/leverage. PRO.
     metric_row(Row{ .label = "NEAREST WALL", .pro = true, .value = "--", .detail = "-- away \xc2\xb7 --x" });
-    // Cascade risk - LIVE from Positioning.cascade_risk (0..1). Word + gauge. PRO.
+    // Position stress - LIVE from Positioning.cascade_risk (0..1). Word + gauge. PRO.
+    // A hand-weighted crowding/liquidation/OI score never tested against cascades; named
+    // apart from the P9 cascade tier (chart chip) so the two cannot be read as one.
     {
         char val[16] = "--"; float mval = 0.0f; ImVec4 vcol = Tokens::TX1;
         if (pos) {
@@ -701,7 +706,7 @@ void StatsWidget::render_liq_risk() {
                      cr >= 0.85 ? "EXTREME" : cr >= 0.66 ? "HIGH" : cr >= 0.33 ? "MODERATE" : "LOW");
             if (cr >= 0.66) vcol = Tokens::WARN;   // amber word only when actually high
         }
-        metric_row(Row{ .label = "CASCADE RISK", .pro = true, .value = val, .value_col = vcol,
+        metric_row(Row{ .label = "POSITION STRESS", .pro = true, .value = val, .value_col = vcol,
                         .meter = 3, .meter_a = mval, .meter_c1 = Tokens::WARN });
     }
     // Market stress (contagion) - replay-only today (no live stream); "--" live. PRO.
