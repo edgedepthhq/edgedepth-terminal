@@ -5,9 +5,9 @@
 See resting orders, watch trades as they happen, and replay recorded markets.
 The C++/WebAssembly terminal behind [EdgeDepth](https://edgedepth.com/open-source?utm_source=github&utm_medium=oss&utm_campaign=terminal), ready to run with a local feed or your own data.
 
-[![TUT replay in the OSS terminal: depth heatmap, trade bubbles and attached order-book ladder](assets/oss-realtime-20261001.png)](https://github.com/edgedepthhq/edgedepth-terminal/raw/refs/heads/master/assets/oss-realtime-20261001.mp4)
+[![TUT replay in the OSS terminal: depth heatmap, trade bubbles and attached order-book ladder](assets/oss-realtime-20261001.gif)](https://github.com/edgedepthhq/edgedepth-terminal/raw/refs/heads/master/assets/oss-realtime-20261001.mp4)
 
-*Actual OSS build, captured 1 October 2026. Public TUT recording from 9 August 2026, replayed locally without an account. [Download the 20-second clip](https://github.com/edgedepthhq/edgedepth-terminal/raw/refs/heads/master/assets/oss-realtime-20261001.mp4) · [Full-size screenshot](assets/oss-realtime-20261001.png)*
+*Actual OSS build, captured 1 October 2026. Public TUT recording from 9 August 2026, replayed locally without an account. [Download full-quality MP4](https://github.com/edgedepthhq/edgedepth-terminal/raw/refs/heads/master/assets/oss-realtime-20261001.mp4) · [Full-size screenshot](assets/oss-realtime-20261001.png)*
 
 ## Run it locally
 
